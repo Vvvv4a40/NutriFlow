@@ -1,49 +1,100 @@
 ﻿
 
 
-Console.WriteLine("NutriFlow запущен.");
+Console.WriteLine("NutriFlow — расчёт КБЖУ одного продукта");
+Console.WriteLine();
 
-List<Product> spisokEnd = new();
-Product Beef = new Product();
-Product Gerchka = new Product();
+Product product = new Product(
+    name: "Демо-продукт",
+    weightInGrams: 250m,
+    nutritionPer100Grams: new NutritionPer100Grams(
+        calories: 200m,
+        proteinGrams: 10m,
+        fatGrams: 8m,
+        carbohydratesGrams: 24m));
 
+NutritionTotal totalNutrition = product.CalculateTotalNutrition();
 
-public class NutritionPer100g
+Console.WriteLine($"Продукт: {product.Name}");
+Console.WriteLine($"Масса: {product.WeightInGrams:0.##} г");
+Console.WriteLine(
+    $"На 100 г: {product.NutritionPer100Grams.Calories:0.##} ккал, " +
+    $"Б {product.NutritionPer100Grams.ProteinGrams:0.##} г, " +
+    $"Ж {product.NutritionPer100Grams.FatGrams:0.##} г, " +
+    $"У {product.NutritionPer100Grams.CarbohydratesGrams:0.##} г");
+Console.WriteLine(
+    $"Всего: {totalNutrition.Calories:0.##} ккал, " +
+    $"Б {totalNutrition.ProteinGrams:0.##} г, " +
+    $"Ж {totalNutrition.FatGrams:0.##} г, " +
+    $"У {totalNutrition.CarbohydratesGrams:0.##} г");
+Console.WriteLine();
+Console.WriteLine("Демонстрационные значения заданы вручную и не являются справочными.");
+
+public class NutritionPer100Grams
 {
-    public decimal Calories { get; set; }
-    public decimal Protein { get; set; }
-    public decimal Fat { get; set; }
-    public decimal Carbs { get; set; }
+    public NutritionPer100Grams(
+        decimal calories,
+        decimal proteinGrams,
+        decimal fatGrams,
+        decimal carbohydratesGrams)
+    {
+        Calories = calories;
+        ProteinGrams = proteinGrams;
+        FatGrams = fatGrams;
+        CarbohydratesGrams = carbohydratesGrams;
+    }
 
+    public decimal Calories { get; }
+    public decimal ProteinGrams { get; }
+    public decimal FatGrams { get; }
+    public decimal CarbohydratesGrams { get; }
 }
-
 
 public class Product
 {
-    public string Name { get; set; }
-    public decimal Weight { get; set; }
-    public NutritionPer100g Nutrition { get; set; }
-
-    public NutritionTotal CalculateTotal()
+    public Product(
+        string name,
+        decimal weightInGrams,
+        NutritionPer100Grams nutritionPer100Grams)
     {
-        decimal multiplier = Weight / 100;
-
-        NutritionTotal total = new NutritionTotal();
-
-        total.Calories = Nutrition.Calories * multiplier;
-        total.Protein = Nutrition.Protein * multiplier;
-        total.Fat = Nutrition.Fat * multiplier;
-        total.Carbs = Nutrition.Carbs * multiplier;
-
-        return total;
+        Name = name;
+        WeightInGrams = weightInGrams;
+        NutritionPer100Grams = nutritionPer100Grams;
     }
 
+    public string Name { get; }
+    public decimal WeightInGrams { get; }
+    public NutritionPer100Grams NutritionPer100Grams { get; }
+
+    public NutritionTotal CalculateTotalNutrition()
+    {
+        decimal massFactor = WeightInGrams / 100m;
+
+        return new NutritionTotal(
+            calories: NutritionPer100Grams.Calories * massFactor,
+            proteinGrams: NutritionPer100Grams.ProteinGrams * massFactor,
+            fatGrams: NutritionPer100Grams.FatGrams * massFactor,
+            carbohydratesGrams: NutritionPer100Grams.CarbohydratesGrams * massFactor);
+    }
 }
+
 public class NutritionTotal
 {
-    public decimal Calories { get; set; }
-    public decimal Protein { get; set; }
-    public decimal Fat { get; set; }
-    public decimal Carbs { get; set; }
+    public NutritionTotal(
+        decimal calories,
+        decimal proteinGrams,
+        decimal fatGrams,
+        decimal carbohydratesGrams)
+    {
+        Calories = calories;
+        ProteinGrams = proteinGrams;
+        FatGrams = fatGrams;
+        CarbohydratesGrams = carbohydratesGrams;
+    }
+
+    public decimal Calories { get; }
+    public decimal ProteinGrams { get; }
+    public decimal FatGrams { get; }
+    public decimal CarbohydratesGrams { get; }
 }
 
