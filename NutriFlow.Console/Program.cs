@@ -20,8 +20,63 @@ for (int index = 0; index < captureSession.InputEvents.Count; index++)
 }
 
 Console.WriteLine($"Состояние: {captureSession.State}");
-Console.WriteLine("События сохранены по порядку, но автоматически ещё не разобраны.");
+Console.WriteLine("События сохранены по порядку.");
 Console.WriteLine();
+
+FakeMealParser fakeMealParser = new FakeMealParser();
+MealDraft mealDraft = fakeMealParser.Parse(captureSession);
+
+Console.WriteLine("Структурированный черновик FakeMealParser:");
+
+foreach (DishDraft parsedDish in mealDraft.Dishes)
+{
+    Console.WriteLine($"  Блюдо: {parsedDish.Name}");
+    Console.WriteLine("  Ингредиенты:");
+
+    foreach (IngredientDraft ingredient in parsedDish.Ingredients)
+    {
+        Console.WriteLine(
+            $"    {ingredient.ProductName} — {ingredient.WeightInGrams:0.##} г");
+    }
+
+    Console.WriteLine($"  Итоговый вес: {parsedDish.FinalWeightInGrams:0.##} г");
+    Console.WriteLine("  Порции:");
+
+    foreach (decimal portionWeight in parsedDish.PortionWeightsInGrams)
+    {
+        Console.WriteLine($"    {portionWeight:0.##} г");
+    }
+}
+
+if (mealDraft.RequiresClarification)
+{
+    Console.WriteLine("  Уточнения:");
+
+    foreach (string question in mealDraft.ClarificationQuestions)
+    {
+        Console.WriteLine($"    {question}");
+    }
+}
+else
+{
+    Console.WriteLine("  Уточнения: не требуются");
+}
+
+Console.WriteLine("  КБЖУ в результате парсера отсутствуют.");
+Console.WriteLine("  Это заранее заданный fake-сценарий, а не настоящий AI.");
+Console.WriteLine();
+
+if (mealDraft.RequiresClarification)
+{
+    Console.WriteLine("Сессию нельзя подтвердить до получения уточнений.");
+    return;
+}
+
+if (mealDraft.Dishes.Count != 1)
+{
+    throw new NotSupportedException(
+        "Консольный демо-сценарий поддерживает ровно одно блюдо.");
+}
 
 Product productA = new Product(
     name: "Демо-продукт A",
@@ -39,20 +94,34 @@ Product productB = new Product(
         fatGrams: 12m,
         carbohydratesGrams: 18m));
 
-List<DishIngredient> ingredients = new List<DishIngredient>
+Dictionary<string, Product> productsByName = new Dictionary<string, Product>
 {
-    new DishIngredient(product: productA, weightInGrams: 200m),
-    new DishIngredient(product: productB, weightInGrams: 100m)
+    [productA.Name] = productA,
+    [productB.Name] = productB
 };
+DishDraft dishDraft = mealDraft.Dishes[0];
+List<DishIngredient> ingredients = new List<DishIngredient>();
+
+foreach (IngredientDraft ingredientDraft in dishDraft.Ingredients)
+{
+    if (!productsByName.TryGetValue(
+            ingredientDraft.ProductName,
+            out Product? product))
+    {
+        throw new InvalidOperationException(
+            $"Демо-продукт '{ingredientDraft.ProductName}' не найден.");
+    }
+
+    ingredients.Add(
+        new DishIngredient(product, ingredientDraft.WeightInGrams));
+}
 
 DishBatch dish = new DishBatch(
-    name: "Демо-блюдо",
+    name: dishDraft.Name,
     ingredients: ingredients,
-    finalWeightInGrams: 250m);
+    finalWeightInGrams: dishDraft.FinalWeightInGrams);
 
-decimal portionWeightInGrams = 125m;
-decimal secondPortionWeightInGrams = 62.5m;
-
+Console.WriteLine("Предпросмотр, рассчитанный C#-кодом:");
 Console.WriteLine($"Блюдо: {dish.Name}");
 Console.WriteLine("Ингредиенты:");
 
@@ -67,38 +136,41 @@ foreach (DishIngredient ingredient in dish.Ingredients)
 
 NutritionValues dishTotalNutrition = dish.CalculateTotalNutrition();
 NutritionValues nutritionPer100Grams = dish.CalculateNutritionPer100Grams();
-NutritionValues portionNutrition = dish.CalculatePortionNutrition(portionWeightInGrams);
-NutritionValues secondPortionNutrition = dish.CalculatePortionNutrition(
-    secondPortionWeightInGrams);
+List<NutritionValues> portionNutritionValues = new List<NutritionValues>();
+
+foreach (decimal portionWeight in dishDraft.PortionWeightsInGrams)
+{
+    portionNutritionValues.Add(dish.CalculatePortionNutrition(portionWeight));
+}
 
 Console.WriteLine();
 Console.WriteLine($"Итоговый вес блюда: {dish.FinalWeightInGrams:0.##} г");
 Console.WriteLine($"Всё блюдо: {FormatNutrition(dishTotalNutrition)}");
 Console.WriteLine($"На 100 г готового блюда: {FormatNutrition(nutritionPer100Grams)}");
-Console.WriteLine(
-    $"Порция {portionWeightInGrams:0.##} г: " +
-    FormatNutrition(portionNutrition));
+
+for (int index = 0; index < dishDraft.PortionWeightsInGrams.Count; index++)
+{
+    Console.WriteLine(
+        $"Порция {dishDraft.PortionWeightsInGrams[index]:0.##} г: " +
+        FormatNutrition(portionNutritionValues[index]));
+}
+
 Console.WriteLine();
 
 captureSession.Confirm();
-Console.WriteLine($"Сессия после ручной проверки: {captureSession.State}");
+Console.WriteLine($"Сессия после имитации подтверждения: {captureSession.State}");
 Console.WriteLine();
 
-List<MealEntry> mealEntries = new List<MealEntry>
+List<MealEntry> mealEntries = new List<MealEntry>();
+
+for (int index = 0; index < dishDraft.PortionWeightsInGrams.Count; index++)
 {
-    new MealEntry(
-        name: $"{dish.Name}, первая порция",
-        weightInGrams: portionWeightInGrams,
-        nutrition: portionNutrition),
-    new MealEntry(
-        name: $"{dish.Name}, вторая порция",
-        weightInGrams: secondPortionWeightInGrams,
-        nutrition: secondPortionNutrition),
-    new MealEntry(
-        name: $"{dish.Name}, третья порция",
-        weightInGrams: secondPortionWeightInGrams,
-        nutrition: secondPortionNutrition),
-};
+    mealEntries.Add(
+        new MealEntry(
+            name: $"{dish.Name}, порция {index + 1}",
+            weightInGrams: dishDraft.PortionWeightsInGrams[index],
+            nutrition: portionNutritionValues[index]));
+}
 
 DailyGoal dailyGoal = new DailyGoal(
     new NutritionValues(
