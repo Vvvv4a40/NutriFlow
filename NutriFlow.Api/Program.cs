@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure;
+using NutriFlow.Infrastructure.ExternalProducts;
 using NutriFlow.Infrastructure.Persistence;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,24 @@ string connectionString = $"Data Source={databasePath}";
 builder.Services.AddDbContext<NutriFlowDbContext>(
     options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<LocalProductCatalog>();
+builder.Services.AddScoped<ProductLookupService>();
+
+string openFoodFactsBaseUrl =
+    builder.Configuration["OpenFoodFacts:BaseUrl"] ??
+    "https://world.openfoodfacts.org/";
+string openFoodFactsUserAgent =
+    builder.Configuration["OpenFoodFacts:UserAgent"] ??
+    "NutriFlow/1.0 (https://github.com/Vvvv4a40/NutriFlow)";
+
+builder.Services.AddHttpClient<IExternalProductProvider, OpenFoodFactsClient>(
+    client =>
+    {
+        client.BaseAddress = new Uri(openFoodFactsBaseUrl, UriKind.Absolute);
+        client.Timeout = TimeSpan.FromSeconds(10);
+        client.DefaultRequestHeaders.TryAddWithoutValidation(
+            "User-Agent",
+            openFoodFactsUserAgent);
+    });
 
 WebApplication app = builder.Build();
 
@@ -57,6 +76,17 @@ app.MapGet("/api/products", FindLocalProductsAsync)
     .WithTags("Products")
     .Produces<List<ProductResponse>>(StatusCodes.Status200OK)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest);
+
+app.MapGet("/api/products/barcode/{barcode}", FindProductByBarcodeAsync)
+    .WithName("FindProductByBarcode")
+    .WithSummary("Finds a product locally or retrieves and caches it from Open Food Facts.")
+    .WithTags("Products")
+    .Produces<ProductResponse>(StatusCodes.Status200OK)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status404NotFound)
+    .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+    .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
 
 app.Run();
 
@@ -97,7 +127,11 @@ static async Task<IResult> CreateManualProductAsync(
                 ? DataQuality.Estimated
                 : DataQuality.Exact,
             "Manual input through NutriFlow API");
-        Product product = new Product(request.Name!, nutrition, source);
+        Product product = new Product(
+            request.Name!,
+            nutrition,
+            source,
+            request.Barcode);
 
         bool wasAdded = await catalog.AddAsync(product, cancellationToken);
 
@@ -116,6 +150,55 @@ static async Task<IResult> CreateManualProductAsync(
     catch (ArgumentException exception)
     {
         return InvalidProduct(exception.Message);
+    }
+}
+
+static async Task<IResult> FindProductByBarcodeAsync(
+    string barcode,
+    ProductLookupService lookupService,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        Product? product = await lookupService.FindByBarcodeAsync(
+            barcode,
+            cancellationToken);
+
+        return product is null
+            ? Results.Problem(
+                detail: "The product was not found in the local catalog or Open Food Facts.",
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Product not found.")
+            : Results.Ok(MapProductResponse(product));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.ValidationProblem(
+            new Dictionary<string, string[]>
+            {
+                ["barcode"] = new[] { exception.Message }
+            });
+    }
+    catch (InvalidDataException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "External product data is incomplete.");
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem(
+            detail: "Open Food Facts is temporarily unavailable.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "External product lookup failed.");
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.Problem(
+            detail: "Open Food Facts did not respond before the timeout.",
+            statusCode: StatusCodes.Status504GatewayTimeout,
+            title: "External product lookup timed out.");
     }
 }
 
@@ -210,7 +293,8 @@ static ProductResponse MapProductResponse(Product product)
         product.Source.Kind.ToString(),
         product.Source.Quality.ToString(),
         product.Source.Name,
-        product.Source.Reference);
+        product.Source.Reference,
+        product.Barcode);
 }
 
 static MealDraftResponse MapResponse(

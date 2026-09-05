@@ -58,6 +58,45 @@ public sealed class ProductTests
             () => new Product("Product", CreateNutrition(), null!));
     }
 
+    [Fact]
+    public void Constructor_WithBarcode_StoresNormalizedBarcode()
+    {
+        Product product = new Product(
+            "Product",
+            CreateNutrition(),
+            CreateSource(),
+            " 0123456789012 ");
+
+        Assert.Equal("0123456789012", product.Barcode);
+    }
+
+    [Fact]
+    public void Constructor_WithoutBarcode_AllowsNullBarcode()
+    {
+        Product product = new Product(
+            "Product",
+            CreateNutrition(),
+            CreateSource());
+
+        Assert.Null(product.Barcode);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1234567")]
+    [InlineData("123456789")]
+    [InlineData("1234567A")]
+    public void Constructor_WithInvalidBarcode_ThrowsArgumentException(
+        string barcode)
+    {
+        Assert.Throws<ArgumentException>(
+            () => new Product(
+                "Product",
+                CreateNutrition(),
+                CreateSource(),
+                barcode));
+    }
+
     private static NutritionValues CreateNutrition()
     {
         return new NutritionValues(100m, 10m, 4m, 6m);

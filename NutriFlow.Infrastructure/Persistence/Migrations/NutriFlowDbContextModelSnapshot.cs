@@ -22,6 +22,10 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(14)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("Calories")
                         .HasColumnType("TEXT");
 
@@ -60,6 +64,9 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Barcode")
+                        .IsUnique();
 
                     b.HasIndex("NormalizedName");
 

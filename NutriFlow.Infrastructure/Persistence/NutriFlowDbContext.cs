@@ -27,6 +27,10 @@ public sealed class NutriFlowDbContext : DbContext
                 .HasMaxLength(200)
                 .IsRequired();
             entity.HasIndex(product => product.NormalizedName);
+            entity.Property(product => product.Barcode)
+                .HasMaxLength(14);
+            entity.HasIndex(product => product.Barcode)
+                .IsUnique();
 
             entity.Property(product => product.Calories)
                 .HasColumnType("TEXT");

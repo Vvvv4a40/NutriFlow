@@ -9,4 +9,5 @@ public sealed record ProductResponse(
     string SourceKind,
     string DataQuality,
     string SourceName,
-    string? SourceReference);
+    string? SourceReference,
+    string? Barcode);
