@@ -27,11 +27,13 @@ public sealed class NutritionSource
                 nameof(reference));
         }
 
-        if ((kind is NutritionSourceKind.LabelPhoto or NutritionSourceKind.DishPhoto) &&
+        if ((kind is NutritionSourceKind.LabelPhoto or
+                     NutritionSourceKind.DishPhoto or
+                     NutritionSourceKind.ExternalService) &&
             reference is null)
         {
             throw new ArgumentException(
-                "A photo source requires a reference.",
+                "This source requires a reference.",
                 nameof(reference));
         }
 

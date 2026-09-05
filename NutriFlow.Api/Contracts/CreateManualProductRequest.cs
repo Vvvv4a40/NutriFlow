@@ -6,4 +6,5 @@ public sealed record CreateManualProductRequest(
     decimal ProteinGrams,
     decimal FatGrams,
     decimal CarbohydratesGrams,
-    bool? IsEstimated);
+    bool? IsEstimated,
+    string? Barcode = null);

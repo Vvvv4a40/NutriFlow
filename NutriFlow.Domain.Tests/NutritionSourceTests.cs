@@ -101,7 +101,8 @@ public sealed class NutritionSourceTests
     [Theory]
     [InlineData(NutritionSourceKind.LabelPhoto)]
     [InlineData(NutritionSourceKind.DishPhoto)]
-    public void Constructor_WithPhotoSourceWithoutReference_ThrowsArgumentException(
+    [InlineData(NutritionSourceKind.ExternalService)]
+    public void Constructor_WithReferencedSourceWithoutReference_ThrowsArgumentException(
         NutritionSourceKind kind)
     {
         Assert.Throws<ArgumentException>(

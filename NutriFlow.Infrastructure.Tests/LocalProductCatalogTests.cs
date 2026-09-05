@@ -124,6 +124,63 @@ public sealed class LocalProductCatalogTests
     }
 
     [Fact]
+    public async Task AddAsync_ThenFindByBarcodeAsync_RestoresProduct()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Product product = new Product(
+            "Кефир",
+            new NutritionValues(50m, 3m, 2.5m, 4m),
+            new NutritionSource(
+                NutritionSourceKind.ExternalService,
+                DataQuality.Unknown,
+                "Open Food Facts",
+                "https://world.openfoodfacts.org/product/0123456789012"),
+            "0123456789012");
+
+        await using NutriFlowDbContext context = database.CreateContext();
+        LocalProductCatalog catalog = new LocalProductCatalog(context);
+        await catalog.AddAsync(product);
+
+        Product actual = Assert.IsType<Product>(
+            await catalog.FindByBarcodeAsync(" 0123456789012 "));
+
+        Assert.Equal(product.Name, actual.Name);
+        Assert.Equal("0123456789012", actual.Barcode);
+        Assert.Equal(product.Source.Reference, actual.Source.Reference);
+    }
+
+    [Fact]
+    public async Task AddAsync_WithExistingBarcode_DoesNotAddSecondProduct()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+
+        await using NutriFlowDbContext context = database.CreateContext();
+        LocalProductCatalog catalog = new LocalProductCatalog(context);
+        Product first = new Product(
+            "First",
+            new NutritionValues(100m, 10m, 5m, 4m),
+            new NutritionSource(
+                NutritionSourceKind.ManualInput,
+                DataQuality.Exact,
+                "Test data"),
+            "12345678");
+        Product second = new Product(
+            "Second",
+            new NutritionValues(200m, 20m, 6m, 8m),
+            new NutritionSource(
+                NutritionSourceKind.ManualInput,
+                DataQuality.Exact,
+                "Test data"),
+            "12345678");
+
+        Assert.True(await catalog.AddAsync(first));
+        Assert.False(await catalog.AddAsync(second));
+        Assert.Equal("First", (await catalog.FindByBarcodeAsync("12345678"))?.Name);
+    }
+
+    [Fact]
     public async Task AddAsync_WithIdenticalProduct_DoesNotAddDuplicate()
     {
         await using TestDatabase database = new TestDatabase();

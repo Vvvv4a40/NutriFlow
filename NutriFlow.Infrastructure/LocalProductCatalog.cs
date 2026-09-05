@@ -27,16 +27,18 @@ public sealed class LocalProductCatalog
             .AsNoTracking()
             .AnyAsync(
                 record =>
-                    record.NormalizedName == normalizedName &&
-                    record.Calories == product.NutritionPer100Grams.Calories &&
-                    record.ProteinGrams == product.NutritionPer100Grams.ProteinGrams &&
-                    record.FatGrams == product.NutritionPer100Grams.FatGrams &&
-                    record.CarbohydratesGrams ==
-                        product.NutritionPer100Grams.CarbohydratesGrams &&
-                    record.SourceKind == product.Source.Kind &&
-                    record.SourceQuality == product.Source.Quality &&
-                    record.SourceName == product.Source.Name &&
-                    record.SourceReference == product.Source.Reference,
+                    (product.Barcode != null &&
+                     record.Barcode == product.Barcode) ||
+                    (record.NormalizedName == normalizedName &&
+                     record.Calories == product.NutritionPer100Grams.Calories &&
+                     record.ProteinGrams == product.NutritionPer100Grams.ProteinGrams &&
+                     record.FatGrams == product.NutritionPer100Grams.FatGrams &&
+                     record.CarbohydratesGrams ==
+                         product.NutritionPer100Grams.CarbohydratesGrams &&
+                     record.SourceKind == product.Source.Kind &&
+                     record.SourceQuality == product.Source.Quality &&
+                     record.SourceName == product.Source.Name &&
+                     record.SourceReference == product.Source.Reference),
                 cancellationToken);
 
         if (alreadyExists)
@@ -45,7 +47,28 @@ public sealed class LocalProductCatalog
         }
 
         _dbContext.Products.Add(MapRecord(product));
-        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException) when (product.Barcode is not null)
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            bool barcodeWasAddedConcurrently = await _dbContext.Products
+                .AsNoTracking()
+                .AnyAsync(
+                    record => record.Barcode == product.Barcode,
+                    cancellationToken);
+
+            if (barcodeWasAddedConcurrently)
+            {
+                return false;
+            }
+
+            throw;
+        }
 
         return true;
     }
@@ -65,12 +88,28 @@ public sealed class LocalProductCatalog
         return records.Select(MapProduct).ToArray();
     }
 
+    public async Task<Product?> FindByBarcodeAsync(
+        string barcode,
+        CancellationToken cancellationToken = default)
+    {
+        string normalizedBarcode = ProductBarcode.Normalize(barcode);
+
+        ProductRecord? record = await _dbContext.Products
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                product => product.Barcode == normalizedBarcode,
+                cancellationToken);
+
+        return record is null ? null : MapProduct(record);
+    }
+
     private static ProductRecord MapRecord(Product product)
     {
         return new ProductRecord
         {
             Name = product.Name,
             NormalizedName = NormalizeName(product.Name),
+            Barcode = product.Barcode,
             Calories = product.NutritionPer100Grams.Calories,
             ProteinGrams = product.NutritionPer100Grams.ProteinGrams,
             FatGrams = product.NutritionPer100Grams.FatGrams,
@@ -95,7 +134,7 @@ public sealed class LocalProductCatalog
             record.SourceName,
             record.SourceReference);
 
-        return new Product(record.Name, nutrition, source);
+        return new Product(record.Name, nutrition, source, record.Barcode);
     }
 
     private static string NormalizeName(string name)
