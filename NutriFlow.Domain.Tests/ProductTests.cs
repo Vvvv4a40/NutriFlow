@@ -18,6 +18,17 @@ public sealed class ProductTests
     }
 
     [Fact]
+    public void Constructor_WithOuterSpaces_TrimsName()
+    {
+        Product product = new Product(
+            " Product ",
+            CreateNutrition(),
+            CreateSource());
+
+        Assert.Equal("Product", product.Name);
+    }
+
+    [Fact]
     public void Constructor_WithNullName_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(

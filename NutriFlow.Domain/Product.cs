@@ -11,7 +11,7 @@ public sealed class Product
         ArgumentNullException.ThrowIfNull(nutritionPer100Grams);
         ArgumentNullException.ThrowIfNull(source);
 
-        Name = name;
+        Name = name.Trim();
         NutritionPer100Grams = nutritionPer100Grams;
         Source = source;
     }
