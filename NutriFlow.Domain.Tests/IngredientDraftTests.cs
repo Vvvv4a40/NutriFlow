@@ -39,4 +39,49 @@ public sealed class IngredientDraftTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new IngredientDraft("Product", weightInGrams));
     }
+
+    [Fact]
+    public void Constructor_WithEstimatedWeight_StoresQuality()
+    {
+        IngredientDraft ingredient = new IngredientDraft(
+            " Product ",
+            125m,
+            DataQuality.Estimated);
+
+        Assert.Equal("Product", ingredient.ProductName);
+        Assert.Equal(125m, ingredient.WeightInGrams);
+        Assert.Equal(DataQuality.Estimated, ingredient.WeightQuality);
+    }
+
+    [Fact]
+    public void Constructor_WithUnknownWeight_StoresUnknownValue()
+    {
+        IngredientDraft ingredient = new IngredientDraft(
+            "Product",
+            null,
+            DataQuality.Unknown);
+
+        Assert.Null(ingredient.WeightInGrams);
+        Assert.Equal(DataQuality.Unknown, ingredient.WeightQuality);
+    }
+
+    [Fact]
+    public void Constructor_WithUnknownWeightAndExactQuality_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new IngredientDraft(
+                "Product",
+                null,
+                DataQuality.Exact));
+    }
+
+    [Fact]
+    public void Constructor_WithKnownWeightAndUnknownQuality_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new IngredientDraft(
+                "Product",
+                100m,
+                DataQuality.Unknown));
+    }
 }

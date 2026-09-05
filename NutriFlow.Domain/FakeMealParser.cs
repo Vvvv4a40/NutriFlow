@@ -1,6 +1,6 @@
 namespace NutriFlow.Domain;
 
-public sealed class FakeMealParser
+public sealed class FakeMealParser : IMealParser
 {
     private static readonly string[] SupportedInputTexts =
     {
@@ -52,6 +52,15 @@ public sealed class FakeMealParser
 
         throw new NotSupportedException(
             "FakeMealParser supports only its predefined input sequences.");
+    }
+
+    public Task<MealDraft> ParseAsync(
+        CaptureSession session,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return Task.FromResult(Parse(session));
     }
 
     private static MealDraft CreateSupportedDraft()

@@ -120,13 +120,18 @@ foreach (IngredientDraft ingredientDraft in dishDraft.Ingredients)
     }
 
     ingredients.Add(
-        new DishIngredient(product, ingredientDraft.WeightInGrams));
+        new DishIngredient(
+            product,
+            ingredientDraft.WeightInGrams ??
+            throw new InvalidOperationException(
+                $"Масса продукта '{ingredientDraft.ProductName}' неизвестна.")));
 }
 
 DishBatch dish = new DishBatch(
     name: dishDraft.Name,
     ingredients: ingredients,
-    finalWeightInGrams: dishDraft.FinalWeightInGrams);
+    finalWeightInGrams: dishDraft.FinalWeightInGrams ??
+        throw new InvalidOperationException("Итоговый вес блюда неизвестен."));
 
 Console.WriteLine("Предпросмотр, рассчитанный C#-кодом:");
 Console.WriteLine($"Блюдо: {dish.Name}");

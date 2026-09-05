@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>NutriFlow.Api-2d43c324-e100-49b1-8c4e-7fb3b7522b35</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
