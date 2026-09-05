@@ -127,15 +127,25 @@ public sealed class DishBatchTests
     {
         Product productA = new Product(
             "Product A",
-            new NutritionValues(100m, 10m, 4m, 6m));
+            new NutritionValues(100m, 10m, 4m, 6m),
+            CreateSource());
         Product productB = new Product(
             "Product B",
-            new NutritionValues(200m, 5m, 12m, 18m));
+            new NutritionValues(200m, 5m, 12m, 18m),
+            CreateSource());
 
         return new List<DishIngredient>
         {
             new DishIngredient(productA, 200m),
             new DishIngredient(productB, 100m)
         };
+    }
+
+    private static NutritionSource CreateSource()
+    {
+        return new NutritionSource(
+            NutritionSourceKind.ManualInput,
+            DataQuality.Exact,
+            "Test data");
     }
 }

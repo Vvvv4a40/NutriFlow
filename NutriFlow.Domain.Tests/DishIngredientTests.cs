@@ -9,7 +9,8 @@ public sealed class DishIngredientTests
     {
         Product product = new Product(
             "Product",
-            new NutritionValues(200m, 10m, 8m, 24m));
+            new NutritionValues(200m, 10m, 8m, 24m),
+            CreateSource());
         DishIngredient ingredient = new DishIngredient(product, 175m);
 
         NutritionValues result = ingredient.CalculateNutrition();
@@ -41,6 +42,15 @@ public sealed class DishIngredientTests
     {
         return new Product(
             "Product",
-            new NutritionValues(100m, 10m, 4m, 6m));
+            new NutritionValues(100m, 10m, 4m, 6m),
+            CreateSource());
+    }
+
+    private static NutritionSource CreateSource()
+    {
+        return new NutritionSource(
+            NutritionSourceKind.ManualInput,
+            DataQuality.Exact,
+            "Test data");
     }
 }

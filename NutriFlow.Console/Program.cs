@@ -78,13 +78,19 @@ if (mealDraft.Dishes.Count != 1)
         "Консольный демо-сценарий поддерживает ровно одно блюдо.");
 }
 
+NutritionSource demoNutritionSource = new NutritionSource(
+    NutritionSourceKind.ManualInput,
+    DataQuality.Unknown,
+    "Демонстрационный ручной ввод");
+
 Product productA = new Product(
     name: "Демо-продукт A",
     nutritionPer100Grams: new NutritionValues(
         calories: 100m,
         proteinGrams: 10m,
         fatGrams: 4m,
-        carbohydratesGrams: 6m));
+        carbohydratesGrams: 6m),
+    source: demoNutritionSource);
 
 Product productB = new Product(
     name: "Демо-продукт B",
@@ -92,7 +98,8 @@ Product productB = new Product(
         calories: 200m,
         proteinGrams: 5m,
         fatGrams: 12m,
-        carbohydratesGrams: 18m));
+        carbohydratesGrams: 18m),
+    source: demoNutritionSource);
 
 Dictionary<string, Product> productsByName = new Dictionary<string, Product>
 {
@@ -132,6 +139,9 @@ foreach (DishIngredient ingredient in dish.Ingredients)
     Console.WriteLine(
         $"  {ingredient.Product.Name}, {ingredient.WeightInGrams:0.##} г: " +
         FormatNutrition(ingredientNutrition));
+    Console.WriteLine(
+        $"    источник: {ingredient.Product.Source.Name}; " +
+        $"качество: {ingredient.Product.Source.Quality}");
 }
 
 NutritionValues dishTotalNutrition = dish.CalculateTotalNutrition();
