@@ -1,6 +1,26 @@
-using NutriFlow.Domain;
+﻿using NutriFlow.Domain;
 
-Console.WriteLine("NutriFlow — расчёт блюда, порций и дневного прогресса");
+Console.WriteLine("NutriFlow — сессия ввода и расчёт дневного прогресса");
+Console.WriteLine();
+
+CaptureSession captureSession = new CaptureSession();
+captureSession.AddEvent(new InputEvent("Добавил 200 г демо-продукта A."));
+captureSession.AddEvent(new InputEvent("Потом добавил 100 г демо-продукта B."));
+captureSession.AddEvent(new InputEvent("Готовое блюдо весит 250 г."));
+captureSession.AddEvent(
+    new InputEvent("Съел 125 г, потом ещё две порции по 62,5 г."));
+captureSession.FinishCollecting();
+
+Console.WriteLine("Сессия исходного ввода:");
+
+for (int index = 0; index < captureSession.InputEvents.Count; index++)
+{
+    InputEvent inputEvent = captureSession.InputEvents[index];
+    Console.WriteLine($"  {index + 1}. {inputEvent.Text}");
+}
+
+Console.WriteLine($"Состояние: {captureSession.State}");
+Console.WriteLine("События сохранены по порядку, но автоматически ещё не разобраны.");
 Console.WriteLine();
 
 Product productA = new Product(
@@ -60,6 +80,10 @@ Console.WriteLine(
     FormatNutrition(portionNutrition));
 Console.WriteLine();
 
+captureSession.Confirm();
+Console.WriteLine($"Сессия после ручной проверки: {captureSession.State}");
+Console.WriteLine();
+
 List<MealEntry> mealEntries = new List<MealEntry>
 {
     new MealEntry(
@@ -69,7 +93,11 @@ List<MealEntry> mealEntries = new List<MealEntry>
     new MealEntry(
         name: $"{dish.Name}, вторая порция",
         weightInGrams: secondPortionWeightInGrams,
-        nutrition: secondPortionNutrition)
+        nutrition: secondPortionNutrition),
+    new MealEntry(
+        name: $"{dish.Name}, третья порция",
+        weightInGrams: secondPortionWeightInGrams,
+        nutrition: secondPortionNutrition),
 };
 
 DailyGoal dailyGoal = new DailyGoal(
