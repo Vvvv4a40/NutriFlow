@@ -2,4 +2,5 @@ namespace NutriFlow.Api.Contracts;
 
 public sealed record IngredientDraftResponse(
     string ProductName,
-    decimal WeightInGrams);
+    decimal? WeightInGrams,
+    string WeightQuality);

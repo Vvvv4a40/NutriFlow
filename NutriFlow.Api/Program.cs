@@ -1,14 +1,15 @@
+using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure;
+using NutriFlow.Infrastructure.Ai;
 using NutriFlow.Infrastructure.ExternalProducts;
 using NutriFlow.Infrastructure.Persistence;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
-builder.Services.AddSingleton<FakeMealParser>();
 string? configuredDatabasePath = builder.Configuration["Database:Path"];
 
 if (string.IsNullOrWhiteSpace(configuredDatabasePath))
@@ -42,6 +43,54 @@ builder.Services.AddHttpClient<IExternalProductProvider, OpenFoodFactsClient>(
             openFoodFactsUserAgent);
     });
 
+string aiProvider = builder.Configuration["Ai:Provider"] ?? "Fake";
+
+if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IMealParser, FakeMealParser>();
+}
+else if (aiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+{
+    string? apiKey = builder.Configuration["Ai:OpenAI:ApiKey"];
+
+    if (string.IsNullOrWhiteSpace(apiKey))
+    {
+        throw new InvalidOperationException(
+            "Ai:OpenAI:ApiKey must be configured when the OpenAI provider is enabled.");
+    }
+
+    string openAiBaseUrl =
+        builder.Configuration["Ai:OpenAI:BaseUrl"] ??
+        "https://api.openai.com/v1/";
+    string openAiModel =
+        builder.Configuration["Ai:OpenAI:Model"] ??
+        "gpt-5.4-mini";
+
+    builder.Services.AddHttpClient(
+        "OpenAI",
+        client =>
+        {
+            client.BaseAddress = new Uri(openAiBaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(45);
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+        });
+    builder.Services.AddScoped<IMealParser>(serviceProvider =>
+    {
+        IHttpClientFactory httpClientFactory =
+            serviceProvider.GetRequiredService<IHttpClientFactory>();
+
+        return new OpenAiMealParser(
+            httpClientFactory.CreateClient("OpenAI"),
+            openAiModel);
+    });
+}
+else
+{
+    throw new InvalidOperationException(
+        $"Unsupported AI provider '{aiProvider}'. Use 'Fake' or 'OpenAI'.");
+}
+
 WebApplication app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -54,13 +103,15 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.MapPost("/api/meal-drafts/parse", ParseMealDraft)
+app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
     .WithName("ParseMealDraft")
     .WithSummary("Builds a structured meal draft from captured messages.")
     .WithTags("Meal drafts")
     .Produces<MealDraftResponse>(StatusCodes.Status200OK)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
-    .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+    .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+    .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
 
 app.MapPost("/api/products/manual", CreateManualProductAsync)
     .WithName("CreateManualProduct")
@@ -223,9 +274,10 @@ static async Task<IResult> FindLocalProductsAsync(
     }
 }
 
-static IResult ParseMealDraft(
+static async Task<IResult> ParseMealDraftAsync(
     ParseMealDraftRequest? request,
-    FakeMealParser parser)
+    IMealParser parser,
+    CancellationToken cancellationToken)
 {
     if (request is null ||
         request.Messages is null ||
@@ -235,7 +287,13 @@ static IResult ParseMealDraft(
             "At least one captured message is required.");
     }
 
+    if (request.Messages.Count > 50)
+    {
+        return InvalidMessages("A capture session cannot contain more than 50 messages.");
+    }
+
     CaptureSession session = new CaptureSession();
+    int totalCharacterCount = 0;
 
     foreach (string? message in request.Messages)
     {
@@ -245,6 +303,18 @@ static IResult ParseMealDraft(
                 "Messages cannot contain null, empty, or whitespace-only values.");
         }
 
+        if (message.Length > 4000)
+        {
+            return InvalidMessages("A single message cannot exceed 4000 characters.");
+        }
+
+        totalCharacterCount += message.Length;
+
+        if (totalCharacterCount > 20_000)
+        {
+            return InvalidMessages("Captured messages cannot exceed 20000 characters in total.");
+        }
+
         session.AddEvent(new InputEvent(message));
     }
 
@@ -252,7 +322,9 @@ static IResult ParseMealDraft(
 
     try
     {
-        MealDraft mealDraft = parser.Parse(session);
+        MealDraft mealDraft = await parser.ParseAsync(
+            session,
+            cancellationToken);
         return Results.Ok(MapResponse(session, mealDraft));
     }
     catch (NotSupportedException exception)
@@ -261,6 +333,27 @@ static IResult ParseMealDraft(
             detail: exception.Message,
             statusCode: StatusCodes.Status422UnprocessableEntity,
             title: "The input sequence is not supported.");
+    }
+    catch (InvalidDataException)
+    {
+        return Results.Problem(
+            detail: "The AI provider returned an invalid structured meal draft.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Meal parsing failed.");
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem(
+            detail: "The AI provider is temporarily unavailable.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Meal parsing failed.");
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.Problem(
+            detail: "The AI provider did not respond before the timeout.",
+            statusCode: StatusCodes.Status504GatewayTimeout,
+            title: "Meal parsing timed out.");
     }
 }
 
@@ -313,15 +406,23 @@ static MealDraftResponse MapResponse(
             ingredients.Add(
                 new IngredientDraftResponse(
                     ingredient.ProductName,
-                    ingredient.WeightInGrams));
+                    ingredient.WeightInGrams,
+                    ingredient.WeightQuality.ToString()));
         }
+
+        List<PortionDraftResponse> portions = dish.Portions
+            .Select(portion => new PortionDraftResponse(
+                portion.WeightInGrams,
+                portion.WeightQuality.ToString()))
+            .ToList();
 
         dishes.Add(
             new DishDraftResponse(
                 dish.Name,
                 ingredients,
                 dish.FinalWeightInGrams,
-                new List<decimal>(dish.PortionWeightsInGrams)));
+                dish.FinalWeightQuality.ToString(),
+                portions));
     }
 
     return new MealDraftResponse(

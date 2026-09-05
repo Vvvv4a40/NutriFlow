@@ -148,6 +148,52 @@ public sealed class DishDraftTests
                 new List<decimal> { 100m, 51m }));
     }
 
+    [Fact]
+    public void Constructor_WithUnknownFinalWeight_StoresIncompleteDraft()
+    {
+        DishDraft dish = new DishDraft(
+            "Dish",
+            CreateIngredients(),
+            null,
+            DataQuality.Unknown,
+            new List<PortionDraft>());
+
+        Assert.Null(dish.FinalWeightInGrams);
+        Assert.Equal(DataQuality.Unknown, dish.FinalWeightQuality);
+    }
+
+    [Fact]
+    public void Constructor_WithEstimatedValues_StoresTheirQuality()
+    {
+        DishDraft dish = new DishDraft(
+            "Dish",
+            new List<IngredientDraft>
+            {
+                new IngredientDraft("Product", 100m, DataQuality.Estimated)
+            },
+            150m,
+            DataQuality.Estimated,
+            new List<PortionDraft>
+            {
+                new PortionDraft(50m, DataQuality.Estimated)
+            });
+
+        Assert.Equal(DataQuality.Estimated, dish.FinalWeightQuality);
+        Assert.Equal(DataQuality.Estimated, dish.Portions[0].WeightQuality);
+    }
+
+    [Fact]
+    public void Constructor_WithNullPortion_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new DishDraft(
+                "Dish",
+                CreateIngredients(),
+                150m,
+                DataQuality.Exact,
+                new List<PortionDraft> { null! }));
+    }
+
     private static IReadOnlyList<IngredientDraft> CreateIngredients()
     {
         return new List<IngredientDraft>
