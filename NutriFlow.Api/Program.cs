@@ -1,10 +1,12 @@
 using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http.Features;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure;
 using NutriFlow.Infrastructure.Ai;
 using NutriFlow.Infrastructure.ExternalProducts;
+using NutriFlow.Infrastructure.LabelPhotos;
 using NutriFlow.Infrastructure.Persistence;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -20,11 +22,31 @@ if (string.IsNullOrWhiteSpace(configuredDatabasePath))
 string databasePath = Path.GetFullPath(
     configuredDatabasePath,
     builder.Environment.ContentRootPath);
+string? databaseDirectory = Path.GetDirectoryName(databasePath);
+
+if (databaseDirectory is not null)
+{
+    Directory.CreateDirectory(databaseDirectory);
+}
+
 string connectionString = $"Data Source={databasePath}";
 builder.Services.AddDbContext<NutriFlowDbContext>(
     options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<LocalProductCatalog>();
 builder.Services.AddScoped<ProductLookupService>();
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit =
+        LabelPhotoValidator.MaximumFileSizeInBytes + 64 * 1024;
+});
+
+string configuredLabelPhotoPath =
+    builder.Configuration["Storage:LabelPhotosPath"] ??
+    "data/label-photos";
+string labelPhotoPath = Path.GetFullPath(
+    configuredLabelPhotoPath,
+    builder.Environment.ContentRootPath);
+builder.Services.AddSingleton(new LabelPhotoStore(labelPhotoPath));
 
 string openFoodFactsBaseUrl =
     builder.Configuration["OpenFoodFacts:BaseUrl"] ??
@@ -48,6 +70,8 @@ string aiProvider = builder.Configuration["Ai:Provider"] ?? "Fake";
 if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
 {
     builder.Services.AddSingleton<IMealParser, FakeMealParser>();
+    builder.Services.AddSingleton<INutritionLabelReader,
+        UnavailableNutritionLabelReader>();
 }
 else if (aiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
 {
@@ -81,6 +105,15 @@ else if (aiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
             serviceProvider.GetRequiredService<IHttpClientFactory>();
 
         return new OpenAiMealParser(
+            httpClientFactory.CreateClient("OpenAI"),
+            openAiModel);
+    });
+    builder.Services.AddScoped<INutritionLabelReader>(serviceProvider =>
+    {
+        IHttpClientFactory httpClientFactory =
+            serviceProvider.GetRequiredService<IHttpClientFactory>();
+
+        return new OpenAiNutritionLabelReader(
             httpClientFactory.CreateClient("OpenAI"),
             openAiModel);
     });
@@ -137,6 +170,17 @@ app.MapGet("/api/products/barcode/{barcode}", FindProductByBarcodeAsync)
     .ProducesProblem(StatusCodes.Status404NotFound)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+
+app.MapPost("/api/labels/analyze", AnalyzeNutritionLabelAsync)
+    .WithName("AnalyzeNutritionLabel")
+    .WithSummary("Extracts a reviewable nutrition draft from a label photo.")
+    .WithTags("Labels")
+    .DisableAntiforgery()
+    .Produces<NutritionLabelDraftResponse>(StatusCodes.Status200OK)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
     .ProducesProblem(StatusCodes.Status504GatewayTimeout);
 
 app.Run();
@@ -250,6 +294,92 @@ static async Task<IResult> FindProductByBarcodeAsync(
             detail: "Open Food Facts did not respond before the timeout.",
             statusCode: StatusCodes.Status504GatewayTimeout,
             title: "External product lookup timed out.");
+    }
+}
+
+static async Task<IResult> AnalyzeNutritionLabelAsync(
+    IFormFile photo,
+    INutritionLabelReader labelReader,
+    LabelPhotoStore photoStore,
+    CancellationToken cancellationToken)
+{
+    if (photo.Length == 0)
+    {
+        return InvalidPhoto("A label photo is required.");
+    }
+
+    if (photo.Length > LabelPhotoValidator.MaximumFileSizeInBytes)
+    {
+        return InvalidPhoto("The label photo cannot exceed 8 MB.");
+    }
+
+    byte[] content;
+
+    await using (MemoryStream buffer = new MemoryStream((int)photo.Length))
+    {
+        await photo.CopyToAsync(buffer, cancellationToken);
+        content = buffer.ToArray();
+    }
+
+    ValidatedLabelPhoto validatedPhoto;
+
+    try
+    {
+        validatedPhoto = LabelPhotoValidator.Validate(content, photo.ContentType);
+    }
+    catch (InvalidDataException exception)
+    {
+        return InvalidPhoto(exception.Message);
+    }
+
+    try
+    {
+        NutritionLabelDraft draft = await labelReader.ReadAsync(
+            validatedPhoto.Content,
+            validatedPhoto.MediaType,
+            cancellationToken);
+        string photoReference = await photoStore.SaveAsync(
+            validatedPhoto,
+            cancellationToken);
+
+        return Results.Ok(new NutritionLabelDraftResponse(
+            photoReference,
+            draft.ProductName,
+            draft.Basis.ToString(),
+            draft.Calories,
+            draft.ProteinGrams,
+            draft.FatGrams,
+            draft.CarbohydratesGrams,
+            new List<string>(draft.ClarificationQuestions),
+            draft.CanCreateProduct));
+    }
+    catch (NotSupportedException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Label analysis is not configured.");
+    }
+    catch (InvalidDataException)
+    {
+        return Results.Problem(
+            detail: "The AI provider returned invalid label data.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Label analysis failed.");
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem(
+            detail: "The AI provider is temporarily unavailable.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Label analysis failed.");
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.Problem(
+            detail: "The AI provider did not respond before the timeout.",
+            statusCode: StatusCodes.Status504GatewayTimeout,
+            title: "Label analysis timed out.");
     }
 }
 
@@ -372,6 +502,15 @@ static IResult InvalidProduct(string message)
         new Dictionary<string, string[]>
         {
             ["product"] = new[] { message }
+        });
+}
+
+static IResult InvalidPhoto(string message)
+{
+    return Results.ValidationProblem(
+        new Dictionary<string, string[]>
+        {
+            ["photo"] = new[] { message }
         });
 }
 
