@@ -1,6 +1,10 @@
+using System.Globalization;
 using System.Net.Http.Headers;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.RateLimiting;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Api.Services;
 using NutriFlow.Domain;
@@ -13,6 +17,44 @@ using NutriFlow.Infrastructure.Persistence;
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.AddProblemDetails();
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>(
+        "sqlite",
+        tags: new[] { "ready" },
+        timeout: TimeSpan.FromSeconds(5));
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        if (context.Lease.TryGetMetadata(
+                MetadataName.RetryAfter,
+                out TimeSpan retryAfter))
+        {
+            context.HttpContext.Response.Headers["Retry-After"] =
+                Math.Ceiling(retryAfter.TotalSeconds)
+                    .ToString(CultureInfo.InvariantCulture);
+        }
+
+        await Results.Problem(
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: "Too many requests",
+                detail: "Wait before calling an external-service endpoint again.")
+            .ExecuteAsync(context.HttpContext);
+    };
+    options.AddPolicy(
+        "external-services",
+        context => RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 12,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 string? configuredDatabasePath = builder.Configuration["Database:Path"];
 
 if (string.IsNullOrWhiteSpace(configuredDatabasePath))
@@ -130,6 +172,8 @@ else
 
 WebApplication app = builder.Build();
 
+app.UseExceptionHandler();
+
 if (builder.Configuration.GetValue(
         "Database:ApplyMigrationsOnStartup",
         true))
@@ -143,8 +187,35 @@ if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase) &&
     await SeedDemoDataAsync(app.Services);
 }
 
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Permissions-Policy"] =
+        "camera=(), geolocation=(), microphone=()";
+
+    bool isDevelopmentSwagger = app.Environment.IsDevelopment() &&
+                                context.Request.Path.StartsWithSegments("/swagger");
+    if (!isDevelopmentSwagger)
+    {
+        context.Response.Headers["Content-Security-Policy"] =
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: blob:; " +
+            "connect-src 'self'; " +
+            "object-src 'none'; " +
+            "frame-ancestors 'none'; " +
+            "base-uri 'self'; " +
+            "form-action 'self'";
+    }
+
+    await next(context);
+});
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
@@ -155,15 +226,30 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+app.MapHealthChecks(
+    "/health/live",
+    new HealthCheckOptions
+    {
+        Predicate = _ => false
+    });
+app.MapHealthChecks(
+    "/health/ready",
+    new HealthCheckOptions
+    {
+        Predicate = registration => registration.Tags.Contains("ready")
+    });
+
 app.MapPost("/api/meal-sessions", CreateMealSessionAsync)
     .WithName("CreateMealSession")
+    .RequireRateLimiting("external-services")
     .WithSummary("Parses messages and creates a persistent calculated meal preview.")
     .WithTags("Meal sessions")
     .Produces<MealSessionResponse>(StatusCodes.Status201Created)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
-    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
 app.MapGet("/api/meal-sessions/{id:guid}", GetMealSessionAsync)
     .WithName("GetMealSession")
@@ -174,6 +260,7 @@ app.MapGet("/api/meal-sessions/{id:guid}", GetMealSessionAsync)
 
 app.MapPost("/api/meal-sessions/{id:guid}/messages", AddMealSessionMessageAsync)
     .WithName("AddMealSessionMessage")
+    .RequireRateLimiting("external-services")
     .WithSummary("Adds a clarification and rebuilds the structured preview.")
     .WithTags("Meal sessions")
     .Produces<MealSessionResponse>(StatusCodes.Status200OK)
@@ -182,7 +269,8 @@ app.MapPost("/api/meal-sessions/{id:guid}/messages", AddMealSessionMessageAsync)
     .ProducesProblem(StatusCodes.Status409Conflict)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
-    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
 app.MapPost("/api/meal-sessions/{id:guid}/confirm", ConfirmMealSessionAsync)
     .WithName("ConfirmMealSession")
@@ -208,13 +296,15 @@ app.MapGet("/api/daily-progress/{date}", GetDailyProgressAsync)
 
 app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
     .WithName("ParseMealDraft")
+    .RequireRateLimiting("external-services")
     .WithSummary("Builds a structured meal draft from captured messages.")
     .WithTags("Meal drafts")
     .Produces<MealDraftResponse>(StatusCodes.Status200OK)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
-    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
 app.MapPost("/api/products/manual", CreateManualProductAsync)
     .WithName("CreateManualProduct")
@@ -241,6 +331,7 @@ app.MapGet("/api/products", FindLocalProductsAsync)
 
 app.MapGet("/api/products/barcode/{barcode}", FindProductByBarcodeAsync)
     .WithName("FindProductByBarcode")
+    .RequireRateLimiting("external-services")
     .WithSummary("Finds a product locally or retrieves and caches it from Open Food Facts.")
     .WithTags("Products")
     .Produces<ProductResponse>(StatusCodes.Status200OK)
@@ -248,10 +339,12 @@ app.MapGet("/api/products/barcode/{barcode}", FindProductByBarcodeAsync)
     .ProducesProblem(StatusCodes.Status404NotFound)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
-    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
 app.MapPost("/api/labels/analyze", AnalyzeNutritionLabelAsync)
     .WithName("AnalyzeNutritionLabel")
+    .RequireRateLimiting("external-services")
     .WithSummary("Extracts a reviewable nutrition draft from a label photo.")
     .WithTags("Labels")
     .DisableAntiforgery()
@@ -259,7 +352,8 @@ app.MapPost("/api/labels/analyze", AnalyzeNutritionLabelAsync)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
     .ProducesProblem(StatusCodes.Status502BadGateway)
     .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
-    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
 app.Run();
 

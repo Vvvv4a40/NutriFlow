@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, test and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      DOTNET_NOLOGO: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore projects
+        run: dotnet restore NutriFlow.sln --warnaserror
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Build Release
+        run: dotnet build NutriFlow.sln --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
+
+      - name: Verify formatting
+        run: dotnet format NutriFlow.sln --no-restore --verify-no-changes
+
+      - name: Check EF Core model
+        run: >-
+          dotnet tool run dotnet-ef migrations has-pending-model-changes
+          --project NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj
+          --startup-project NutriFlow.Api/NutriFlow.Api.csproj
+          --configuration Release
+          --no-build
+
+      - name: Audit vulnerable packages
+        run: dotnet list NutriFlow.sln package --include-transitive --vulnerable
+
+      - name: Build Docker image
+        run: docker build --pull --tag nutriflow:ci .

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Infrastructure.LabelPhotos;
 
@@ -35,6 +36,88 @@ public sealed class MealWorkflowApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("NutriFlow", html, StringComparison.Ordinal);
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains(
+            "default-src 'self'",
+            Assert.Single(response.Headers.GetValues("Content-Security-Policy")),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HealthEndpoints_ReportLiveAndMigratedDatabase()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage live = await client.GetAsync("/health/live");
+        HttpResponseMessage ready = await client.GetAsync("/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+        Assert.Equal("Healthy", await live.Content.ReadAsStringAsync());
+        Assert.Equal("Healthy", await ready.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task HealthEndpoints_WhenSchemaIsNotMigrated_ReportNotReady()
+    {
+        await using TestApiFactory factory = new TestApiFactory(
+            applyMigrations: false,
+            seedDemoData: false);
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage live = await client.GetAsync("/health/live");
+        HttpResponseMessage ready = await client.GetAsync("/health/ready");
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Equal("Healthy", await live.Content.ReadAsStringAsync());
+        Assert.Equal("Unhealthy", await ready.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Swagger_InDevelopment_IsNotBlockedByDashboardPolicy()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync("/swagger/index.html");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.Contains("Content-Security-Policy"));
+    }
+
+    [Fact]
+    public async Task ExternalEndpoint_WhenRequestLimitIsExceeded_ReturnsTooManyRequests()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+        List<HttpStatusCode> statuses = new();
+
+        for (int attempt = 0; attempt < 13; attempt++)
+        {
+            using HttpResponseMessage response = await client.PostAsJsonAsync(
+                "/api/meal-drafts/parse",
+                new ParseMealDraftRequest(DemoMessages));
+            statuses.Add(response.StatusCode);
+        }
+
+        Assert.All(
+            statuses.Take(12),
+            status => Assert.Equal(HttpStatusCode.OK, status));
+        Assert.Equal(HttpStatusCode.TooManyRequests, statuses[^1]);
+
+        using HttpResponseMessage rejected = await client.PostAsJsonAsync(
+            "/api/meal-drafts/parse",
+            new ParseMealDraftRequest(DemoMessages));
+        using JsonDocument problem = JsonDocument.Parse(
+            await rejected.Content.ReadAsStringAsync());
+
+        Assert.Equal(
+            "application/problem+json",
+            rejected.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(
+            "Too many requests",
+            problem.RootElement.GetProperty("title").GetString());
     }
 
     [Fact]
@@ -350,23 +433,36 @@ public sealed class MealWorkflowApiTests
 
     private sealed class TestApiFactory : WebApplicationFactory<Program>
     {
+        private readonly bool _applyMigrations;
         private readonly string _directoryPath = Path.Combine(
             Path.GetTempPath(),
             $"nutriflow-api-{Guid.NewGuid():N}");
+        private readonly bool _seedDemoData;
+
+        public TestApiFactory(
+            bool applyMigrations = true,
+            bool seedDemoData = true)
+        {
+            _applyMigrations = applyMigrations;
+            _seedDemoData = seedDemoData;
+        }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             Directory.CreateDirectory(_directoryPath);
             builder.UseEnvironment("Development");
+            builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting(
                 "Database:Path",
                 Path.Combine(_directoryPath, "nutriflow.db"));
-            builder.UseSetting("Database:ApplyMigrationsOnStartup", "true");
+            builder.UseSetting(
+                "Database:ApplyMigrationsOnStartup",
+                _applyMigrations.ToString());
             builder.UseSetting(
                 "Storage:LabelPhotosPath",
                 Path.Combine(_directoryPath, "label-photos"));
             builder.UseSetting("Ai:Provider", "Fake");
-            builder.UseSetting("Demo:SeedData", "true");
+            builder.UseSetting("Demo:SeedData", _seedDemoData.ToString());
         }
 
         public override async ValueTask DisposeAsync()
