@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NutriFlow.Infrastructure", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NutriFlow.Infrastructure.Tests", "NutriFlow.Infrastructure.Tests\NutriFlow.Infrastructure.Tests.csproj", "{C7D1B17E-4A7E-413B-95D8-9C1B2A85EA8E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NutriFlow.Api.Tests", "NutriFlow.Api.Tests\NutriFlow.Api.Tests.csproj", "{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -97,6 +99,18 @@ Global
 		{C7D1B17E-4A7E-413B-95D8-9C1B2A85EA8E}.Release|x64.Build.0 = Release|Any CPU
 		{C7D1B17E-4A7E-413B-95D8-9C1B2A85EA8E}.Release|x86.ActiveCfg = Release|Any CPU
 		{C7D1B17E-4A7E-413B-95D8-9C1B2A85EA8E}.Release|x86.Build.0 = Release|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Debug|x64.Build.0 = Debug|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Debug|x86.Build.0 = Debug|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Release|x64.ActiveCfg = Release|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Release|x64.Build.0 = Release|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Release|x86.ActiveCfg = Release|Any CPU
+		{836C1D2A-A384-4299-B3DE-C89EBF49F8E3}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

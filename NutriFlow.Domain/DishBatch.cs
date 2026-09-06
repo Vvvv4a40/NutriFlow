@@ -18,7 +18,14 @@ public sealed class DishBatch
                 nameof(ingredients));
         }
 
-        Name = name;
+        if (ingredients.Any(ingredient => ingredient is null))
+        {
+            throw new ArgumentException(
+                "Dish ingredients cannot contain null values.",
+                nameof(ingredients));
+        }
+
+        Name = name.Trim();
         Ingredients = new List<DishIngredient>(ingredients).AsReadOnly();
         FinalWeightInGrams = finalWeightInGrams;
     }
