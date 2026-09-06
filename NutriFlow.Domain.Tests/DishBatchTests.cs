@@ -87,6 +87,16 @@ public sealed class DishBatchTests
     }
 
     [Fact]
+    public void Constructor_WithNullIngredient_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(
+            () => new DishBatch(
+                "Dish",
+                new List<DishIngredient> { null! },
+                250m));
+    }
+
+    [Fact]
     public void Constructor_WithNullName_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(

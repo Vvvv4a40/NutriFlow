@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#185b45">
+    <title>NutriFlow — дневник питания</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+
+    <header class="app-header">
+        <div class="brand" aria-label="NutriFlow">
+            <span class="brand-mark" aria-hidden="true">N</span>
+            <span>
+                <strong>NutriFlow</strong>
+                <small>Питание без ручной раскладки блюда</small>
+            </span>
+        </div>
+
+        <div class="header-actions">
+            <label class="date-control" for="meal-date">
+                <span>День</span>
+                <input id="meal-date" type="date">
+            </label>
+            <span id="api-status" class="status-indicator is-checking">
+                <span aria-hidden="true"></span>
+                Проверяем API
+            </span>
+            <button id="open-catalog-button" class="button button-secondary" type="button">
+                Каталог продуктов
+            </button>
+        </div>
+    </header>
+
+    <main id="main-content" class="page-shell">
+        <div id="global-error" class="global-message global-message-error" role="alert" hidden>
+            <div>
+                <strong>Не удалось выполнить запрос</strong>
+                <p id="global-error-text"></p>
+            </div>
+            <button id="dismiss-error-button" class="icon-button" type="button" aria-label="Закрыть сообщение">×</button>
+        </div>
+
+        <section class="daily-section" aria-labelledby="daily-title">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Сегодня</p>
+                    <h1 id="daily-title">Дневной баланс</h1>
+                    <p id="daily-caption" class="section-description">Загружаем цель и съеденные порции…</p>
+                </div>
+                <button id="edit-goal-button" class="button button-quiet" type="button">
+                    Настроить цель
+                </button>
+            </div>
+
+            <form id="goal-form" class="goal-form" hidden>
+                <div class="field-grid field-grid-four">
+                    <label class="field">
+                        <span>Калории, ккал</span>
+                        <input name="calories" type="number" min="0" step="0.01" required>
+                    </label>
+                    <label class="field">
+                        <span>Белки, г</span>
+                        <input name="proteinGrams" type="number" min="0" step="0.01" required>
+                    </label>
+                    <label class="field">
+                        <span>Жиры, г</span>
+                        <input name="fatGrams" type="number" min="0" step="0.01" required>
+                    </label>
+                    <label class="field">
+                        <span>Углеводы, г</span>
+                        <input name="carbohydratesGrams" type="number" min="0" step="0.01" required>
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button class="button button-primary" type="submit">Сохранить цель</button>
+                    <button id="cancel-goal-button" class="button button-quiet" type="button">Отмена</button>
+                </div>
+            </form>
+
+            <div id="daily-metrics" class="metric-grid" aria-live="polite"></div>
+
+            <details class="entries-panel">
+                <summary>
+                    <span>Записи за день</span>
+                    <span id="entries-count" class="count-badge">0</span>
+                </summary>
+                <div id="daily-entries" class="entries-list"></div>
+            </details>
+        </section>
+
+        <section class="workspace" aria-label="Работа с приёмом пищи">
+            <article class="panel capture-panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Шаг 1</p>
+                        <h2>Расскажите, что приготовили</h2>
+                    </div>
+                    <button id="new-session-button" class="button button-quiet button-small" type="button" hidden>
+                        Новая сессия
+                    </button>
+                </div>
+                <p class="panel-description">
+                    Добавляйте детали постепенно: продукты, массы, итоговый вес и съеденную порцию.
+                </p>
+
+                <div id="message-list" class="message-list" aria-live="polite"></div>
+
+                <form id="message-form" class="composer">
+                    <label class="field" for="message-input">
+                        <span>Новое сообщение</span>
+                        <textarea id="message-input" name="message" rows="3"
+                                  maxlength="4000"
+                                  placeholder="Например: добавил примерно 600 г говядины"></textarea>
+                    </label>
+                    <div class="composer-actions">
+                        <button id="example-button" class="button button-quiet" type="button">Заполнить пример</button>
+                        <button id="add-message-button" class="button button-secondary" type="submit">Добавить сообщение</button>
+                    </div>
+                </form>
+
+                <button id="build-draft-button" class="button button-primary button-wide" type="button" disabled>
+                    Собрать черновик
+                </button>
+                <p id="capture-hint" class="form-hint">Добавьте хотя бы одно сообщение.</p>
+            </article>
+
+            <article class="panel preview-panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Шаг 2</p>
+                        <h2>Проверьте результат</h2>
+                    </div>
+                    <span id="session-status" class="status-badge" hidden></span>
+                </div>
+                <p class="panel-description">
+                    Источники и качество данных видны до записи в дневник. Все расчёты выполняет сервер.
+                </p>
+
+                <div id="preview-content" class="preview-content" aria-live="polite">
+                    <div class="empty-state">
+                        <span class="empty-state-icon" aria-hidden="true">⌁</span>
+                        <h3>Черновик пока не собран</h3>
+                        <p>Сообщения превратятся в блюда, ингредиенты и рассчитанные порции.</p>
+                    </div>
+                </div>
+
+                <div id="confirm-bar" class="confirm-bar" hidden>
+                    <div>
+                        <strong id="confirm-title">Проверьте данные перед записью</strong>
+                        <p id="confirm-hint">Подтверждение станет доступно, когда все важные данные определены.</p>
+                    </div>
+                    <button id="confirm-button" class="button button-primary" type="button" disabled>
+                        Записать в дневник
+                    </button>
+                </div>
+            </article>
+        </section>
+    </main>
+
+    <dialog id="catalog-dialog" class="catalog-dialog">
+        <div class="dialog-shell">
+            <header class="dialog-header">
+                <div>
+                    <p class="eyebrow">Каталог</p>
+                    <h2>Добавить данные продукта</h2>
+                    <p id="catalog-context" class="dialog-description">Выберите удобный источник.</p>
+                </div>
+                <button id="close-catalog-button" class="icon-button" type="button" aria-label="Закрыть каталог">×</button>
+            </header>
+
+            <div class="tabs" role="tablist" aria-label="Способ добавления продукта">
+                <button class="tab is-active" type="button" role="tab" aria-selected="true" data-tab="barcode">Штрихкод</button>
+                <button class="tab" type="button" role="tab" aria-selected="false" data-tab="label">Фото этикетки</button>
+                <button class="tab" type="button" role="tab" aria-selected="false" data-tab="manual">Ручной ввод</button>
+            </div>
+
+            <section class="tab-panel is-active" data-panel="barcode" role="tabpanel">
+                <form id="barcode-form" class="stack-form">
+                    <label class="field">
+                        <span>Штрихкод GTIN</span>
+                        <input name="barcode" type="text" inputmode="numeric" autocomplete="off"
+                               pattern="[0-9]{8}|[0-9]{12,14}" required
+                               placeholder="Например, 3017620422003">
+                    </label>
+                    <p class="form-hint">Сначала проверим SQLite, затем Open Food Facts и сохраним найденное локально.</p>
+                    <button class="button button-primary" type="submit">Найти продукт</button>
+                </form>
+                <div id="barcode-result" class="result-slot" aria-live="polite"></div>
+            </section>
+
+            <section class="tab-panel" data-panel="label" role="tabpanel" hidden>
+                <form id="label-form" class="stack-form">
+                    <label id="photo-dropzone" class="dropzone">
+                        <input id="label-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp">
+                        <span class="dropzone-icon" aria-hidden="true">＋</span>
+                        <strong>Выберите фотографию этикетки</strong>
+                        <span>JPEG, PNG или WebP, не более 8 МБ</span>
+                    </label>
+                    <button class="button button-primary" type="submit">Распознать этикетку</button>
+                </form>
+                <div id="label-result" class="result-slot" aria-live="polite"></div>
+            </section>
+
+            <section class="tab-panel" data-panel="manual" role="tabpanel" hidden>
+                <form id="manual-product-form" class="stack-form">
+                    <label class="field">
+                        <span>Название продукта</span>
+                        <input name="name" type="text" maxlength="200" required>
+                    </label>
+                    <div class="field-grid field-grid-two">
+                        <label class="field">
+                            <span>Калории, ккал / 100 г</span>
+                            <input name="calories" type="number" min="0" step="0.01" required>
+                        </label>
+                        <label class="field">
+                            <span>Белки, г / 100 г</span>
+                            <input name="proteinGrams" type="number" min="0" step="0.01" required>
+                        </label>
+                        <label class="field">
+                            <span>Жиры, г / 100 г</span>
+                            <input name="fatGrams" type="number" min="0" step="0.01" required>
+                        </label>
+                        <label class="field">
+                            <span>Углеводы, г / 100 г</span>
+                            <input name="carbohydratesGrams" type="number" min="0" step="0.01" required>
+                        </label>
+                    </div>
+                    <label class="field">
+                        <span>Штрихкод, если есть</span>
+                        <input name="barcode" type="text" inputmode="numeric" autocomplete="off"
+                               pattern="[0-9]{8}|[0-9]{12,14}">
+                    </label>
+                    <label class="check-field">
+                        <input name="isEstimated" type="checkbox">
+                        <span>Значения приблизительные</span>
+                    </label>
+                    <button class="button button-primary" type="submit">Сохранить продукт</button>
+                </form>
+                <div id="manual-result" class="result-slot" aria-live="polite"></div>
+            </section>
+        </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="/js/app.js" defer></script>
+</body>
+</html>

@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http.Features;
 using NutriFlow.Api.Contracts;
+using NutriFlow.Api.Services;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure;
 using NutriFlow.Infrastructure.Ai;
@@ -34,6 +35,9 @@ builder.Services.AddDbContext<NutriFlowDbContext>(
     options => options.UseSqlite(connectionString));
 builder.Services.AddScoped<LocalProductCatalog>();
 builder.Services.AddScoped<ProductLookupService>();
+builder.Services.AddScoped<MealSessionStore>();
+builder.Services.AddScoped<DailyDiaryStore>();
+builder.Services.AddScoped<MealWorkflowService>();
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit =
@@ -126,15 +130,81 @@ else
 
 WebApplication app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+if (builder.Configuration.GetValue(
+        "Database:ApplyMigrationsOnStartup",
+        true))
 {
     await ApplyDatabaseMigrationsAsync(app.Services);
+}
+
+if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase) &&
+    builder.Configuration.GetValue("Demo:SeedData", true))
+{
+    await SeedDemoDataAsync(app.Services);
+}
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+if (app.Environment.IsDevelopment())
+{
     app.MapOpenApi();
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/openapi/v1.json", "NutriFlow API v1");
     });
 }
+
+app.MapPost("/api/meal-sessions", CreateMealSessionAsync)
+    .WithName("CreateMealSession")
+    .WithSummary("Parses messages and creates a persistent calculated meal preview.")
+    .WithTags("Meal sessions")
+    .Produces<MealSessionResponse>(StatusCodes.Status201Created)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+    .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+
+app.MapGet("/api/meal-sessions/{id:guid}", GetMealSessionAsync)
+    .WithName("GetMealSession")
+    .WithSummary("Returns the current server-side preview of a meal session.")
+    .WithTags("Meal sessions")
+    .Produces<MealSessionResponse>(StatusCodes.Status200OK)
+    .ProducesProblem(StatusCodes.Status404NotFound);
+
+app.MapPost("/api/meal-sessions/{id:guid}/messages", AddMealSessionMessageAsync)
+    .WithName("AddMealSessionMessage")
+    .WithSummary("Adds a clarification and rebuilds the structured preview.")
+    .WithTags("Meal sessions")
+    .Produces<MealSessionResponse>(StatusCodes.Status200OK)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status404NotFound)
+    .ProducesProblem(StatusCodes.Status409Conflict)
+    .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+    .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout);
+
+app.MapPost("/api/meal-sessions/{id:guid}/confirm", ConfirmMealSessionAsync)
+    .WithName("ConfirmMealSession")
+    .WithSummary("Atomically records the portions from the reviewed preview.")
+    .WithTags("Meal sessions")
+    .Produces<ConfirmMealSessionResponse>(StatusCodes.Status200OK)
+    .Produces<ConfirmMealSessionResponse>(StatusCodes.Status409Conflict)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status404NotFound);
+
+app.MapPut("/api/daily-goals/{date}", SetDailyGoalAsync)
+    .WithName("SetDailyGoal")
+    .WithSummary("Creates or replaces the nutrition goal for a date.")
+    .WithTags("Daily diary")
+    .Produces<DailyProgressResponse>(StatusCodes.Status200OK)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest);
+
+app.MapGet("/api/daily-progress/{date}", GetDailyProgressAsync)
+    .WithName("GetDailyProgress")
+    .WithSummary("Returns consumed, remaining and exceeded nutrition for a date.")
+    .WithTags("Daily diary")
+    .Produces<DailyProgressResponse>(StatusCodes.Status200OK);
 
 app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
     .WithName("ParseMealDraft")
@@ -149,6 +219,14 @@ app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
 app.MapPost("/api/products/manual", CreateManualProductAsync)
     .WithName("CreateManualProduct")
     .WithSummary("Stores manually entered nutrition values in the local catalog.")
+    .WithTags("Products")
+    .Produces<ProductResponse>(StatusCodes.Status201Created)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status409Conflict);
+
+app.MapPost("/api/products/from-label", CreateLabelProductAsync)
+    .WithName("CreateLabelProduct")
+    .WithSummary("Stores reviewed per-100-gram values from a saved label photo.")
     .WithTags("Products")
     .Produces<ProductResponse>(StatusCodes.Status201Created)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
@@ -194,6 +272,211 @@ static async Task ApplyDatabaseMigrationsAsync(IServiceProvider services)
     await dbContext.Database.MigrateAsync();
 }
 
+static async Task SeedDemoDataAsync(IServiceProvider services)
+{
+    await using AsyncServiceScope scope = services.CreateAsyncScope();
+    LocalProductCatalog catalog =
+        scope.ServiceProvider.GetRequiredService<LocalProductCatalog>();
+
+    await DemoCatalogSeeder.SeedAsync(catalog);
+}
+
+static async Task<IResult> CreateMealSessionAsync(
+    CreateMealSessionRequest? request,
+    MealWorkflowService workflow,
+    CancellationToken cancellationToken)
+{
+    if (request is null)
+    {
+        return InvalidMessages("A meal session request is required.");
+    }
+
+    try
+    {
+        MealSessionResponse response = await workflow.CreateAsync(
+            request.Messages,
+            request.MealDate ?? DateOnly.FromDateTime(DateTime.Today),
+            cancellationToken);
+
+        return Results.Created($"/api/meal-sessions/{response.Id}", response);
+    }
+    catch (ArgumentException exception)
+    {
+        return InvalidMessages(exception.Message);
+    }
+    catch (NotSupportedException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "The input sequence is not supported.");
+    }
+    catch (InvalidDataException)
+    {
+        return MealParserFailure();
+    }
+    catch (HttpRequestException)
+    {
+        return MealParserUnavailable();
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return MealParserTimeout();
+    }
+}
+
+static async Task<IResult> GetMealSessionAsync(
+    Guid id,
+    MealWorkflowService workflow,
+    CancellationToken cancellationToken)
+{
+    MealSessionResponse? response = await workflow.FindAsync(
+        id,
+        cancellationToken);
+
+    return response is null
+        ? MealSessionNotFound(id)
+        : Results.Ok(response);
+}
+
+static async Task<IResult> AddMealSessionMessageAsync(
+    Guid id,
+    AddMealSessionMessageRequest? request,
+    MealWorkflowService workflow,
+    CancellationToken cancellationToken)
+{
+    if (request is null)
+    {
+        return InvalidMessages("A message request is required.");
+    }
+
+    try
+    {
+        MealSessionResponse? response = await workflow.AddMessageAsync(
+            id,
+            request.Message,
+            cancellationToken);
+
+        return response is null
+            ? MealSessionNotFound(id)
+            : Results.Ok(response);
+    }
+    catch (ArgumentException exception)
+    {
+        return InvalidMessages(exception.Message);
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status409Conflict,
+            title: "The meal session cannot be changed.");
+    }
+    catch (NotSupportedException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "The input sequence is not supported.");
+    }
+    catch (InvalidDataException)
+    {
+        return MealParserFailure();
+    }
+    catch (HttpRequestException)
+    {
+        return MealParserUnavailable();
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return MealParserTimeout();
+    }
+}
+
+static async Task<IResult> ConfirmMealSessionAsync(
+    Guid id,
+    ConfirmMealSessionRequest? request,
+    MealWorkflowService workflow,
+    CancellationToken cancellationToken)
+{
+    if (request is null || string.IsNullOrWhiteSpace(request.PreviewToken))
+    {
+        return Results.ValidationProblem(
+            new Dictionary<string, string[]>
+            {
+                ["previewToken"] = new[]
+                {
+                    "The preview token returned by the server is required."
+                }
+            });
+    }
+
+    MealConfirmationOutcome? outcome = await workflow.ConfirmAsync(
+        id,
+        request.PreviewToken,
+        cancellationToken);
+
+    if (outcome is null)
+    {
+        return MealSessionNotFound(id);
+    }
+
+    string? message = outcome.Kind switch
+    {
+        MealConfirmationOutcomeKind.StalePreview =>
+            "The preview changed. Review the current values before confirming again.",
+        MealConfirmationOutcomeKind.NotReady =>
+            "Resolve the listed questions and product issues before confirmation.",
+        _ => null
+    };
+    ConfirmMealSessionResponse response = new ConfirmMealSessionResponse(
+        outcome.Kind.ToString(),
+        message,
+        outcome.Session,
+        outcome.Entries.Select(MapMealEntryResponse).ToArray());
+
+    return outcome.Kind is MealConfirmationOutcomeKind.Confirmed or
+        MealConfirmationOutcomeKind.AlreadyConfirmed
+        ? Results.Ok(response)
+        : Results.Json(response, statusCode: StatusCodes.Status409Conflict);
+}
+
+static async Task<IResult> SetDailyGoalAsync(
+    DateOnly date,
+    SetDailyGoalRequest? request,
+    MealWorkflowService workflow,
+    CancellationToken cancellationToken)
+{
+    if (request is null)
+    {
+        return InvalidGoal("A daily goal is required.");
+    }
+
+    try
+    {
+        await workflow.SetDailyGoalAsync(date, request, cancellationToken);
+        DailyProgressResponse response = await workflow.GetDailyProgressAsync(
+            date,
+            cancellationToken);
+
+        return Results.Ok(response);
+    }
+    catch (ArgumentException exception)
+    {
+        return InvalidGoal(exception.Message);
+    }
+}
+
+static async Task<IResult> GetDailyProgressAsync(
+    DateOnly date,
+    MealWorkflowService workflow,
+    CancellationToken cancellationToken)
+{
+    return Results.Ok(await workflow.GetDailyProgressAsync(
+        date,
+        cancellationToken));
+}
+
 static async Task<IResult> CreateManualProductAsync(
     CreateManualProductRequest? request,
     LocalProductCatalog catalog,
@@ -228,6 +511,60 @@ static async Task<IResult> CreateManualProductAsync(
             source,
             request.Barcode);
 
+        bool wasAdded = await catalog.AddAsync(product, cancellationToken);
+
+        if (!wasAdded)
+        {
+            return Results.Problem(
+                detail: "An identical product already exists in the local catalog.",
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The product already exists.");
+        }
+
+        string location =
+            $"/api/products?name={Uri.EscapeDataString(product.Name)}";
+        return Results.Created(location, MapProductResponse(product));
+    }
+    catch (ArgumentException exception)
+    {
+        return InvalidProduct(exception.Message);
+    }
+}
+
+static async Task<IResult> CreateLabelProductAsync(
+    CreateLabelProductRequest? request,
+    LocalProductCatalog catalog,
+    LabelPhotoStore photoStore,
+    CancellationToken cancellationToken)
+{
+    if (request is null)
+    {
+        return InvalidProduct("A reviewed label product is required.");
+    }
+
+    if (!photoStore.Contains(request.PhotoReference!))
+    {
+        return InvalidProduct(
+            "PhotoReference must identify a label photo saved by NutriFlow.");
+    }
+
+    try
+    {
+        NutritionValues nutrition = new NutritionValues(
+            request.Calories,
+            request.ProteinGrams,
+            request.FatGrams,
+            request.CarbohydratesGrams);
+        NutritionSource source = new NutritionSource(
+            NutritionSourceKind.LabelPhoto,
+            DataQuality.Verified,
+            "Reviewed nutrition label",
+            request.PhotoReference);
+        Product product = new Product(
+            request.Name!,
+            nutrition,
+            source,
+            request.Barcode);
         bool wasAdded = await catalog.AddAsync(product, cancellationToken);
 
         if (!wasAdded)
@@ -505,6 +842,15 @@ static IResult InvalidProduct(string message)
         });
 }
 
+static IResult InvalidGoal(string message)
+{
+    return Results.ValidationProblem(
+        new Dictionary<string, string[]>
+        {
+            ["goal"] = new[] { message }
+        });
+}
+
 static IResult InvalidPhoto(string message)
 {
     return Results.ValidationProblem(
@@ -527,6 +873,50 @@ static ProductResponse MapProductResponse(Product product)
         product.Source.Name,
         product.Source.Reference,
         product.Barcode);
+}
+
+static MealEntryResponse MapMealEntryResponse(MealEntry entry)
+{
+    return new MealEntryResponse(
+        entry.Name,
+        entry.WeightInGrams,
+        new NutritionResponse(
+            entry.Nutrition.Calories,
+            entry.Nutrition.ProteinGrams,
+            entry.Nutrition.FatGrams,
+            entry.Nutrition.CarbohydratesGrams));
+}
+
+static IResult MealSessionNotFound(Guid id)
+{
+    return Results.Problem(
+        detail: $"Meal session '{id}' was not found.",
+        statusCode: StatusCodes.Status404NotFound,
+        title: "Meal session not found.");
+}
+
+static IResult MealParserFailure()
+{
+    return Results.Problem(
+        detail: "The AI provider returned an invalid structured meal draft.",
+        statusCode: StatusCodes.Status502BadGateway,
+        title: "Meal parsing failed.");
+}
+
+static IResult MealParserUnavailable()
+{
+    return Results.Problem(
+        detail: "The AI provider is temporarily unavailable.",
+        statusCode: StatusCodes.Status502BadGateway,
+        title: "Meal parsing failed.");
+}
+
+static IResult MealParserTimeout()
+{
+    return Results.Problem(
+        detail: "The AI provider did not respond before the timeout.",
+        statusCode: StatusCodes.Status504GatewayTimeout,
+        title: "Meal parsing timed out.");
 }
 
 static MealDraftResponse MapResponse(
@@ -569,4 +959,8 @@ static MealDraftResponse MapResponse(
         dishes,
         new List<string>(mealDraft.ClarificationQuestions),
         mealDraft.RequiresClarification);
+}
+
+public partial class Program
+{
 }
