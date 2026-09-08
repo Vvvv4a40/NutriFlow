@@ -2,10 +2,11 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 WORKDIR /src
 
-COPY NutriFlow.Domain/NutriFlow.Domain.csproj NutriFlow.Domain/
-COPY NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj NutriFlow.Infrastructure/
-COPY NutriFlow.Api/NutriFlow.Api.csproj NutriFlow.Api/
-RUN dotnet restore NutriFlow.Api/NutriFlow.Api.csproj
+COPY global.json Directory.Build.props ./
+COPY NutriFlow.Domain/NutriFlow.Domain.csproj NutriFlow.Domain/packages.lock.json NutriFlow.Domain/
+COPY NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj NutriFlow.Infrastructure/packages.lock.json NutriFlow.Infrastructure/
+COPY NutriFlow.Api/NutriFlow.Api.csproj NutriFlow.Api/packages.lock.json NutriFlow.Api/
+RUN dotnet restore NutriFlow.Api/NutriFlow.Api.csproj --locked-mode --warnaserror
 
 COPY . .
 RUN dotnet publish NutriFlow.Api/NutriFlow.Api.csproj \

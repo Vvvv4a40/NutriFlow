@@ -9,6 +9,12 @@
 **/*.db-shm
 **/*.db-wal
 NutriFlow.Api/data/
+.env
+.env.*
+**/appsettings.Local.json
+**/*.pfx
+**/*.pem
+**/*.key
 NutriFlow.Console/
 NutriFlow.Domain.Tests/
 NutriFlow.Infrastructure.Tests/

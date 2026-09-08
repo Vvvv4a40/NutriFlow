@@ -181,6 +181,73 @@ public sealed class LocalProductCatalogTests
     }
 
     [Fact]
+    public async Task AddAsync_WithBetterBarcodeData_ReplacesProductAndKeepsOldNameAsAlias()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+
+        await using NutriFlowDbContext context = database.CreateContext();
+        LocalProductCatalog catalog = new LocalProductCatalog(context);
+        Product external = new Product(
+            "Brand milk",
+            new NutritionValues(61m, 3m, 3.2m, 4.7m),
+            new NutritionSource(
+                NutritionSourceKind.ExternalService,
+                DataQuality.Unknown,
+                "Open Food Facts",
+                "https://world.openfoodfacts.org/product/12345678"),
+            "12345678");
+        Product reviewed = new Product(
+            "Молоко 3,2%",
+            new NutritionValues(60m, 3m, 3.2m, 4.5m),
+            new NutritionSource(
+                NutritionSourceKind.LabelPhoto,
+                DataQuality.Verified,
+                "Reviewed label",
+                "labels/photo.webp"),
+            "12345678");
+
+        Assert.True(await catalog.AddAsync(external));
+        Assert.True(await catalog.AddAsync(reviewed));
+
+        Product byBarcode = Assert.IsType<Product>(
+            await catalog.FindByBarcodeAsync("12345678"));
+        Product byOldName = Assert.Single(
+            await catalog.FindByNameAsync("brand milk"));
+
+        Assert.Equal("Молоко 3,2%", byBarcode.Name);
+        Assert.Equal(DataQuality.Verified, byBarcode.Source.Quality);
+        Assert.Equal(60m, byBarcode.NutritionPer100Grams.Calories);
+        Assert.Equal(byBarcode.Name, byOldName.Name);
+    }
+
+    [Fact]
+    public async Task AddAliasByBarcodeAsync_MakesCapturedNameResolvable()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+
+        await using NutriFlowDbContext context = database.CreateContext();
+        LocalProductCatalog catalog = new LocalProductCatalog(context);
+        Product product = new Product(
+            "Manufacturer milk",
+            new NutritionValues(60m, 3m, 3m, 4m),
+            new NutritionSource(
+                NutritionSourceKind.ManualInput,
+                DataQuality.Exact,
+                "Test input"),
+            "12345678");
+        await catalog.AddAsync(product);
+
+        await catalog.AddAliasByBarcodeAsync("12345678", "молоко");
+        await catalog.AddAliasByBarcodeAsync("12345678", " МОЛОКО ");
+
+        Product resolved = Assert.Single(
+            await catalog.FindByNameAsync("молоко"));
+        Assert.Equal("Manufacturer milk", resolved.Name);
+    }
+
+    [Fact]
     public async Task AddAsync_WithIdenticalProduct_DoesNotAddDuplicate()
     {
         await using TestDatabase database = new TestDatabase();

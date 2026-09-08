@@ -62,6 +62,58 @@ public sealed class OpenFoodFactsClientTests
     }
 
     [Fact]
+    public async Task FindByBarcodeAsync_WithDifferentResponseBarcode_ThrowsInvalidDataException()
+    {
+        StubHttpMessageHandler handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """
+            {
+              "code": "12345678",
+              "product": {
+                "product_name": "Wrong product",
+                "nutriments": {
+                  "energy-kcal_100g": 100,
+                  "proteins_100g": 4,
+                  "fat_100g": 2,
+                  "carbohydrates_100g": 10
+                }
+              }
+            }
+            """);
+        OpenFoodFactsClient client = CreateClient(handler);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => client.FindByBarcodeAsync("3017620422003"));
+    }
+
+    [Fact]
+    public async Task FindByBarcodeAsync_WithInvalidResponseBarcode_ThrowsInvalidDataException()
+    {
+        StubHttpMessageHandler handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """
+            {
+              "code": "not-a-barcode",
+              "product": {
+                "product_name": "Invalid response",
+                "nutriments": {
+                  "energy-kcal_100g": 100,
+                  "proteins_100g": 4,
+                  "fat_100g": 2,
+                  "carbohydrates_100g": 10
+                }
+              }
+            }
+            """);
+        OpenFoodFactsClient client = CreateClient(handler);
+
+        InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => client.FindByBarcodeAsync("3017620422003"));
+
+        Assert.IsType<ArgumentException>(exception.InnerException);
+    }
+
+    [Fact]
     public async Task FindByBarcodeAsync_WithIncompleteNutrition_ThrowsInvalidDataException()
     {
         StubHttpMessageHandler handler = new StubHttpMessageHandler(

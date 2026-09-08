@@ -38,8 +38,12 @@ NutriFlow — веб-приложение для восстановления с
 - Для продукта сохраняются происхождение данных, ссылка на источник и понятная оценка качества без выдуманных процентов уверенности.
 - Поиск по штрихкоду сначала проверяет SQLite, а при локальном промахе обращается к Open Food Facts и кэширует валидный результат.
 - Данные Open Food Facts сохраняются с качеством `Unknown`: успешный ответ пользовательской базы сам по себе не считается проверкой.
-- Устаревший предпросмотр нельзя подтвердить: сервер проверяет `previewToken` перед атомарной записью порций.
-- Фотография этикетки проверяется по сигнатуре файла; поддерживаются JPEG, PNG и WebP размером до 8 МБ.
+- Найденный по штрихкоду продукт можно связать с формулировкой ингредиента через локальный алиас; проверенные данные с тем же штрихкодом заменяют менее качественный внешний результат.
+- Устаревший предпросмотр нельзя изменить или подтвердить: сервер условно обновляет сессию по `previewToken`, а порции записывает атомарно.
+- Явно удалённая масса вычитается C#-кодом, а порция может быть задана массой или долей готового блюда.
+- Предпросмотр отдельно показывает качество итога блюда, значения на 100 г и каждой рассчитанной порции до подтверждения.
+- Итоговая запись дневника сохраняет худшую категорию качества среди продукта, исходных масс и порции.
+- Фотография этикетки проверяется по сигнатуре файла; поддерживаются JPEG, PNG и WebP размером до 8 МБ, а сохранённый первоисточник можно открыть из предпросмотра.
 - Промежуточные значения не округляются, чтобы сумма порций не расходилась с расчётом всего блюда.
 
 Подробнее о продуктовых правилах: [docs/PRODUCT.md](docs/PRODUCT.md).
@@ -96,7 +100,7 @@ flowchart LR
 
 ```powershell
 dotnet tool restore
-dotnet restore NutriFlow.sln --warnaserror
+dotnet restore NutriFlow.sln --locked-mode --warnaserror
 dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 ```
 
@@ -133,6 +137,7 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 | Метод и маршрут | Назначение |
 | --- | --- |
 | `GET /` | Веб-интерфейс |
+| `GET /api/capabilities` | Получить доступные возможности текущего AI-провайдера |
 | `POST /api/meal-sessions` | Создать сессию и рассчитанный предпросмотр |
 | `GET /api/meal-sessions/{id}` | Получить актуальное состояние сессии |
 | `POST /api/meal-sessions/{id}/messages` | Добавить уточнение и пересобрать предпросмотр |
@@ -142,9 +147,11 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 | `POST /api/meal-drafts/parse` | Получить структурированный черновик без сохранения workflow |
 | `POST /api/products/manual` | Сохранить продукт с ручными значениями |
 | `POST /api/products/from-label` | Сохранить проверенные значения с этикетки |
+| `POST /api/products/aliases` | Связать имя ингредиента с продуктом по штрихкоду |
 | `GET /api/products?name=...` | Найти локальные продукты по точному нормализованному имени |
 | `GET /api/products/barcode/{barcode}` | Найти продукт локально или через Open Food Facts |
 | `POST /api/labels/analyze` | Получить проверяемый черновик из фотографии этикетки |
+| `GET /api/label-photos/{fileName}` | Открыть сохранённую фотографию-источник по непрозрачной ссылке |
 | `GET /health/live` | Проверить работоспособность процесса |
 | `GET /health/ready` | Проверить доступность и актуальность схемы SQLite |
 
@@ -170,17 +177,17 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 ## Проверка качества
 
 ```powershell
-dotnet restore NutriFlow.sln
+dotnet restore NutriFlow.sln --locked-mode --warnaserror
 dotnet tool restore
 dotnet build NutriFlow.sln --configuration Release --no-restore
-dotnet test NutriFlow.sln --configuration Release --no-build
+dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
 dotnet format NutriFlow.sln --no-restore --verify-no-changes
 dotnet tool run dotnet-ef migrations has-pending-model-changes `
   --project NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj `
   --startup-project NutriFlow.Api/NutriFlow.Api.csproj `
   --configuration Release `
   --no-build
-dotnet list NutriFlow.sln package --include-transitive --vulnerable
+dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
 ```
 
 GitHub Actions выполняет тот же Release-конвейер, превращает предупреждения
@@ -204,6 +211,15 @@ docker run --rm --name nutriflow `
 При включении реального провайдера также нужно установить `Ai__Provider=OpenAI`
 и `Demo__SeedData=false`; ключ нельзя передавать в образ или сохранять в Git.
 
+## Источник Open Food Facts и лицензирование
+
+Данные, полученные из Open Food Facts, сохраняют название сервиса и ссылку на
+исходную карточку продукта. База Open Food Facts распространяется по ODbL, а
+локальное кэширование не отменяет требования лицензии и атрибуции. Перед
+распространением накопленной базы оператор должен проверить
+[официальные условия использования](https://world.openfoodfacts.org/terms-of-use)
+и [руководство Open Food Facts по лицензированию](https://openfoodfacts.github.io/openfoodfacts-server/api/tutorials/license-be-on-the-legal-side/).
+
 ## Ограничения эксплуатации
 
 - SQLite рассчитан на один экземпляр NutriFlow с локальным постоянным диском. Горизонтальное масштабирование потребует серверной СУБД.
@@ -216,5 +232,7 @@ docker run --rm --name nutriflow `
   доверенных прокси должны быть настроены на конкретной платформе до использования
   IP как ключа ограничения запросов.
 - Поиск Open Food Facts реализован для штрихкода; произвольный полнотекстовый поиск ингредиентов во внешнем каталоге пока отсутствует.
+- Fake-провайдер предназначен для воспроизводимой демонстрации и не разбирает произвольный текст; интерфейс явно показывает этот режим и отключает недоступное распознавание фото.
+- Для каталога пока нет отдельного редактирования и удаления: конфликтующие данные того же уровня качества требуют будущего явного сценария замены, а не перезаписываются автоматически.
 - Фотографии сохраняются на локальный диск. Несколько экземпляров потребуют общего объектного хранилища.
 - Качество внешних пищевых данных зависит от первоисточника, поэтому результат всегда показывается пользователю до подтверждения.

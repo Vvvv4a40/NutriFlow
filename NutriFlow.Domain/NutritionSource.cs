@@ -18,12 +18,45 @@ public sealed class NutritionSource
             throw new ArgumentOutOfRangeException(nameof(quality));
         }
 
+        if (kind == NutritionSourceKind.Unknown &&
+            quality != DataQuality.Unknown)
+        {
+            throw new ArgumentException(
+                "An unknown source must have unknown data quality.",
+                nameof(quality));
+        }
+
+        if (kind == NutritionSourceKind.DishPhoto &&
+            quality is DataQuality.Exact or DataQuality.Verified)
+        {
+            throw new ArgumentException(
+                "Nutrition estimated from a dish photo cannot be exact or verified.",
+                nameof(quality));
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        string normalizedName = name.Trim();
+        string? normalizedReference = reference?.Trim();
+
+        if (normalizedName.Length > 200)
+        {
+            throw new ArgumentException(
+                "A nutrition source name cannot exceed 200 characters.",
+                nameof(name));
+        }
 
         if (reference is not null && string.IsNullOrWhiteSpace(reference))
         {
             throw new ArgumentException(
                 "Reference cannot be empty or whitespace.",
+                nameof(reference));
+        }
+
+        if (normalizedReference?.Length > 2048)
+        {
+            throw new ArgumentException(
+                "A nutrition source reference cannot exceed 2048 characters.",
                 nameof(reference));
         }
 
@@ -37,7 +70,7 @@ public sealed class NutritionSource
                 nameof(reference));
         }
 
-        if (kind == NutritionSourceKind.WebPage && !IsHttpUrl(reference))
+        if (kind == NutritionSourceKind.WebPage && !IsHttpUrl(normalizedReference))
         {
             throw new ArgumentException(
                 "A web page source requires an absolute HTTP or HTTPS URL.",
@@ -46,8 +79,8 @@ public sealed class NutritionSource
 
         Kind = kind;
         Quality = quality;
-        Name = name.Trim();
-        Reference = reference?.Trim();
+        Name = normalizedName;
+        Reference = normalizedReference;
     }
 
     public NutritionSourceKind Kind { get; }

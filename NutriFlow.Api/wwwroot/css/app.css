@@ -57,9 +57,15 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
+.source-link:focus-visible,
 .dropzone:focus-within {
     outline: 3px solid rgba(24, 91, 69, 0.24);
     outline-offset: 2px;
+}
+
+.dropzone.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.64;
 }
 
 [hidden] {
@@ -159,6 +165,16 @@ summary:focus-visible,
     background: transparent;
 }
 
+.date-control.is-locked {
+    background: var(--surface-muted);
+}
+
+.date-control input:disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 1;
+}
+
 .status-indicator {
     display: inline-flex;
     align-items: center;
@@ -218,6 +234,22 @@ summary:focus-visible,
 
 .global-message p {
     margin: 4px 0 0;
+}
+
+.capabilities-banner {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 20px;
+    padding: 15px 18px;
+    color: var(--info);
+    border: 1px solid #c8ddf2;
+    background: var(--info-soft);
+    border-radius: var(--radius-medium);
+}
+
+.capabilities-banner p {
+    margin: 4px 0 0;
+    line-height: 1.5;
 }
 
 .daily-section,
@@ -519,6 +551,19 @@ h3 {
     margin-top: 3px;
     color: var(--text-muted);
     font-size: 12px;
+}
+
+.entry-row .entry-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.entry-row .entry-meta .quality-badge {
+    display: inline-flex;
+    margin-top: 0;
+    font-size: 10px;
 }
 
 .entry-nutrition {
@@ -874,6 +919,32 @@ h3 {
     margin-top: 3px;
 }
 
+.ingredient-weights {
+    display: grid;
+    gap: 3px;
+    margin-top: 5px;
+}
+
+.ingredient-main .ingredient-weight-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 0;
+}
+
+.ingredient-main .ingredient-weight-row > span,
+.ingredient-main .ingredient-weight-row .quality-badge {
+    display: inline-flex;
+    margin-top: 0;
+}
+
+.ingredient-main .ingredient-included-weight {
+    margin-top: 1px;
+    color: var(--text);
+    font-weight: 700;
+}
+
 .ingredient-source {
     display: flex;
     min-width: 0;
@@ -898,6 +969,15 @@ h3 {
     color: #425049;
     background: #edf0ee;
     text-overflow: ellipsis;
+}
+
+.source-link {
+    align-self: center;
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 750;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
 }
 
 .dish-nutrition {
@@ -963,6 +1043,34 @@ h3 {
     font-size: 12px;
 }
 
+.portion-derived-weight {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-muted);
+}
+
+.portion-nutrition-result {
+    display: grid;
+    justify-items: end;
+    gap: 5px;
+}
+
+.calculation-quality {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+.nutrition-box > .calculation-quality {
+    display: flex;
+    margin: 6px 0 0;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+}
+
 .confirm-bar {
     display: flex;
     align-items: center;
@@ -1026,6 +1134,19 @@ h3 {
     cursor: pointer;
     font-size: 12px;
     font-weight: 750;
+}
+
+.tab small {
+    display: block;
+    margin-top: 2px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.tab:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
 }
 
 .tab.is-active {
@@ -1321,6 +1442,10 @@ h3 {
     .dish-total,
     .entry-nutrition {
         text-align: left;
+    }
+
+    .portion-nutrition-result {
+        justify-items: start;
     }
 
     .tabs {

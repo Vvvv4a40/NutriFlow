@@ -5,6 +5,18 @@ namespace NutriFlow.Domain.Tests;
 public sealed class MealEntryTests
 {
     [Fact]
+    public void Constructor_WithQuality_StoresQuality()
+    {
+        MealEntry entry = new MealEntry(
+            "Breakfast",
+            250m,
+            new NutritionValues(300m, 20m, 10m, 40m),
+            DataQuality.Estimated);
+
+        Assert.Equal(DataQuality.Estimated, entry.Quality);
+    }
+
+    [Fact]
     public void Constructor_StoresNameWeightAndNutrition()
     {
         NutritionValues nutrition = new NutritionValues(300m, 20m, 10m, 40m);

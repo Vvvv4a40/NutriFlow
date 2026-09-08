@@ -71,11 +71,13 @@ public sealed class DailyDiaryStoreTests
                 251.1234567890123456789012345m,
                 20.25m,
                 13.5m,
-                7.75m));
+                7.75m),
+            DataQuality.Estimated);
         MealEntry secondEntry = new MealEntry(
             "Рагу, порция 2",
             100.25m,
-            new NutritionValues(125.5m, 10.125m, 6.75m, 3.875m));
+            new NutritionValues(125.5m, 10.125m, 6.75m, 3.875m),
+            DataQuality.Verified);
 
         await using (NutriFlowDbContext context = database.CreateContext())
         {
@@ -239,6 +241,7 @@ public sealed class DailyDiaryStoreTests
     {
         Assert.Equal(expected.Name, actual.Name);
         Assert.Equal(expected.WeightInGrams, actual.WeightInGrams);
+        Assert.Equal(expected.Quality, actual.Quality);
         AssertNutrition(
             actual.Nutrition,
             expected.Nutrition.Calories,

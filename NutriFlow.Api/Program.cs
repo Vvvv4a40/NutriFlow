@@ -239,6 +239,20 @@ app.MapHealthChecks(
         Predicate = registration => registration.Tags.Contains("ready")
     });
 
+bool supportsAiInput = aiProvider.Equals(
+    "OpenAI",
+    StringComparison.OrdinalIgnoreCase);
+app.MapGet(
+        "/api/capabilities",
+        () => Results.Ok(new ApplicationCapabilitiesResponse(
+            supportsAiInput ? "OpenAI" : "Fake",
+            supportsAiInput,
+            supportsAiInput)))
+    .WithName("GetApplicationCapabilities")
+    .WithSummary("Reports input features enabled by the configured AI provider.")
+    .WithTags("Application")
+    .Produces<ApplicationCapabilitiesResponse>(StatusCodes.Status200OK);
+
 app.MapPost("/api/meal-sessions", CreateMealSessionAsync)
     .WithName("CreateMealSession")
     .RequireRateLimiting("external-services")
@@ -322,6 +336,14 @@ app.MapPost("/api/products/from-label", CreateLabelProductAsync)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
     .ProducesProblem(StatusCodes.Status409Conflict);
 
+app.MapPost("/api/products/aliases", AddProductAliasAsync)
+    .WithName("AddProductAlias")
+    .WithSummary("Links a captured ingredient name to a product identified by barcode.")
+    .WithTags("Products")
+    .Produces<ProductResponse>(StatusCodes.Status200OK)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status404NotFound);
+
 app.MapGet("/api/products", FindLocalProductsAsync)
     .WithName("FindLocalProducts")
     .WithSummary("Finds local products by an exact normalized name.")
@@ -354,6 +376,16 @@ app.MapPost("/api/labels/analyze", AnalyzeNutritionLabelAsync)
     .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
     .ProducesProblem(StatusCodes.Status504GatewayTimeout)
     .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+app.MapGet("/api/label-photos/{fileName}", GetLabelPhoto)
+    .WithName("GetLabelPhoto")
+    .WithSummary("Returns a saved nutrition-label photo by its opaque reference.")
+    .WithTags("Labels")
+    .Produces(
+        StatusCodes.Status200OK,
+        contentType: "image/jpeg",
+        additionalContentTypes: ["image/png", "image/webp"])
+    .ProducesProblem(StatusCodes.Status404NotFound);
 
 app.Run();
 
@@ -610,7 +642,7 @@ static async Task<IResult> CreateManualProductAsync(
         if (!wasAdded)
         {
             return Results.Problem(
-                detail: "An identical product already exists in the local catalog.",
+                detail: "A matching product already exists, or this barcode has data of equal or better quality.",
                 statusCode: StatusCodes.Status409Conflict,
                 title: "The product already exists.");
         }
@@ -634,6 +666,12 @@ static async Task<IResult> CreateLabelProductAsync(
     if (request is null)
     {
         return InvalidProduct("A reviewed label product is required.");
+    }
+
+    if (request.Basis != NutritionBasis.Per100Grams)
+    {
+        return InvalidProduct(
+            "Basis must be Per100Grams before label values can be saved.");
     }
 
     if (!photoStore.Contains(request.PhotoReference!))
@@ -664,7 +702,7 @@ static async Task<IResult> CreateLabelProductAsync(
         if (!wasAdded)
         {
             return Results.Problem(
-                detail: "An identical product already exists in the local catalog.",
+                detail: "A matching product already exists, or this barcode has data of equal or better quality.",
                 statusCode: StatusCodes.Status409Conflict,
                 title: "The product already exists.");
         }
@@ -725,6 +763,38 @@ static async Task<IResult> FindProductByBarcodeAsync(
             detail: "Open Food Facts did not respond before the timeout.",
             statusCode: StatusCodes.Status504GatewayTimeout,
             title: "External product lookup timed out.");
+    }
+}
+
+static async Task<IResult> AddProductAliasAsync(
+    AddProductAliasRequest? request,
+    LocalProductCatalog catalog,
+    CancellationToken cancellationToken)
+{
+    if (request is null)
+    {
+        return InvalidProduct("A product alias request is required.");
+    }
+
+    try
+    {
+        Product product = await catalog.AddAliasByBarcodeAsync(
+            request.Barcode!,
+            request.Alias!,
+            cancellationToken);
+
+        return Results.Ok(MapProductResponse(product));
+    }
+    catch (ArgumentException exception)
+    {
+        return InvalidProduct(exception.Message);
+    }
+    catch (KeyNotFoundException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Product not found.");
     }
 }
 
@@ -812,6 +882,23 @@ static async Task<IResult> AnalyzeNutritionLabelAsync(
             statusCode: StatusCodes.Status504GatewayTimeout,
             title: "Label analysis timed out.");
     }
+}
+
+static IResult GetLabelPhoto(
+    string fileName,
+    LabelPhotoStore photoStore)
+{
+    StoredLabelPhoto? photo = photoStore.Find($"label-photo:{fileName}");
+
+    return photo is null
+        ? Results.Problem(
+            detail: "The saved label photo was not found.",
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Label photo not found.")
+        : Results.File(
+            photo.FilePath,
+            photo.MediaType,
+            enableRangeProcessing: true);
 }
 
 static async Task<IResult> FindLocalProductsAsync(
@@ -978,7 +1065,8 @@ static MealEntryResponse MapMealEntryResponse(MealEntry entry)
             entry.Nutrition.Calories,
             entry.Nutrition.ProteinGrams,
             entry.Nutrition.FatGrams,
-            entry.Nutrition.CarbohydratesGrams));
+            entry.Nutrition.CarbohydratesGrams),
+        entry.Quality.ToString());
 }
 
 static IResult MealSessionNotFound(Guid id)
@@ -1030,12 +1118,16 @@ static MealDraftResponse MapResponse(
                 new IngredientDraftResponse(
                     ingredient.ProductName,
                     ingredient.WeightInGrams,
-                    ingredient.WeightQuality.ToString()));
+                    ingredient.WeightQuality.ToString(),
+                    ingredient.RemovedWeightInGrams,
+                    ingredient.RemovedWeightQuality.ToString(),
+                    ingredient.IncludedWeightInGrams));
         }
 
         List<PortionDraftResponse> portions = dish.Portions
             .Select(portion => new PortionDraftResponse(
                 portion.WeightInGrams,
+                portion.FractionOfDish,
                 portion.WeightQuality.ToString()))
             .ToList();
 

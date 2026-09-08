@@ -20,12 +20,16 @@ public sealed class OpenAiMealParserTests
                     {
                       "productName": "Говядина",
                       "weightInGrams": 600,
-                      "weightQuality": "estimated"
+                      "weightQuality": "estimated",
+                      "removedWeightInGrams": 50,
+                      "removedWeightQuality": "exact"
                     },
                     {
                       "productName": "Овощная смесь",
                       "weightInGrams": null,
-                      "weightQuality": "unknown"
+                      "weightQuality": "unknown",
+                      "removedWeightInGrams": 0,
+                      "removedWeightQuality": "exact"
                     }
                   ],
                   "finalWeightInGrams": 1180,
@@ -33,6 +37,7 @@ public sealed class OpenAiMealParserTests
                   "portions": [
                     {
                       "weightInGrams": 350,
+                      "fractionOfDish": null,
                       "weightQuality": "exact"
                     }
                   ]
@@ -59,6 +64,8 @@ public sealed class OpenAiMealParserTests
         Assert.Equal("Рагу", dish.Name);
         Assert.Equal(600m, dish.Ingredients[0].WeightInGrams);
         Assert.Equal(DataQuality.Estimated, dish.Ingredients[0].WeightQuality);
+        Assert.Equal(50m, dish.Ingredients[0].RemovedWeightInGrams);
+        Assert.Equal(550m, dish.Ingredients[0].IncludedWeightInGrams);
         Assert.Null(dish.Ingredients[1].WeightInGrams);
         Assert.Equal(DataQuality.Unknown, dish.Ingredients[1].WeightQuality);
         Assert.Equal(1180m, dish.FinalWeightInGrams);
@@ -77,6 +84,10 @@ public sealed class OpenAiMealParserTests
                 .GetProperty("format")
                 .GetProperty("type")
                 .GetString());
+        Assert.Contains(
+            "one-ingredient dish",
+            root.GetProperty("instructions").GetString(),
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "calories",
             root.GetProperty("text")
@@ -99,6 +110,59 @@ public sealed class OpenAiMealParserTests
         RecordingHttpMessageHandler handler = new RecordingHttpMessageHandler(
             HttpStatusCode.OK,
             CreateOpenAiResponse("{ not json }"));
+        OpenAiMealParser parser = CreateParser(handler);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => parser.ParseAsync(CreateReadySession("Message")));
+    }
+
+    [Fact]
+    public async Task ParseAsync_WithFractionalPortion_PreservesFractionForDomainCalculation()
+    {
+        string structuredOutput = """
+            {
+              "dishes": [{
+                "name": "Рагу",
+                "ingredients": [{
+                  "productName": "Овощи",
+                  "weightInGrams": 600,
+                  "weightQuality": "exact",
+                  "removedWeightInGrams": 0,
+                  "removedWeightQuality": "exact"
+                }],
+                "finalWeightInGrams": 500,
+                "finalWeightQuality": "exact",
+                "portions": [{
+                  "weightInGrams": null,
+                  "fractionOfDish": 0.5,
+                  "weightQuality": "exact"
+                }]
+              }],
+              "clarificationQuestions": []
+            }
+            """;
+        RecordingHttpMessageHandler handler = new RecordingHttpMessageHandler(
+            HttpStatusCode.OK,
+            CreateOpenAiResponse(structuredOutput));
+        OpenAiMealParser parser = CreateParser(handler);
+
+        MealDraft draft = await parser.ParseAsync(
+            CreateReadySession("Съел половину рагу."));
+        PortionDraft portion = Assert.Single(Assert.Single(draft.Dishes).Portions);
+
+        Assert.Null(portion.WeightInGrams);
+        Assert.Equal(0.5m, portion.FractionOfDish);
+        Assert.Equal(250m, portion.ResolveWeightInGrams(500m));
+    }
+
+    [Theory]
+    [MemberData(nameof(StructuredOutputsWithNullArrayItems))]
+    public async Task ParseAsync_WithNullArrayItem_ThrowsInvalidDataException(
+        string structuredOutput)
+    {
+        RecordingHttpMessageHandler handler = new RecordingHttpMessageHandler(
+            HttpStatusCode.OK,
+            CreateOpenAiResponse(structuredOutput));
         OpenAiMealParser parser = CreateParser(handler);
 
         await Assert.ThrowsAsync<InvalidDataException>(
@@ -154,6 +218,58 @@ public sealed class OpenAiMealParserTests
 
         return new OpenAiMealParser(httpClient, "gpt-test");
     }
+
+    public static TheoryData<string> StructuredOutputsWithNullArrayItems =>
+        new()
+        {
+            """
+            { "dishes": [null], "clarificationQuestions": [] }
+            """,
+            """
+            {
+              "dishes": [{
+                "name": "Блюдо",
+                "ingredients": [null],
+                "finalWeightInGrams": null,
+                "finalWeightQuality": "unknown",
+                "portions": []
+              }],
+              "clarificationQuestions": []
+            }
+            """,
+            """
+            {
+              "dishes": [{
+                "name": "Блюдо",
+                "ingredients": [{
+                  "productName": "Продукт",
+                  "weightInGrams": 100,
+                  "weightQuality": "exact"
+                }],
+                "finalWeightInGrams": 100,
+                "finalWeightQuality": "exact",
+                "portions": [null]
+              }],
+              "clarificationQuestions": []
+            }
+            """,
+            """
+            {
+              "dishes": [{
+                "name": "Блюдо",
+                "ingredients": [{
+                  "productName": "Продукт",
+                  "weightInGrams": 100,
+                  "weightQuality": "exact"
+                }],
+                "finalWeightInGrams": 100,
+                "finalWeightQuality": "exact",
+                "portions": []
+              }],
+              "clarificationQuestions": [null]
+            }
+            """
+        };
 
     private static CaptureSession CreateReadySession(params string[] messages)
     {

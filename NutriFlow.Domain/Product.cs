@@ -12,7 +12,18 @@ public sealed class Product
         ArgumentNullException.ThrowIfNull(nutritionPer100Grams);
         ArgumentNullException.ThrowIfNull(source);
 
-        Name = name.Trim();
+        string normalizedName = name.Trim();
+
+        if (normalizedName.Length > 200)
+        {
+            throw new ArgumentException(
+                "A product name cannot exceed 200 characters.",
+                nameof(name));
+        }
+
+        ValidateNutritionPer100Grams(nutritionPer100Grams);
+
+        Name = normalizedName;
         NutritionPer100Grams = nutritionPer100Grams;
         Source = source;
         Barcode = barcode is null
@@ -24,4 +35,23 @@ public sealed class Product
     public NutritionValues NutritionPer100Grams { get; }
     public NutritionSource Source { get; }
     public string? Barcode { get; }
+
+    private static void ValidateNutritionPer100Grams(NutritionValues nutrition)
+    {
+        if (nutrition.Calories > 1000m)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(nutrition),
+                "Calories per 100 grams cannot exceed 1000 kcal.");
+        }
+
+        if (nutrition.ProteinGrams > 100m ||
+            nutrition.FatGrams > 100m ||
+            nutrition.CarbohydratesGrams > 100m)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(nutrition),
+                "Each macronutrient per 100 grams cannot exceed 100 grams.");
+        }
+    }
 }

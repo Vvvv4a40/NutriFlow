@@ -68,6 +68,7 @@ public sealed class MealSessionStore
 
     public async Task<StoredMealSession> ReplaceDraftAsync(
         Guid id,
+        string expectedPreviewToken,
         IReadOnlyList<string> messages,
         MealDraft draft,
         string previewJson,
@@ -77,56 +78,76 @@ public sealed class MealSessionStore
     {
         ValidateMessages(messages);
         ArgumentNullException.ThrowIfNull(draft);
+        ValidatePreviewToken(expectedPreviewToken, nameof(expectedPreviewToken));
         ValidatePreview(previewJson, previewToken);
         ValidateEditableStatus(status);
 
-        MealSessionRecord record = await _dbContext.MealSessions
-            .SingleOrDefaultAsync(session => session.Id == id, cancellationToken) ??
-            throw new KeyNotFoundException($"Meal session '{id}' was not found.");
+        string messagesJson = JsonSerializer.Serialize(messages, SerializerOptions);
+        string draftJson = SerializeDraft(draft);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        int updatedCount = await _dbContext.MealSessions
+            .Where(session =>
+                session.Id == id &&
+                session.Status != MealSessionStatus.Confirmed &&
+                session.PreviewToken == expectedPreviewToken)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(session => session.MessagesJson, messagesJson)
+                    .SetProperty(session => session.DraftJson, draftJson)
+                    .SetProperty(session => session.PreviewJson, previewJson)
+                    .SetProperty(session => session.PreviewToken, previewToken)
+                    .SetProperty(session => session.Status, status)
+                    .SetProperty(session => session.UpdatedAtUtc, now),
+                cancellationToken);
 
-        if (record.Status == MealSessionStatus.Confirmed)
+        if (updatedCount == 0)
         {
-            throw new InvalidOperationException(
-                "A confirmed meal session cannot be changed.");
+            await ThrowWriteFailureAsync(id, cancellationToken);
         }
 
-        record.MessagesJson = JsonSerializer.Serialize(messages, SerializerOptions);
-        record.DraftJson = SerializeDraft(draft);
-        record.PreviewJson = previewJson;
-        record.PreviewToken = previewToken;
-        record.Status = status;
-        record.UpdatedAtUtc = DateTimeOffset.UtcNow;
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        MealSessionRecord record = await _dbContext.MealSessions
+            .AsNoTracking()
+            .SingleAsync(session => session.Id == id, cancellationToken);
 
         return MapSession(record);
     }
 
-    public async Task UpdatePreviewAsync(
+    public async Task<StoredMealSession> UpdatePreviewAsync(
         Guid id,
+        string expectedPreviewToken,
         string previewJson,
         string previewToken,
         MealSessionStatus status,
         CancellationToken cancellationToken = default)
     {
+        ValidatePreviewToken(expectedPreviewToken, nameof(expectedPreviewToken));
         ValidatePreview(previewJson, previewToken);
         ValidateEditableStatus(status);
 
-        MealSessionRecord record = await _dbContext.MealSessions
-            .SingleOrDefaultAsync(session => session.Id == id, cancellationToken) ??
-            throw new KeyNotFoundException($"Meal session '{id}' was not found.");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        int updatedCount = await _dbContext.MealSessions
+            .Where(session =>
+                session.Id == id &&
+                session.Status != MealSessionStatus.Confirmed &&
+                session.PreviewToken == expectedPreviewToken)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(session => session.PreviewJson, previewJson)
+                    .SetProperty(session => session.PreviewToken, previewToken)
+                    .SetProperty(session => session.Status, status)
+                    .SetProperty(session => session.UpdatedAtUtc, now),
+                cancellationToken);
 
-        if (record.Status == MealSessionStatus.Confirmed)
+        if (updatedCount == 0)
         {
-            throw new InvalidOperationException(
-                "A confirmed meal session cannot be changed.");
+            await ThrowWriteFailureAsync(id, cancellationToken);
         }
 
-        record.PreviewJson = previewJson;
-        record.PreviewToken = previewToken;
-        record.Status = status;
-        record.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        MealSessionRecord record = await _dbContext.MealSessions
+            .AsNoTracking()
+            .SingleAsync(session => session.Id == id, cancellationToken);
+
+        return MapSession(record);
     }
 
     private static StoredMealSession MapSession(MealSessionRecord record)
@@ -162,11 +183,15 @@ public sealed class MealSessionStore
                 dish.Ingredients.Select(ingredient => new StoredIngredient(
                     ingredient.ProductName,
                     ingredient.WeightInGrams,
-                    ingredient.WeightQuality)).ToArray(),
+                    ingredient.WeightQuality,
+                    ingredient.RemovedWeightInGrams,
+                    ingredient.RemovedWeightQuality,
+                    RemovalSpecified: true)).ToArray(),
                 dish.FinalWeightInGrams,
                 dish.FinalWeightQuality,
                 dish.Portions.Select(portion => new StoredPortion(
                     portion.WeightInGrams,
+                    portion.FractionOfDish,
                     portion.WeightQuality)).ToArray())).ToArray(),
             draft.ClarificationQuestions.ToArray());
 
@@ -211,7 +236,13 @@ public sealed class MealSessionStore
                         return new IngredientDraft(
                             validIngredient.ProductName,
                             validIngredient.WeightInGrams,
-                            validIngredient.WeightQuality);
+                            validIngredient.WeightQuality,
+                            validIngredient.RemovalSpecified
+                                ? validIngredient.RemovedWeightInGrams
+                                : 0m,
+                            validIngredient.RemovalSpecified
+                                ? validIngredient.RemovedWeightQuality
+                                : DataQuality.Exact);
                     }).ToArray(),
                     validDish.FinalWeightInGrams,
                     validDish.FinalWeightQuality,
@@ -219,9 +250,22 @@ public sealed class MealSessionStore
                     {
                         StoredPortion validPortion = portion!;
 
-                        return new PortionDraft(
-                            validPortion.WeightInGrams,
-                            validPortion.WeightQuality);
+                        if (validPortion.WeightInGrams is not null)
+                        {
+                            return new PortionDraft(
+                                validPortion.WeightInGrams.Value,
+                                validPortion.WeightQuality);
+                        }
+
+                        if (validPortion.FractionOfDish is not null)
+                        {
+                            return PortionDraft.FromFraction(
+                                validPortion.FractionOfDish.Value,
+                                validPortion.WeightQuality);
+                        }
+
+                        throw new InvalidDataException(
+                            "Stored portion has neither a weight nor a fraction.");
                     }).ToArray());
             }).ToList();
 
@@ -256,15 +300,42 @@ public sealed class MealSessionStore
     private static void ValidatePreview(string previewJson, string previewToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(previewJson);
-        ArgumentException.ThrowIfNullOrWhiteSpace(previewToken);
+        ValidatePreviewToken(previewToken, nameof(previewToken));
+    }
+
+    private static void ValidatePreviewToken(string previewToken, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(previewToken, parameterName);
 
         if (previewToken.Length != 64 ||
             previewToken.Any(character => !Uri.IsHexDigit(character)))
         {
             throw new ArgumentException(
                 "A preview token must be a 64-character hexadecimal SHA-256 value.",
-                nameof(previewToken));
+                parameterName);
         }
+    }
+
+    private async Task ThrowWriteFailureAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        MealSessionStatus? currentStatus = await _dbContext.MealSessions
+            .AsNoTracking()
+            .Where(session => session.Id == id)
+            .Select(session => (MealSessionStatus?)session.Status)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (currentStatus is null)
+        {
+            throw new KeyNotFoundException($"Meal session '{id}' was not found.");
+        }
+
+        string message = currentStatus == MealSessionStatus.Confirmed
+            ? "A confirmed meal session cannot be changed."
+            : "The meal session changed in another request. Reload it before editing again.";
+
+        throw new MealSessionConflictException(message);
     }
 
     private static void ValidateEditableStatus(MealSessionStatus status)
@@ -289,9 +360,13 @@ public sealed class MealSessionStore
     private sealed record StoredIngredient(
         string ProductName,
         decimal? WeightInGrams,
-        DataQuality WeightQuality);
+        DataQuality WeightQuality,
+        decimal? RemovedWeightInGrams,
+        DataQuality RemovedWeightQuality,
+        bool RemovalSpecified);
 
     private sealed record StoredPortion(
-        decimal WeightInGrams,
+        decimal? WeightInGrams,
+        decimal? FractionOfDish,
         DataQuality WeightQuality);
 }

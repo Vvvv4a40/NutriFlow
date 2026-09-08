@@ -36,7 +36,9 @@ public sealed record DishPreviewResponse(
     decimal? FinalWeightInGrams,
     string FinalWeightQuality,
     NutritionResponse? TotalNutrition,
+    string? TotalNutritionQuality,
     NutritionResponse? NutritionPer100Grams,
+    string? NutritionPer100GramsQuality,
     IReadOnlyList<IngredientPreviewResponse> Ingredients,
     IReadOnlyList<PortionPreviewResponse> Portions);
 
@@ -44,10 +46,15 @@ public sealed record IngredientPreviewResponse(
     string ProductName,
     decimal? WeightInGrams,
     string WeightQuality,
+    decimal? RemovedWeightInGrams,
+    string RemovedWeightQuality,
+    decimal? IncludedWeightInGrams,
     ProductResponse? ResolvedProduct,
     NutritionResponse? Nutrition);
 
 public sealed record PortionPreviewResponse(
-    decimal WeightInGrams,
+    decimal? WeightInGrams,
+    decimal? FractionOfDish,
     string WeightQuality,
-    NutritionResponse? Nutrition);
+    NutritionResponse? Nutrition,
+    string? NutritionQuality);

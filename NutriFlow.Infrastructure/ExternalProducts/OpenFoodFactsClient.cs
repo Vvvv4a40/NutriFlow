@@ -58,6 +58,31 @@ public sealed class OpenFoodFactsClient : IExternalProductProvider
                 exception);
         }
 
+        if (!string.IsNullOrWhiteSpace(payload?.Code))
+        {
+            string responseBarcode;
+
+            try
+            {
+                responseBarcode = ProductBarcode.Normalize(payload.Code);
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidDataException(
+                    "Open Food Facts returned an invalid barcode.",
+                    exception);
+            }
+
+            if (!string.Equals(
+                    responseBarcode,
+                    normalizedBarcode,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "Open Food Facts returned a different barcode than requested.");
+            }
+        }
+
         if (payload?.Product is null)
         {
             return null;
@@ -131,6 +156,8 @@ public sealed class OpenFoodFactsClient : IExternalProductProvider
     }
 
     private sealed record OpenFoodFactsResponse(
+        [property: JsonPropertyName("code")]
+        string? Code,
         [property: JsonPropertyName("product")]
         OpenFoodFactsProduct? Product);
 

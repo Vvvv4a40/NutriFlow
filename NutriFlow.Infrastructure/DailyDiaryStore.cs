@@ -22,22 +22,62 @@ public sealed class DailyDiaryStore
     {
         ArgumentNullException.ThrowIfNull(goal);
 
-        DailyGoalRecord? record = await _dbContext.DailyGoals
-            .SingleOrDefaultAsync(item => item.Date == date, cancellationToken);
+        NutritionValues nutrition = goal.TargetNutrition;
+        int updatedCount = await _dbContext.DailyGoals
+            .Where(item => item.Date == date)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.Calories, nutrition.Calories)
+                    .SetProperty(
+                        item => item.ProteinGrams,
+                        nutrition.ProteinGrams)
+                    .SetProperty(item => item.FatGrams, nutrition.FatGrams)
+                    .SetProperty(
+                        item => item.CarbohydratesGrams,
+                        nutrition.CarbohydratesGrams),
+                cancellationToken);
 
-        if (record is null)
+        if (updatedCount > 0)
         {
-            record = new DailyGoalRecord { Date = date };
-            _dbContext.DailyGoals.Add(record);
+            return;
         }
 
-        record.Calories = goal.TargetNutrition.Calories;
-        record.ProteinGrams = goal.TargetNutrition.ProteinGrams;
-        record.FatGrams = goal.TargetNutrition.FatGrams;
-        record.CarbohydratesGrams =
-            goal.TargetNutrition.CarbohydratesGrams;
+        DailyGoalRecord record = new DailyGoalRecord
+        {
+            Date = date,
+            Calories = nutrition.Calories,
+            ProteinGrams = nutrition.ProteinGrams,
+            FatGrams = nutrition.FatGrams,
+            CarbohydratesGrams = nutrition.CarbohydratesGrams
+        };
+        _dbContext.DailyGoals.Add(record);
 
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            _dbContext.ChangeTracker.Clear();
+            updatedCount = await _dbContext.DailyGoals
+                .Where(item => item.Date == date)
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(item => item.Calories, nutrition.Calories)
+                        .SetProperty(
+                            item => item.ProteinGrams,
+                            nutrition.ProteinGrams)
+                        .SetProperty(item => item.FatGrams, nutrition.FatGrams)
+                        .SetProperty(
+                            item => item.CarbohydratesGrams,
+                            nutrition.CarbohydratesGrams),
+                    cancellationToken);
+
+            if (updatedCount == 0)
+            {
+                throw;
+            }
+        }
     }
 
     public async Task<DailyGoal?> FindGoalAsync(
@@ -164,6 +204,7 @@ public sealed class DailyDiaryStore
                 ProteinGrams = entry.Nutrition.ProteinGrams,
                 FatGrams = entry.Nutrition.FatGrams,
                 CarbohydratesGrams = entry.Nutrition.CarbohydratesGrams,
+                Quality = entry.Quality,
                 CreatedAtUtc = now
             });
         }
@@ -183,6 +224,7 @@ public sealed class DailyDiaryStore
                 record.Calories,
                 record.ProteinGrams,
                 record.FatGrams,
-                record.CarbohydratesGrams));
+                record.CarbohydratesGrams),
+            record.Quality);
     }
 }

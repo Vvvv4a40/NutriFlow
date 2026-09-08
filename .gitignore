@@ -7,3 +7,10 @@
 *.db-shm
 *.db-wal
 /NutriFlow.Api/data/
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+*.pfx
+*.pem
+*.key

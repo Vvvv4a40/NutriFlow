@@ -10,6 +10,7 @@ public sealed class NutriFlowDbContext : DbContext
     }
 
     internal DbSet<ProductRecord> Products => Set<ProductRecord>();
+    internal DbSet<ProductAliasRecord> ProductAliases => Set<ProductAliasRecord>();
     internal DbSet<MealSessionRecord> MealSessions => Set<MealSessionRecord>();
     internal DbSet<MealEntryRecord> MealEntries => Set<MealEntryRecord>();
     internal DbSet<DailyGoalRecord> DailyGoals => Set<DailyGoalRecord>();
@@ -55,6 +56,28 @@ public sealed class NutriFlowDbContext : DbContext
                 .HasMaxLength(2048);
         });
 
+        modelBuilder.Entity<ProductAliasRecord>(entity =>
+        {
+            entity.ToTable("ProductAliases");
+            entity.HasKey(alias => alias.Id);
+            entity.Property(alias => alias.Name)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.Property(alias => alias.NormalizedName)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.HasIndex(alias => alias.NormalizedName);
+            entity.HasIndex(alias => new
+            {
+                alias.ProductId,
+                alias.NormalizedName
+            }).IsUnique();
+            entity.HasOne(alias => alias.Product)
+                .WithMany(product => product.Aliases)
+                .HasForeignKey(alias => alias.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<MealSessionRecord>(entity =>
         {
             entity.ToTable("MealSessions");
@@ -85,6 +108,7 @@ public sealed class NutriFlowDbContext : DbContext
             entity.Property(entry => entry.ProteinGrams).HasColumnType("TEXT");
             entity.Property(entry => entry.FatGrams).HasColumnType("TEXT");
             entity.Property(entry => entry.CarbohydratesGrams).HasColumnType("TEXT");
+            entity.Property(entry => entry.Quality).HasConversion<int>();
             entity.Property(entry => entry.CreatedAtUtc).HasColumnType("TEXT");
             entity.HasIndex(entry => new
             {

@@ -17,4 +17,5 @@ public sealed record DailyProgressResponse(
 public sealed record MealEntryResponse(
     string Name,
     decimal WeightInGrams,
-    NutritionResponse Nutrition);
+    NutritionResponse Nutrition,
+    string Quality);
