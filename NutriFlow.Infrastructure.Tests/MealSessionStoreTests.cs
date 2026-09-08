@@ -100,6 +100,7 @@ public sealed class MealSessionStoreTests
             MealSessionStore store = new MealSessionStore(context);
             await store.ReplaceDraftAsync(
                 initial.Id,
+                InitialToken,
                 ["Начал готовить", "Готовое блюдо весит 800 г"],
                 replacement,
                 """{"version":2,"canConfirm":true}""",
@@ -146,6 +147,7 @@ public sealed class MealSessionStoreTests
             MealSessionStore store = new MealSessionStore(context);
             await store.UpdatePreviewAsync(
                 initial.Id,
+                InitialToken,
                 """{"products":"resolved"}""",
                 UpdatedToken,
                 MealSessionStatus.ReadyForConfirmation);
@@ -197,20 +199,72 @@ public sealed class MealSessionStoreTests
         await using NutriFlowDbContext editContext = database.CreateContext();
         MealSessionStore editStore = new MealSessionStore(editContext);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<MealSessionConflictException>(() =>
             editStore.ReplaceDraftAsync(
                 session.Id,
+                InitialToken,
                 ["Изменённое сообщение"],
                 CreateReadyDraft(),
                 """{"changed":true}""",
                 UpdatedToken,
                 MealSessionStatus.ReadyForConfirmation));
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<MealSessionConflictException>(() =>
             editStore.UpdatePreviewAsync(
                 session.Id,
+                InitialToken,
                 """{"changed":true}""",
                 UpdatedToken,
                 MealSessionStatus.ReadyForConfirmation));
+    }
+
+    [Fact]
+    public async Task UpdatePreviewAsync_WithStaleToken_DoesNotOverwriteNewerPreview()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        StoredMealSession initial;
+
+        await using (NutriFlowDbContext createContext = database.CreateContext())
+        {
+            initial = await new MealSessionStore(createContext).CreateAsync(
+                ["Готовлю рагу"],
+                CreateReadyDraft(),
+                """{"version":1}""",
+                InitialToken,
+                MealSessionStatus.NeedsProducts,
+                new DateOnly(2026, 9, 6));
+        }
+
+        await using (NutriFlowDbContext firstContext = database.CreateContext())
+        {
+            await new MealSessionStore(firstContext).UpdatePreviewAsync(
+                initial.Id,
+                InitialToken,
+                """{"version":2}""",
+                UpdatedToken,
+                MealSessionStatus.ReadyForConfirmation);
+        }
+
+        await using (NutriFlowDbContext staleContext = database.CreateContext())
+        {
+            MealSessionStore staleStore = new MealSessionStore(staleContext);
+
+            await Assert.ThrowsAsync<MealSessionConflictException>(() =>
+                staleStore.UpdatePreviewAsync(
+                    initial.Id,
+                    InitialToken,
+                    """{"version":"stale"}""",
+                    new string('c', 64),
+                    MealSessionStatus.NeedsClarification));
+        }
+
+        await using NutriFlowDbContext readContext = database.CreateContext();
+        StoredMealSession actual = Assert.IsType<StoredMealSession>(
+            await new MealSessionStore(readContext).FindAsync(initial.Id));
+
+        Assert.Equal("""{"version":2}""", actual.PreviewJson);
+        Assert.Equal(UpdatedToken, actual.PreviewToken);
+        Assert.Equal(MealSessionStatus.ReadyForConfirmation, actual.Status);
     }
 
     private static MealDraft CreateIncompleteDraft()

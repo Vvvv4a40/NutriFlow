@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NutriFlow.Api.Contracts;
+using NutriFlow.Domain;
 using NutriFlow.Infrastructure.LabelPhotos;
 
 namespace NutriFlow.Api.Tests;
@@ -55,6 +57,22 @@ public sealed class MealWorkflowApiTests
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
         Assert.Equal("Healthy", await live.Content.ReadAsStringAsync());
         Assert.Equal("Healthy", await ready.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Capabilities_WithFakeProvider_ReportsDemoLimitations()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+
+        ApplicationCapabilitiesResponse capabilities =
+            await client.GetFromJsonAsync<ApplicationCapabilitiesResponse>(
+                "/api/capabilities",
+                JsonOptions) ?? throw new InvalidDataException();
+
+        Assert.Equal("Fake", capabilities.AiProvider);
+        Assert.False(capabilities.SupportsFreeText);
+        Assert.False(capabilities.SupportsLabelPhotos);
     }
 
     [Fact]
@@ -141,27 +159,41 @@ public sealed class MealWorkflowApiTests
         Assert.Empty(session.Issues);
         DishPreviewResponse dish = Assert.Single(session.Dishes);
         AssertNutrition(dish.TotalNutrition, 400m, 25m, 20m, 30m);
+        Assert.Equal("Unknown", dish.TotalNutritionQuality);
         AssertNutrition(dish.NutritionPer100Grams, 160m, 10m, 8m, 12m);
+        Assert.Equal("Unknown", dish.NutritionPer100GramsQuality);
         Assert.Collection(
             dish.Portions,
-            portion => AssertNutrition(
-                portion.Nutrition,
-                200m,
-                12.5m,
-                10m,
-                15m),
-            portion => AssertNutrition(
-                portion.Nutrition,
-                100m,
-                6.25m,
-                5m,
-                7.5m),
-            portion => AssertNutrition(
-                portion.Nutrition,
-                100m,
-                6.25m,
-                5m,
-                7.5m));
+            portion =>
+            {
+                AssertNutrition(
+                    portion.Nutrition,
+                    200m,
+                    12.5m,
+                    10m,
+                    15m);
+                Assert.Equal("Unknown", portion.NutritionQuality);
+            },
+            portion =>
+            {
+                AssertNutrition(
+                    portion.Nutrition,
+                    100m,
+                    6.25m,
+                    5m,
+                    7.5m);
+                Assert.Equal("Unknown", portion.NutritionQuality);
+            },
+            portion =>
+            {
+                AssertNutrition(
+                    portion.Nutrition,
+                    100m,
+                    6.25m,
+                    5m,
+                    7.5m);
+                Assert.Equal("Unknown", portion.NutritionQuality);
+            });
 
         HttpResponseMessage confirmationResponse = await client.PostAsJsonAsync(
             $"/api/meal-sessions/{session.Id}/confirm",
@@ -174,6 +206,9 @@ public sealed class MealWorkflowApiTests
         Assert.Equal("Confirmed", confirmation.Session.Status);
         Assert.False(confirmation.Session.CanConfirm);
         Assert.Equal(3, confirmation.Entries.Count);
+        Assert.All(
+            confirmation.Entries,
+            entry => Assert.Equal("Unknown", entry.Quality));
 
         DailyProgressResponse progress = await client.GetFromJsonAsync<
             DailyProgressResponse>(
@@ -184,6 +219,9 @@ public sealed class MealWorkflowApiTests
         AssertNutrition(progress.Remaining, 1600m, 75m, 50m, 220m);
         AssertNutrition(progress.Exceeded, 0m, 0m, 0m, 0m);
         Assert.Equal(3, progress.Entries.Count);
+        Assert.All(
+            progress.Entries,
+            entry => Assert.Equal("Unknown", entry.Quality));
 
         HttpResponseMessage repeatedResponse = await client.PostAsJsonAsync(
             $"/api/meal-sessions/{session.Id}/confirm",
@@ -359,6 +397,205 @@ public sealed class MealWorkflowApiTests
     }
 
     [Fact]
+    public async Task BarcodeAlias_MakesCapturedIngredientNameResolvable()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+        const string barcode = "12345678";
+
+        HttpResponseMessage productResponse = await client.PostAsJsonAsync(
+            "/api/products/manual",
+            new CreateManualProductRequest(
+                "Manufacturer milk",
+                60m,
+                3m,
+                3m,
+                4m,
+                IsEstimated: false,
+                Barcode: barcode));
+        HttpResponseMessage aliasResponse = await client.PostAsJsonAsync(
+            "/api/products/aliases",
+            new AddProductAliasRequest(barcode, "молоко"));
+        IReadOnlyList<ProductResponse>? matches =
+            await client.GetFromJsonAsync<IReadOnlyList<ProductResponse>>(
+                "/api/products?name=%D0%BC%D0%BE%D0%BB%D0%BE%D0%BA%D0%BE",
+                JsonOptions);
+
+        Assert.Equal(HttpStatusCode.Created, productResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, aliasResponse.StatusCode);
+        Assert.Equal("Manufacturer milk", Assert.Single(matches!).Name);
+    }
+
+    [Fact]
+    public async Task CreateManualProduct_WithImpossibleNutrition_ReturnsBadRequest()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/products/manual",
+            new CreateManualProductRequest(
+                "Invalid product",
+                1001m,
+                10m,
+                10m,
+                10m,
+                IsEstimated: false));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Preview_WithoutPortion_StillCalculatesDishTotalAndPer100Grams()
+    {
+        MealDraft draft = new MealDraft(
+            [
+                new DishDraft(
+                    "Тестовое блюдо",
+                    [new IngredientDraft("Тестовый продукт", 200m)],
+                    200m,
+                    DataQuality.Exact,
+                    [])
+            ],
+            []);
+        await using TestApiFactory factory = new TestApiFactory(
+            seedDemoData: false,
+            parser: new StaticMealParser(draft));
+        using HttpClient client = factory.CreateClient();
+        await AddTestProductAsync(client);
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/meal-sessions",
+            new CreateMealSessionRequest(
+                ["Тестовое сообщение"],
+                new DateOnly(2026, 9, 7)));
+        MealSessionResponse session = await ReadAsync<MealSessionResponse>(response);
+        DishPreviewResponse dish = Assert.Single(session.Dishes);
+
+        Assert.Equal("NeedsClarification", session.Status);
+        Assert.Contains(session.Issues, issue => issue.Code == "portion_missing");
+        AssertNutrition(dish.TotalNutrition, 200m, 20m, 8m, 12m);
+        AssertNutrition(
+            dish.NutritionPer100Grams,
+            100m,
+            10m,
+            4m,
+            6m);
+    }
+
+    [Fact]
+    public async Task Preview_WithoutFinalWeight_StillCalculatesIngredientTotal()
+    {
+        MealDraft draft = new MealDraft(
+            [
+                new DishDraft(
+                    "Тестовое блюдо",
+                    [new IngredientDraft("Тестовый продукт", 200m)],
+                    null,
+                    DataQuality.Unknown,
+                    [new PortionDraft(50m)])
+            ],
+            []);
+        await using TestApiFactory factory = new TestApiFactory(
+            seedDemoData: false,
+            parser: new StaticMealParser(draft));
+        using HttpClient client = factory.CreateClient();
+        await AddTestProductAsync(client);
+
+        MealSessionResponse session = await ReadAsync<MealSessionResponse>(
+            await client.PostAsJsonAsync(
+                "/api/meal-sessions",
+                new CreateMealSessionRequest(
+                    ["Тестовое сообщение"],
+                    new DateOnly(2026, 9, 7))));
+        DishPreviewResponse dish = Assert.Single(session.Dishes);
+
+        Assert.Equal("NeedsClarification", session.Status);
+        Assert.Contains(session.Issues, issue => issue.Code == "final_weight_missing");
+        AssertNutrition(dish.TotalNutrition, 200m, 20m, 8m, 12m);
+        Assert.Null(dish.NutritionPer100Grams);
+        Assert.Null(Assert.Single(dish.Portions).Nutrition);
+    }
+
+    [Fact]
+    public async Task Preview_WithRemovedIngredientWeight_UsesOnlyIncludedMass()
+    {
+        MealDraft draft = new MealDraft(
+            [
+                new DishDraft(
+                    "Тестовое блюдо",
+                    [
+                        new IngredientDraft(
+                            "Тестовый продукт",
+                            200m,
+                            DataQuality.Exact,
+                            50m,
+                            DataQuality.Exact)
+                    ],
+                    150m,
+                    DataQuality.Exact,
+                    [new PortionDraft(150m)])
+            ],
+            []);
+        await using TestApiFactory factory = new TestApiFactory(
+            seedDemoData: false,
+            parser: new StaticMealParser(draft));
+        using HttpClient client = factory.CreateClient();
+        await AddTestProductAsync(client);
+
+        MealSessionResponse session = await ReadAsync<MealSessionResponse>(
+            await client.PostAsJsonAsync(
+                "/api/meal-sessions",
+                new CreateMealSessionRequest(
+                    ["Добавил 200 г, затем удалил 50 г."],
+                    new DateOnly(2026, 9, 7))));
+        DishPreviewResponse dish = Assert.Single(session.Dishes);
+        IngredientPreviewResponse ingredient = Assert.Single(dish.Ingredients);
+
+        Assert.Equal("ReadyForConfirmation", session.Status);
+        Assert.Equal(50m, ingredient.RemovedWeightInGrams);
+        Assert.Equal(150m, ingredient.IncludedWeightInGrams);
+        AssertNutrition(dish.TotalNutrition, 150m, 15m, 6m, 9m);
+    }
+
+    [Fact]
+    public async Task Preview_WithFractionalPortion_CalculatesItsWeightAndNutrition()
+    {
+        MealDraft draft = new MealDraft(
+            [
+                new DishDraft(
+                    "Тестовое блюдо",
+                    [new IngredientDraft("Тестовый продукт", 200m)],
+                    200m,
+                    DataQuality.Exact,
+                    [PortionDraft.FromFraction(0.25m)])
+            ],
+            []);
+        await using TestApiFactory factory = new TestApiFactory(
+            seedDemoData: false,
+            parser: new StaticMealParser(draft));
+        using HttpClient client = factory.CreateClient();
+        await AddTestProductAsync(client);
+
+        MealSessionResponse created = await ReadAsync<MealSessionResponse>(
+            await client.PostAsJsonAsync(
+                "/api/meal-sessions",
+                new CreateMealSessionRequest(
+                    ["Съел четверть блюда."],
+                    new DateOnly(2026, 9, 7))));
+        MealSessionResponse session = await client.GetFromJsonAsync<MealSessionResponse>(
+            $"/api/meal-sessions/{created.Id}",
+            JsonOptions) ?? throw new InvalidDataException();
+        PortionPreviewResponse portion = Assert.Single(
+            Assert.Single(session.Dishes).Portions);
+
+        Assert.Equal("ReadyForConfirmation", session.Status);
+        Assert.Equal(50m, portion.WeightInGrams);
+        Assert.Equal(0.25m, portion.FractionOfDish);
+        AssertNutrition(portion.Nutrition, 50m, 5m, 2m, 3m);
+    }
+
+    [Fact]
     public async Task CreateProductFromLabel_PreservesPhotoProvenance()
     {
         await using TestApiFactory factory = new TestApiFactory();
@@ -383,17 +620,78 @@ public sealed class MealWorkflowApiTests
             "/api/products/from-label",
             new CreateLabelProductRequest(
                 photoReference,
+                NutritionBasis.Per100Grams,
                 "Творог с этикетки",
                 121m,
                 17m,
                 5m,
                 3m));
         ProductResponse product = await ReadAsync<ProductResponse>(response);
+        string fileName = photoReference["label-photo:".Length..];
+        HttpResponseMessage photoResponse = await client.GetAsync(
+            $"/api/label-photos/{Uri.EscapeDataString(fileName)}");
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Equal("LabelPhoto", product.SourceKind);
         Assert.Equal("Verified", product.DataQuality);
         Assert.Equal(photoReference, product.SourceReference);
+        Assert.Equal(HttpStatusCode.OK, photoResponse.StatusCode);
+        Assert.Equal(
+            "image/png",
+            photoResponse.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(
+            new byte[]
+            {
+                0x89, 0x50, 0x4E, 0x47,
+                0x0D, 0x0A, 0x1A, 0x0A
+            },
+            await photoResponse.Content.ReadAsByteArrayAsync());
+    }
+
+    [Theory]
+    [InlineData(NutritionBasis.Unknown)]
+    [InlineData(NutritionBasis.Per100Milliliters)]
+    [InlineData(NutritionBasis.PerServing)]
+    public async Task CreateProductFromLabel_RejectsNonGramBasis(
+        NutritionBasis basis)
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+        string photoReference;
+
+        await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            LabelPhotoStore store =
+                scope.ServiceProvider.GetRequiredService<LabelPhotoStore>();
+            ValidatedLabelPhoto photo = LabelPhotoValidator.Validate(
+                new byte[]
+                {
+                    0x89, 0x50, 0x4E, 0x47,
+                    0x0D, 0x0A, 0x1A, 0x0A
+                },
+                "image/png");
+            photoReference = await store.SaveAsync(photo);
+        }
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/products/from-label",
+            new CreateLabelProductRequest(
+                photoReference,
+                basis,
+                "Неверная база",
+                121m,
+                17m,
+                5m,
+                3m));
+        using JsonDocument problem = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            "Basis must be Per100Grams before label values can be saved.",
+            problem.RootElement.GetProperty("errors")
+                .GetProperty("product")[0]
+                .GetString());
     }
 
     private static async Task<MealSessionResponse> CreateDemoSessionAsync(
@@ -406,6 +704,21 @@ public sealed class MealWorkflowApiTests
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return await ReadAsync<MealSessionResponse>(response);
+    }
+
+    private static async Task AddTestProductAsync(HttpClient client)
+    {
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/products/manual",
+            new CreateManualProductRequest(
+                "Тестовый продукт",
+                100m,
+                10m,
+                4m,
+                6m,
+                IsEstimated: false));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     }
 
     private static async Task<T> ReadAsync<T>(HttpResponseMessage response)
@@ -438,13 +751,16 @@ public sealed class MealWorkflowApiTests
             Path.GetTempPath(),
             $"nutriflow-api-{Guid.NewGuid():N}");
         private readonly bool _seedDemoData;
+        private readonly IMealParser? _parser;
 
         public TestApiFactory(
             bool applyMigrations = true,
-            bool seedDemoData = true)
+            bool seedDemoData = true,
+            IMealParser? parser = null)
         {
             _applyMigrations = applyMigrations;
             _seedDemoData = seedDemoData;
+            _parser = parser;
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -463,6 +779,15 @@ public sealed class MealWorkflowApiTests
                 Path.Combine(_directoryPath, "label-photos"));
             builder.UseSetting("Ai:Provider", "Fake");
             builder.UseSetting("Demo:SeedData", _seedDemoData.ToString());
+
+            if (_parser is not null)
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IMealParser>();
+                    services.AddSingleton(_parser);
+                });
+            }
         }
 
         public override async ValueTask DisposeAsync()
@@ -474,6 +799,24 @@ public sealed class MealWorkflowApiTests
             {
                 Directory.Delete(_directoryPath, recursive: true);
             }
+        }
+    }
+
+    private sealed class StaticMealParser : IMealParser
+    {
+        private readonly MealDraft _draft;
+
+        public StaticMealParser(MealDraft draft)
+        {
+            _draft = draft;
+        }
+
+        public Task<MealDraft> ParseAsync(
+            CaptureSession session,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(_draft);
         }
     }
 }

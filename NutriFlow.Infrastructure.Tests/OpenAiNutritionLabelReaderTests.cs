@@ -43,6 +43,10 @@ public sealed class OpenAiNutritionLabelReaderTests
         using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
         JsonElement root = request.RootElement;
         Assert.False(root.GetProperty("store").GetBoolean());
+        string instructions = root.GetProperty("instructions").GetString()!;
+        Assert.Contains("kilocalories (kcal) only", instructions);
+        Assert.Contains("Never copy kilojoules (kJ)", instructions);
+        Assert.Contains("If only kJ is printed", instructions);
         JsonElement imageInput = root.GetProperty("input")[0]
             .GetProperty("content")[1];
         Assert.Equal("input_image", imageInput.GetProperty("type").GetString());
@@ -102,6 +106,39 @@ public sealed class OpenAiNutritionLabelReaderTests
         RecordingHttpMessageHandler handler = new RecordingHttpMessageHandler(
             HttpStatusCode.OK,
             CreateOpenAiResponse(structuredOutput));
+        OpenAiNutritionLabelReader reader = CreateReader(handler);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => reader.ReadAsync(new byte[] { 1 }, "image/jpeg"));
+    }
+
+    [Theory]
+    [InlineData(
+        """
+        {
+          "output": [
+            null,
+            { "content": [{ "type": "output_text", "text": "{}" }] }
+          ]
+        }
+        """)]
+    [InlineData(
+        """
+        {
+          "output": [{
+            "content": [
+              null,
+              { "type": "output_text", "text": "{}" }
+            ]
+          }]
+        }
+        """)]
+    public async Task ReadAsync_WithNullOutputArrayItem_ThrowsInvalidDataException(
+        string responseBody)
+    {
+        RecordingHttpMessageHandler handler = new RecordingHttpMessageHandler(
+            HttpStatusCode.OK,
+            responseBody);
         OpenAiNutritionLabelReader reader = CreateReader(handler);
 
         await Assert.ThrowsAsync<InvalidDataException>(

@@ -84,4 +84,44 @@ public sealed class IngredientDraftTests
                 100m,
                 DataQuality.Unknown));
     }
+
+    [Fact]
+    public void Constructor_WithRemovedWeight_CalculatesIncludedWeight()
+    {
+        IngredientDraft ingredient = new IngredientDraft(
+            "Product",
+            600m,
+            DataQuality.Estimated,
+            100m,
+            DataQuality.Exact);
+
+        Assert.Equal(100m, ingredient.RemovedWeightInGrams);
+        Assert.Equal(500m, ingredient.IncludedWeightInGrams);
+        Assert.Equal(DataQuality.Exact, ingredient.RemovedWeightQuality);
+    }
+
+    [Fact]
+    public void Constructor_WithUnknownRemovedWeight_LeavesIncludedWeightUnknown()
+    {
+        IngredientDraft ingredient = new IngredientDraft(
+            "Product",
+            600m,
+            DataQuality.Exact,
+            null,
+            DataQuality.Unknown);
+
+        Assert.Null(ingredient.IncludedWeightInGrams);
+    }
+
+    [Fact]
+    public void Constructor_WithRemovedWeightAboveOriginal_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new IngredientDraft(
+                "Product",
+                100m,
+                DataQuality.Exact,
+                101m,
+                DataQuality.Exact));
+    }
 }

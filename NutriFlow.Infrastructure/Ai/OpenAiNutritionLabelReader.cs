@@ -10,6 +10,9 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
 {
     private const string Instructions = """
         Extract nutrition facts exactly as printed on the product label image.
+        Calories must contain kilocalories (kcal) only. Never copy kilojoules (kJ)
+        into calories. If only kJ is printed, return null for calories and add a
+        compact clarification question.
         Prefer a table expressed per 100 grams when present. Do not convert between a serving,
         100 milliliters, and 100 grams. Do not infer or complete values that are not readable.
         Use null for every missing or unreadable value and add compact clarification questions.
@@ -184,10 +187,25 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
 
     private static string ExtractStructuredOutput(OpenAiResponse? response)
     {
-        string? outputText = response?.Output?
-            .SelectMany(item => item.Content ?? Array.Empty<OpenAiContent>())
+        if (response?.Output is null)
+        {
+            throw new InvalidDataException(
+                "OpenAI response does not contain structured label output.");
+        }
+
+        if (response.Output.Any(item =>
+                item is null ||
+                item.Content?.Any(content => content is null) == true))
+        {
+            throw new InvalidDataException(
+                "OpenAI response contains null output or content items.");
+        }
+
+        string? outputText = response.Output
+            .SelectMany(item =>
+                item!.Content ?? Array.Empty<OpenAiContent?>())
             .FirstOrDefault(content =>
-                content.Type == "output_text" &&
+                content!.Type == "output_text" &&
                 !string.IsNullOrWhiteSpace(content.Text))
             ?.Text;
 
@@ -210,11 +228,11 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
 
     private sealed record OpenAiResponse(
         [property: JsonPropertyName("output")]
-        IReadOnlyList<OpenAiOutputItem>? Output);
+        IReadOnlyList<OpenAiOutputItem?>? Output);
 
     private sealed record OpenAiOutputItem(
         [property: JsonPropertyName("content")]
-        IReadOnlyList<OpenAiContent>? Content);
+        IReadOnlyList<OpenAiContent?>? Content);
 
     private sealed record OpenAiContent(
         [property: JsonPropertyName("type")]

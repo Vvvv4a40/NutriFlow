@@ -16,4 +16,5 @@ internal sealed class ProductRecord
     public DataQuality SourceQuality { get; set; }
     public string SourceName { get; set; } = string.Empty;
     public string? SourceReference { get; set; }
+    public List<ProductAliasRecord> Aliases { get; set; } = new();
 }

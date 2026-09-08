@@ -149,6 +149,22 @@ public sealed class DishDraftTests
     }
 
     [Fact]
+    public void Constructor_WithFractions_ValidatesCombinedConsumedAmount()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new DishDraft(
+                "Dish",
+                CreateIngredients(),
+                200m,
+                DataQuality.Exact,
+                new List<PortionDraft>
+                {
+                    PortionDraft.FromFraction(0.75m),
+                    new PortionDraft(60m)
+                }));
+    }
+
+    [Fact]
     public void Constructor_WithUnknownFinalWeight_StoresIncompleteDraft()
     {
         DishDraft dish = new DishDraft(

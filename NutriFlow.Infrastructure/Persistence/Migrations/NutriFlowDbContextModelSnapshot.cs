@@ -71,6 +71,9 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Property<decimal>("ProteinGrams")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Quality")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Sequence")
                         .HasColumnType("INTEGER");
 
@@ -128,6 +131,35 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("MealSessions", (string)null);
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.ProductAliasRecord", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NormalizedName");
+
+                    b.HasIndex("ProductId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("ProductAliases", (string)null);
                 });
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.ProductRecord", b =>
@@ -198,9 +230,25 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Navigation("MealSession");
                 });
 
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.ProductAliasRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.ProductRecord", "Product")
+                        .WithMany("Aliases")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+                });
+
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealSessionRecord", b =>
                 {
                     b.Navigation("MealEntries");
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.ProductRecord", b =>
+                {
+                    b.Navigation("Aliases");
                 });
 #pragma warning restore 612, 618
         }

@@ -31,7 +31,7 @@ jobs:
           global-json-file: global.json
 
       - name: Restore projects
-        run: dotnet restore NutriFlow.sln --warnaserror
+        run: dotnet restore NutriFlow.sln --locked-mode --warnaserror
 
       - name: Restore local tools
         run: dotnet tool restore
@@ -54,7 +54,7 @@ jobs:
           --no-build
 
       - name: Audit vulnerable packages
-        run: dotnet list NutriFlow.sln package --include-transitive --vulnerable
+        run: dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
 
       - name: Build Docker image
         run: docker build --pull --tag nutriflow:ci .

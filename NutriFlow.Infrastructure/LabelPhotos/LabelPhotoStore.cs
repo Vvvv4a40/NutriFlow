@@ -36,19 +36,37 @@ public sealed class LabelPhotoStore
 
     public bool Contains(string reference)
     {
+        return Find(reference) is not null;
+    }
+
+    public StoredLabelPhoto? Find(string reference)
+    {
         if (string.IsNullOrWhiteSpace(reference) ||
             !reference.StartsWith(ReferencePrefix, StringComparison.Ordinal))
         {
-            return false;
+            return null;
         }
 
         string fileName = reference[ReferencePrefix.Length..];
 
         if (fileName != Path.GetFileName(fileName))
         {
-            return false;
+            return null;
         }
 
-        return File.Exists(Path.Combine(_storagePath, fileName));
+        string? mediaType = Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".jpg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => null
+        };
+        string filePath = Path.Combine(_storagePath, fileName);
+
+        return mediaType is not null && File.Exists(filePath)
+            ? new StoredLabelPhoto(filePath, mediaType)
+            : null;
     }
 }
+
+public sealed record StoredLabelPhoto(string FilePath, string MediaType);

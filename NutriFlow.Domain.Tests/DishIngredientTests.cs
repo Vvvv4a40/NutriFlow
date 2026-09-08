@@ -21,6 +21,22 @@ public sealed class DishIngredientTests
         Assert.Equal(42m, result.CarbohydratesGrams);
     }
 
+    [Fact]
+    public void CalculateNutrition_SubtractsExplicitlyRemovedWeight()
+    {
+        DishIngredient ingredient = new DishIngredient(
+            CreateProduct(),
+            200m,
+            50m);
+
+        NutritionValues result = ingredient.CalculateNutrition();
+
+        Assert.Equal(150m, result.Calories);
+        Assert.Equal(15m, result.ProteinGrams);
+        Assert.Equal(6m, result.FatGrams);
+        Assert.Equal(9m, result.CarbohydratesGrams);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

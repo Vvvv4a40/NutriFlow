@@ -2,6 +2,8 @@
     "use strict";
 
     const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
+    const ACTIVE_SESSION_STORAGE_KEY = "nutriflow.activeMealSessionId";
+    const PENDING_DRAFT_STORAGE_KEY = "nutriflow.pendingMealDraft";
     const ALLOWED_PHOTO_TYPES = new Set([
         "image/jpeg",
         "image/png",
@@ -22,10 +24,15 @@
 
     const elements = {
         mealDate: document.querySelector("#meal-date"),
+        dateControl: document.querySelector("#date-control"),
+        dateControlLabel: document.querySelector("#date-control-label"),
         apiStatus: document.querySelector("#api-status"),
         globalError: document.querySelector("#global-error"),
         globalErrorText: document.querySelector("#global-error-text"),
         dismissErrorButton: document.querySelector("#dismiss-error-button"),
+        capabilitiesBanner: document.querySelector("#capabilities-banner"),
+        capabilitiesTitle: document.querySelector("#capabilities-title"),
+        capabilitiesText: document.querySelector("#capabilities-text"),
         dailyCaption: document.querySelector("#daily-caption"),
         dailyMetrics: document.querySelector("#daily-metrics"),
         dailyEntries: document.querySelector("#daily-entries"),
@@ -51,11 +58,15 @@
         catalogDialog: document.querySelector("#catalog-dialog"),
         catalogContext: document.querySelector("#catalog-context"),
         closeCatalogButton: document.querySelector("#close-catalog-button"),
+        labelTab: document.querySelector("#catalog-tab-label"),
+        labelTabNote: document.querySelector("#label-tab-note"),
         barcodeForm: document.querySelector("#barcode-form"),
         barcodeResult: document.querySelector("#barcode-result"),
         labelForm: document.querySelector("#label-form"),
         labelPhoto: document.querySelector("#label-photo"),
         photoDropzone: document.querySelector("#photo-dropzone"),
+        labelUnavailable: document.querySelector("#label-unavailable"),
+        labelUnavailableText: document.querySelector("#label-unavailable-text"),
         labelResult: document.querySelector("#label-result"),
         manualProductForm: document.querySelector("#manual-product-form"),
         manualResult: document.querySelector("#manual-result"),
@@ -64,8 +75,12 @@
 
     const state = {
         date: getLocalIsoDate(),
+        capabilities: null,
+        capabilitiesLoading: true,
         daily: null,
         dailyLoading: true,
+        dailyRequestSequence: 0,
+        dailyAbortController: null,
         localMessages: [],
         session: null,
         sessionBusy: false,
@@ -78,22 +93,254 @@
     initialize();
 
     function initialize() {
+        restorePendingDraft();
         elements.mealDate.value = state.date;
         bindEvents();
         renderMessages();
         renderPreview();
         renderDaily();
-        loadDailyProgress();
+        renderCapabilities();
+        void loadCapabilities();
+        void restoreSessionAndDailyProgress();
+    }
+
+    async function restoreSessionAndDailyProgress() {
+        await restoreCurrentSession();
+        await loadDailyProgress();
+    }
+
+    async function loadCapabilities() {
+        try {
+            const capabilities = await apiRequest("/api/capabilities");
+            state.capabilities = {
+                aiProvider: String(capabilities?.aiProvider ?? "Unknown"),
+                supportsFreeText: capabilities?.supportsFreeText === true,
+                supportsLabelPhotos: capabilities?.supportsLabelPhotos === true
+            };
+        } catch {
+            state.capabilities = null;
+        } finally {
+            state.capabilitiesLoading = false;
+            renderCapabilities();
+        }
+    }
+
+    function renderCapabilities() {
+        const capabilities = state.capabilities;
+        const supportsLabelPhotos = capabilities?.supportsLabelPhotos === true;
+        const labelSubmitButton = elements.labelForm.querySelector("button[type='submit']");
+
+        elements.labelTab.disabled = !supportsLabelPhotos;
+        elements.labelTab.setAttribute("aria-disabled", String(!supportsLabelPhotos));
+        elements.labelTabNote.hidden = supportsLabelPhotos;
+        elements.labelTabNote.textContent = state.capabilitiesLoading ? "проверяем" : "недоступно";
+        elements.labelPhoto.disabled = !supportsLabelPhotos;
+        labelSubmitButton.disabled = !supportsLabelPhotos;
+        elements.photoDropzone.classList.toggle("is-disabled", !supportsLabelPhotos);
+        elements.photoDropzone.setAttribute("aria-disabled", String(!supportsLabelPhotos));
+        elements.labelUnavailable.hidden = supportsLabelPhotos;
+
+        if (state.capabilitiesLoading) {
+            elements.capabilitiesBanner.hidden = true;
+            elements.labelUnavailableText.textContent = "Возможности сервера ещё проверяются.";
+            return;
+        }
+
+        if (!capabilities) {
+            elements.capabilitiesTitle.textContent = "Возможности сервера не определены";
+            elements.capabilitiesText.textContent = "Основной интерфейс доступен, но обработка свободного текста и фотографий может быть ограничена.";
+            elements.capabilitiesBanner.hidden = false;
+            elements.labelUnavailableText.textContent = "Сервер не сообщил, доступно ли распознавание фотографий.";
+            return;
+        }
+
+        const limitations = [];
+
+        if (!capabilities.supportsFreeText) {
+            limitations.push("обработчик сообщений работает только с демонстрационным сценарием");
+        }
+
+        if (!capabilities.supportsLabelPhotos) {
+            limitations.push("распознавание фотографий этикеток отключено");
+        }
+
+        if (limitations.length === 0) {
+            elements.capabilitiesBanner.hidden = true;
+            return;
+        }
+
+        const isDemoProvider = capabilities.aiProvider.toLowerCase() === "fake";
+        elements.capabilitiesTitle.textContent = isDemoProvider
+            ? "Демонстрационный режим"
+            : "Ограниченные возможности";
+        elements.capabilitiesText.textContent = `${limitations.join("; ")}. Штрихкод и ручной ввод продуктов остаются доступны.`;
+        elements.capabilitiesBanner.hidden = false;
+        elements.labelUnavailableText.textContent = isDemoProvider
+            ? "В демонстрационном режиме фотографии не отправляются на распознавание."
+            : "Текущая конфигурация сервера не поддерживает распознавание фотографий.";
+    }
+
+    async function restoreCurrentSession() {
+        const sessionId = readActiveSessionId();
+
+        if (!sessionId) {
+            return;
+        }
+
+        state.sessionBusy = true;
+        renderMessages();
+
+        try {
+            const session = await apiRequest(`/api/meal-sessions/${encodeURIComponent(sessionId)}`);
+
+            if (isSessionConfirmed(session)) {
+                forgetActiveSession();
+
+                if (state.localMessages.length > 0) {
+                    return;
+                }
+            }
+
+            state.session = session;
+            state.localMessages = [];
+
+            if (!isSessionConfirmed(session)) {
+                state.date = session.mealDate ?? state.date;
+                rememberActiveSession(session.id);
+                clearPendingDraft();
+            }
+
+            elements.mealDate.value = state.date;
+        } catch (error) {
+            if (error.status === 400 || error.status === 404) {
+                forgetActiveSession();
+            } else {
+                showGlobalError(error);
+            }
+        } finally {
+            state.sessionBusy = false;
+            renderMessages();
+            renderPreview();
+        }
+    }
+
+    function readActiveSessionId() {
+        try {
+            return window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+        } catch {
+            return null;
+        }
+    }
+
+    function rememberActiveSession(sessionId) {
+        if (!sessionId) {
+            return;
+        }
+
+        try {
+            window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
+        } catch {
+            // private browsing can make local storage unavailable
+        }
+    }
+
+    function forgetActiveSession() {
+        try {
+            window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+        } catch {
+            // private browsing can make local storage unavailable
+        }
+    }
+
+    function restorePendingDraft() {
+        let storedDraft;
+
+        try {
+            storedDraft = JSON.parse(
+                window.localStorage.getItem(PENDING_DRAFT_STORAGE_KEY) ?? "null"
+            );
+        } catch {
+            clearPendingDraft();
+            return;
+        }
+
+        if (!isValidPendingDraft(storedDraft)) {
+            clearPendingDraft();
+            return;
+        }
+
+        state.localMessages = [...storedDraft.messages];
+        state.date = storedDraft.date;
+    }
+
+    function savePendingDraft() {
+        if (state.session || state.localMessages.length === 0) {
+            clearPendingDraft();
+            return;
+        }
+
+        try {
+            window.localStorage.setItem(
+                PENDING_DRAFT_STORAGE_KEY,
+                JSON.stringify({
+                    date: state.date,
+                    messages: state.localMessages
+                })
+            );
+        } catch {
+            // private browsing can make local storage unavailable
+        }
+    }
+
+    function clearPendingDraft() {
+        try {
+            window.localStorage.removeItem(PENDING_DRAFT_STORAGE_KEY);
+        } catch {
+            // private browsing can make local storage unavailable
+        }
+    }
+
+    function isValidPendingDraft(value) {
+        if (!value ||
+            typeof value.date !== "string" ||
+            !isValidIsoDate(value.date) ||
+            !Array.isArray(value.messages) ||
+            value.messages.length === 0 ||
+            value.messages.length > 50) {
+            return false;
+        }
+
+        let totalLength = 0;
+
+        for (const message of value.messages) {
+            if (typeof message !== "string" ||
+                !message.trim() ||
+                message.length > 4000) {
+                return false;
+            }
+
+            totalLength += message.length;
+        }
+
+        return totalLength <= 20000;
     }
 
     function bindEvents() {
         elements.mealDate.addEventListener("change", () => {
+            if (state.session && !isSessionConfirmed(state.session)) {
+                state.date = state.session.mealDate ?? state.date;
+                elements.mealDate.value = state.date;
+                showToast("Дата закреплена за текущей неподтверждённой сессией.");
+                return;
+            }
+
             if (!elements.mealDate.value) {
                 elements.mealDate.value = state.date;
                 return;
             }
 
             state.date = elements.mealDate.value;
+            savePendingDraft();
             hideGlobalError();
             loadDailyProgress();
         });
@@ -135,6 +382,7 @@
 
         document.querySelectorAll("[data-tab]").forEach(tab => {
             tab.addEventListener("click", () => activateCatalogTab(tab.dataset.tab));
+            tab.addEventListener("keydown", handleCatalogTabKeydown);
         });
 
         elements.barcodeForm.addEventListener("submit", findProductByBarcode);
@@ -152,6 +400,11 @@
         ["dragenter", "dragover"].forEach(eventName => {
             elements.photoDropzone.addEventListener(eventName, event => {
                 event.preventDefault();
+
+                if (state.capabilities?.supportsLabelPhotos !== true) {
+                    return;
+                }
+
                 elements.photoDropzone.classList.add("is-dragging");
             });
         });
@@ -164,6 +417,10 @@
         });
 
         elements.photoDropzone.addEventListener("drop", event => {
+            if (state.capabilities?.supportsLabelPhotos !== true) {
+                return;
+            }
+
             setLabelFile(event.dataTransfer?.files?.[0] ?? null);
         });
     }
@@ -172,6 +429,7 @@
         const requestOptions = {
             method: options.method ?? "GET",
             credentials: "same-origin",
+            signal: options.signal,
             headers: {
                 Accept: "application/json",
                 ...(options.headers ?? {})
@@ -190,6 +448,10 @@
         try {
             response = await fetch(url, requestOptions);
         } catch (error) {
+            if (error?.name === "AbortError") {
+                throw error;
+            }
+
             setApiStatus(false);
             throw new Error("Нет соединения с NutriFlow API. Проверьте, запущено ли приложение.", { cause: error });
         }
@@ -253,17 +515,41 @@
     }
 
     async function loadDailyProgress() {
+        const requestedDate = state.date;
+        const previousDaily = state.daily;
+        const requestSequence = ++state.dailyRequestSequence;
+
+        state.dailyAbortController?.abort();
+        const abortController = new AbortController();
+        state.dailyAbortController = abortController;
         state.dailyLoading = true;
         renderDaily();
 
         try {
-            state.daily = await apiRequest(`/api/daily-progress/${encodeURIComponent(state.date)}`);
+            const daily = await apiRequest(`/api/daily-progress/${encodeURIComponent(requestedDate)}`, {
+                signal: abortController.signal
+            });
+
+            if (requestSequence === state.dailyRequestSequence && requestedDate === state.date) {
+                state.daily = daily;
+            }
         } catch (error) {
-            state.daily = null;
-            showGlobalError(error);
+            if (error?.name === "AbortError") {
+                return;
+            }
+
+            if (requestSequence === state.dailyRequestSequence && requestedDate === state.date) {
+                state.daily = String(previousDaily?.date ?? "") === requestedDate
+                    ? previousDaily
+                    : null;
+                showGlobalError(error);
+            }
         } finally {
-            state.dailyLoading = false;
-            renderDaily();
+            if (requestSequence === state.dailyRequestSequence) {
+                state.dailyLoading = false;
+                state.dailyAbortController = null;
+                renderDaily();
+            }
         }
     }
 
@@ -277,7 +563,11 @@
                 <article class="metric-card" aria-label="Загрузка показателя ${metric.label}">
                     <span class="metric-label">${metric.label}</span>
                     <div class="metric-values"><strong>—</strong><span>${metric.unit}</span></div>
-                    <div class="metric-progress"><span style="--progress: 0%"></span></div>
+                    <div class="metric-progress" role="progressbar"
+                         aria-label="Загрузка показателя ${escapeHtml(metric.label)}"
+                         aria-valuemin="0" aria-valuemax="100">
+                        <span style="--progress: 0%"></span>
+                    </div>
                 </article>
             `).join("");
             elements.dailyEntries.innerHTML = "";
@@ -306,7 +596,7 @@
                 const remainingValue = readNumber(remaining, metric.key);
                 const exceededValue = readNumber(exceeded, metric.key);
                 const progress = targetValue > 0
-                    ? Math.min((consumedValue / targetValue) * 100, 100)
+                    ? Math.max(0, Math.min((consumedValue / targetValue) * 100, 100))
                     : consumedValue > 0 ? 100 : 0;
                 const isExceeded = exceededValue > 0;
                 const note = isExceeded
@@ -323,7 +613,10 @@
                             <strong>${formatNumber(consumedValue)}</strong>
                             <span>из ${formatNumber(targetValue)} ${metric.unit}</span>
                         </div>
-                        <div class="metric-progress" aria-label="${escapeHtml(metric.label)}: ${Math.round(progress)}%">
+                        <div class="metric-progress" role="progressbar"
+                             aria-label="${escapeHtml(metric.label)}"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"
+                             aria-valuetext="${escapeHtml(`${formatNumber(consumedValue)} из ${formatNumber(targetValue)} ${metric.unit}`)}">
                             <span style="--progress: ${progress.toFixed(2)}%"></span>
                         </div>
                     </article>
@@ -338,7 +631,7 @@
                 <article class="entry-row">
                     <div>
                         <strong>${escapeHtml(entry.name ?? "Приём пищи")}</strong>
-                        <span>${formatNumber(entry.weightInGrams)} г</span>
+                        <span class="entry-meta">${formatNumber(entry.weightInGrams)} г ${renderQualityBadge(entry.quality)}</span>
                     </div>
                     <div class="entry-nutrition">${formatNutritionText(entry.nutrition)}</div>
                 </article>
@@ -370,15 +663,22 @@
 
     async function saveDailyGoal(event) {
         event.preventDefault();
+        const goalDate = state.date;
         const submitButton = elements.goalForm.querySelector("button[type='submit']");
         const payload = readNutritionForm(elements.goalForm);
 
         await runButtonTask(submitButton, "Сохраняем…", async () => {
             try {
-                const result = await apiRequest(`/api/daily-goals/${encodeURIComponent(state.date)}`, {
+                const result = await apiRequest(`/api/daily-goals/${encodeURIComponent(goalDate)}`, {
                     method: "PUT",
                     body: payload
                 });
+
+                if (goalDate !== state.date) {
+                    hideGoalForm();
+                    showToast(`Дневная цель за ${formatLongDate(goalDate)} сохранена.`);
+                    return;
+                }
 
                 if (result?.date && result?.consumed) {
                     state.daily = result;
@@ -401,7 +701,18 @@
             return;
         }
 
+        if (state.localMessages.length > 0) {
+            const shouldReplace = window.confirm(
+                "Заменить уже введённые сообщения демонстрационным примером?"
+            );
+
+            if (!shouldReplace) {
+                return;
+            }
+        }
+
         state.localMessages = [...DEMO_MESSAGES];
+        savePendingDraft();
         renderMessages();
         renderPreview();
         elements.messageList.lastElementChild?.scrollIntoView({ block: "nearest" });
@@ -432,6 +743,7 @@
 
         if (!state.session) {
             state.localMessages.push(message);
+            savePendingDraft();
             elements.messageInput.value = "";
             renderMessages();
             renderPreview();
@@ -481,6 +793,8 @@
                     mealDate: state.date
                 }
             });
+            rememberActiveSession(state.session?.id);
+            clearPendingDraft();
             hideGlobalError();
         } catch (error) {
             showGlobalError(error);
@@ -507,9 +821,25 @@
     }
 
     function startNewSession() {
+        if (state.sessionBusy) {
+            return;
+        }
+
+        if (state.session && !isSessionConfirmed(state.session)) {
+            const shouldDiscard = window.confirm(
+                "Текущая сессия ещё не подтверждена. Начать новую и убрать её из рабочего экрана?"
+            );
+
+            if (!shouldDiscard) {
+                return;
+            }
+        }
+
         state.session = null;
         state.localMessages = [];
         state.sessionBusy = false;
+        forgetActiveSession();
+        clearPendingDraft();
         hideGlobalError();
         renderMessages();
         renderPreview();
@@ -542,8 +872,9 @@
                 state.session = await fetchCurrentSession();
             }
 
-            await loadDailyProgress();
+            forgetActiveSession();
             hideGlobalError();
+            await loadDailyProgress();
             showToast("Порции записаны в дневник.");
         } catch (error) {
             showGlobalError(error);
@@ -579,6 +910,7 @@
     function renderMessages() {
         const messages = getVisibleMessages();
         const confirmed = isSessionConfirmed(state.session);
+        const dateLocked = Boolean(state.session) && !confirmed;
 
         elements.messageList.innerHTML = messages.length === 0
             ? `<div class="message-empty">Можно описать готовку несколькими короткими сообщениями — порядок сохранится.</div>`
@@ -596,6 +928,13 @@
         elements.buildDraftButton.hidden = Boolean(state.session);
         elements.buildDraftButton.disabled = state.sessionBusy || state.localMessages.length === 0;
         elements.newSessionButton.hidden = !state.session;
+        elements.newSessionButton.disabled = state.sessionBusy;
+        elements.mealDate.disabled = dateLocked;
+        elements.dateControl.classList.toggle("is-locked", dateLocked);
+        elements.dateControlLabel.textContent = dateLocked ? "День сессии" : "День";
+        elements.dateControl.title = dateLocked
+            ? "Дата закреплена до подтверждения или начала новой сессии"
+            : "Выберите день для дневного баланса";
 
         if (state.sessionBusy) {
             elements.captureHint.textContent = "NutriFlow обрабатывает сессию…";
@@ -657,7 +996,7 @@
             sections.push(`
                 <div class="notice notice-info">
                     <strong>Приём пищи записан</strong>
-                    Порции уже учтены в дневном балансе за ${escapeHtml(formatLongDate(session.mealDate ?? state.date))}.
+                    Порции уже учтены в дневном балансе за ${escapeHtml(formatLongDate(session.mealDate ?? state.date))}
                 </div>
             `);
         }
@@ -681,7 +1020,7 @@
                             const action = canResolveIssueWithProduct(issue)
                                 ? ` <button class="button button-quiet button-small" type="button" data-resolve-product="${escapeHtml(ingredientName)}">Добавить продукт</button>`
                                 : "";
-                            return `<li>${escapeHtml(issue.message ?? issue.code ?? "Необходимо проверить данные.")}${action}</li>`;
+                            return `<li>${escapeHtml(formatWorkflowIssue(issue))}${action}</li>`;
                         }).join("")}
                     </ul>
                 </div>
@@ -750,10 +1089,12 @@
                     <div class="nutrition-box">
                         <span>Всё блюдо</span>
                         ${renderNutrition(dish.totalNutrition)}
+                        ${renderNutritionQuality(dish.totalNutritionQuality)}
                     </div>
                     <div class="nutrition-box">
                         <span>На 100 г готового блюда</span>
                         ${renderNutrition(dish.nutritionPer100Grams)}
+                        ${renderNutritionQuality(dish.nutritionPer100GramsQuality)}
                     </div>
                 </div>
                 <section class="portion-section">
@@ -763,8 +1104,11 @@
                             ? `<span class="nutrition-line">Порция не указана.</span>`
                             : portions.map((portion, index) => `
                                 <div class="portion-row">
-                                    <span>Порция ${index + 1}: <strong>${formatNumber(portion.weightInGrams)} г</strong> ${renderQualityBadge(portion.weightQuality)}</span>
-                                    ${renderNutrition(portion.nutrition)}
+                                    <span>Порция ${index + 1}: ${renderPortionSize(portion)}</span>
+                                    <div class="portion-nutrition-result">
+                                        ${renderNutrition(portion.nutrition)}
+                                        ${renderNutritionQuality(portion.nutritionQuality)}
+                                    </div>
                                 </div>
                             `).join("")}
                     </div>
@@ -775,11 +1119,8 @@
 
     function renderIngredient(ingredient) {
         const product = ingredient.resolvedProduct;
-        const weight = ingredient.weightInGrams == null
-            ? "масса неизвестна"
-            : `${formatNumber(ingredient.weightInGrams)} г`;
         const source = product
-            ? `${renderSourceBadge(product)} ${renderQualityBadge(product.dataQuality)}`
+            ? `${renderSourceBadge(product)} ${renderQualityBadge(product.dataQuality)} ${renderSourceReference(product)}`
             : `<span class="quality-badge is-unknown">продукт не найден</span>`;
         const action = product
             ? ""
@@ -789,7 +1130,7 @@
             <div class="ingredient-row">
                 <div class="ingredient-main">
                     <strong>${escapeHtml(ingredient.productName ?? "Продукт")}</strong>
-                    <span>${escapeHtml(weight)} ${renderQualityBadge(ingredient.weightQuality)}</span>
+                    <div class="ingredient-weights">${renderIngredientWeight(ingredient)}</div>
                 </div>
                 <div class="ingredient-source">${source}</div>
                 <div class="nutrition-line">
@@ -812,6 +1153,14 @@
                 <span>У <strong>${formatNumber(nutrition.carbohydratesGrams)}</strong></span>
             </div>
         `;
+    }
+
+    function renderNutritionQuality(quality) {
+        if (!quality) {
+            return "";
+        }
+
+        return `<span class="calculation-quality">качество КБЖУ ${renderQualityBadge(quality)}</span>`;
     }
 
     function renderQualityBadge(quality) {
@@ -848,12 +1197,71 @@
         return `<span class="source-badge" title="${escapeHtml(product.sourceName ?? "")}">${escapeHtml(sourceLabels[sourceKind] ?? product.sourceName ?? "источник")}</span>`;
     }
 
+    function renderSourceReference(product) {
+        const reference = getSafeSourceUrl(product?.sourceReference);
+
+        if (!reference) {
+            return "";
+        }
+
+        return `<a class="source-link" href="${escapeHtml(reference)}" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-label="Открыть источник данных о продукте в новой вкладке">источник ↗</a>`;
+    }
+
+    function getSafeSourceUrl(value) {
+        if (!value) {
+            return null;
+        }
+
+        const rawReference = String(value);
+        const labelPhotoMatch = /^label-photo:([a-f0-9]{32}\.(?:jpg|png|webp))$/i.exec(
+            rawReference
+        );
+
+        if (labelPhotoMatch) {
+            return `/api/label-photos/${encodeURIComponent(labelPhotoMatch[1])}`;
+        }
+
+        try {
+            const url = new URL(rawReference);
+            return url.protocol === "http:" || url.protocol === "https:"
+                ? url.href
+                : null;
+        } catch {
+            return null;
+        }
+    }
+
+    function formatWorkflowIssue(issue) {
+        const ingredientName = issue?.ingredientName
+            ? ` «${issue.ingredientName}»`
+            : "";
+        const dishName = issue?.dishName
+            ? ` «${issue.dishName}»`
+            : "";
+        const messages = {
+            product_not_found: `Продукт${ingredientName} не найден в каталоге.`,
+            product_ambiguous: `Для продукта${ingredientName} найдено несколько вариантов с разными КБЖУ.`,
+            ingredient_weight_missing: `Укажите массу ингредиента${ingredientName}.`,
+            removed_weight_missing: `Укажите, сколько ингредиента${ingredientName} было удалено.`,
+            final_weight_missing: `Укажите итоговую массу блюда${dishName}, чтобы рассчитать порцию.`,
+            portion_missing: `Укажите массу съеденной порции блюда${dishName}.`
+        };
+        const code = String(issue?.code ?? "").toLowerCase();
+
+        return messages[code] ?? issue?.message ?? issue?.code ?? "Необходимо проверить данные.";
+    }
+
     function canResolveIssueWithProduct(issue) {
         if (!issue?.ingredientName) {
             return false;
         }
 
-        const code = String(issue.code ?? "");
+        const code = String(issue.code ?? "").toLowerCase();
+
+        if (code === "product_ambiguous") {
+            return false;
+        }
+
         return /product|catalog|ambiguous|not.?found|unresolved/i.test(code);
     }
 
@@ -887,7 +1295,9 @@
         state.catalogIngredientName = ingredientName || null;
         elements.catalogContext.textContent = state.catalogIngredientName
             ? `Ищем данные для «${state.catalogIngredientName}». После сохранения обновим предпросмотр.`
-            : "Найдите продукт по штрихкоду, распознайте этикетку или внесите значения вручную.";
+            : state.capabilities?.supportsLabelPhotos === true
+                ? "Найдите продукт по штрихкоду, распознайте этикетку или внесите значения вручную."
+                : "Найдите продукт по штрихкоду или внесите значения вручную.";
 
         if (state.catalogIngredientName) {
             elements.manualProductForm.elements.name.value = state.catalogIngredientName;
@@ -906,21 +1316,62 @@
         }
     }
 
-    function activateCatalogTab(tabName) {
-        document.querySelectorAll("[data-tab]").forEach(tab => {
-            const isActive = tab.dataset.tab === tabName;
+    function activateCatalogTab(tabName, focusPanel = true) {
+        const tabs = [...document.querySelectorAll("[data-tab]")];
+        const requestedTab = tabs.find(tab => tab.dataset.tab === tabName && !tab.disabled);
+        const activeTab = requestedTab ?? tabs.find(tab => !tab.disabled);
+
+        if (!activeTab) {
+            return;
+        }
+
+        tabs.forEach(tab => {
+            const isActive = tab === activeTab;
             tab.classList.toggle("is-active", isActive);
             tab.setAttribute("aria-selected", String(isActive));
+            tab.tabIndex = isActive ? 0 : -1;
         });
 
         document.querySelectorAll("[data-panel]").forEach(panel => {
-            const isActive = panel.dataset.panel === tabName;
+            const isActive = panel.dataset.panel === activeTab.dataset.tab;
             panel.classList.toggle("is-active", isActive);
             panel.hidden = !isActive;
         });
 
-        const activePanel = document.querySelector(`[data-panel="${tabName}"]`);
-        window.setTimeout(() => activePanel?.querySelector("input")?.focus(), 0);
+        if (focusPanel) {
+            const activePanel = document.querySelector(`[data-panel="${activeTab.dataset.tab}"]`);
+            window.setTimeout(() => activePanel?.querySelector("input:not(:disabled)")?.focus(), 0);
+        }
+    }
+
+    function handleCatalogTabKeydown(event) {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+            return;
+        }
+
+        const tabs = [...document.querySelectorAll("[data-tab]")]
+            .filter(tab => !tab.disabled);
+
+        if (tabs.length === 0) {
+            return;
+        }
+
+        event.preventDefault();
+        const currentIndex = Math.max(0, tabs.indexOf(event.currentTarget));
+        let nextIndex;
+
+        if (event.key === "Home") {
+            nextIndex = 0;
+        } else if (event.key === "End") {
+            nextIndex = tabs.length - 1;
+        } else {
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
+        }
+
+        const nextTab = tabs[nextIndex];
+        activateCatalogTab(nextTab.dataset.tab, false);
+        nextTab.focus();
     }
 
     async function findProductByBarcode(event) {
@@ -931,8 +1382,21 @@
 
         await runButtonTask(submitButton, "Ищем…", async () => {
             try {
-                const product = await apiRequest(`/api/products/barcode/${encodeURIComponent(barcode)}`);
-                elements.barcodeResult.innerHTML = renderProductResult(product, "Продукт найден и доступен локально.");
+                let product = await apiRequest(`/api/products/barcode/${encodeURIComponent(barcode)}`);
+                let resultMessage = "Продукт найден и доступен локально.";
+
+                if (state.catalogIngredientName) {
+                    product = await apiRequest("/api/products/aliases", {
+                        method: "POST",
+                        body: {
+                            barcode,
+                            alias: state.catalogIngredientName
+                        }
+                    });
+                    resultMessage = `Продукт связан с ингредиентом «${state.catalogIngredientName}».`;
+                }
+
+                elements.barcodeResult.innerHTML = renderProductResult(product, resultMessage);
                 await refreshSessionAfterProductChange();
                 showToast("Каталог обновлён.");
             } catch (error) {
@@ -986,6 +1450,12 @@
 
     async function analyzeLabel(event) {
         event.preventDefault();
+
+        if (state.capabilities?.supportsLabelPhotos !== true) {
+            showInlineError(elements.labelResult, new Error("Распознавание фотографий недоступно в текущем режиме."));
+            return;
+        }
+
         const file = state.labelFile ?? elements.labelPhoto.files?.[0];
         const submitButton = elements.labelForm.querySelector("button[type='submit']");
         elements.labelResult.innerHTML = "";
@@ -1033,7 +1503,7 @@
         const questions = Array.isArray(draft.clarificationQuestions)
             ? draft.clarificationQuestions
             : [];
-        const initialName = draft.productName || state.catalogIngredientName || "";
+        const initialName = state.catalogIngredientName || draft.productName || "";
         const canSave = canSaveLabelDraft(draft);
 
         elements.labelResult.innerHTML = `
@@ -1070,11 +1540,12 @@
 
     function renderLabelNutritionInput(name, label, value) {
         const inputValue = value == null ? "" : escapeHtml(value);
+        const maximum = name === "calories" ? 1000 : 100;
 
         return `
             <label class="field">
                 <span>${label} / 100 г</span>
-                <input name="${name}" type="number" min="0" step="0.01" value="${inputValue}" required>
+                <input name="${name}" type="number" min="0" max="${maximum}" step="0.01" value="${inputValue}" required>
             </label>
         `;
     }
@@ -1091,6 +1562,7 @@
         const barcode = form.elements.barcode.value.trim();
         const payload = {
             photoReference: state.labelDraft.photoReference,
+            basis: state.labelDraft.basis,
             name: form.elements.name.value.trim(),
             ...readNutritionForm(form),
             barcode: barcode || null
@@ -1131,7 +1603,7 @@
                 <h3>${escapeHtml(product?.name ?? "Продукт сохранён")}</h3>
                 ${renderNutrition(product)}
                 <p>${escapeHtml(message)}</p>
-                <p>Источник: ${escapeHtml(product?.sourceName ?? product?.sourceKind ?? "не указан")} · качество: ${escapeHtml(formatQuality(product?.dataQuality))}</p>
+                <p>Источник: ${escapeHtml(product?.sourceName ?? product?.sourceKind ?? "не указан")} · качество: ${escapeHtml(formatQuality(product?.dataQuality))} ${renderSourceReference(product)}</p>
                 ${product?.barcode ? `<p>Штрихкод: ${escapeHtml(product.barcode)}</p>` : ""}
             </article>
         `;
@@ -1211,6 +1683,67 @@
         return `${formatNumber(nutrition.calories)} ккал · Б ${formatNumber(nutrition.proteinGrams)} · Ж ${formatNumber(nutrition.fatGrams)} · У ${formatNumber(nutrition.carbohydratesGrams)}`;
     }
 
+    function renderIngredientWeight(ingredient) {
+        const originalWeight = ingredient?.weightInGrams == null
+            ? "исходная масса неизвестна"
+            : `исходно ${formatNumber(ingredient.weightInGrams)} г`;
+        const isLegacyRemoval = ingredient?.removedWeightInGrams == null &&
+            !ingredient?.removedWeightQuality;
+        const removedWeight = isLegacyRemoval
+            ? 0
+            : ingredient?.removedWeightInGrams;
+        const removedQuality = isLegacyRemoval
+            ? "Exact"
+            : ingredient?.removedWeightQuality;
+        const includedWeight = isLegacyRemoval
+            ? ingredient?.weightInGrams
+            : ingredient?.includedWeightInGrams;
+        const removedWeightText = removedWeight == null
+            ? "удалённая масса неизвестна"
+            : `удалено ${formatNumber(removedWeight)} г`;
+        const includedWeightText = includedWeight == null
+            ? "вошедшая масса неизвестна"
+            : `вошло ${formatNumber(includedWeight)} г`;
+        const removalWasReported = removedWeight == null || removedWeight > 0;
+
+        if (!removalWasReported) {
+            return `
+                <span class="ingredient-weight-row">
+                    <span>${escapeHtml(originalWeight)}</span>
+                    ${renderQualityBadge(ingredient?.weightQuality)}
+                </span>
+            `;
+        }
+
+        return `
+            <span class="ingredient-weight-row">
+                <span>${escapeHtml(originalWeight)}</span>
+                ${renderQualityBadge(ingredient?.weightQuality)}
+            </span>
+            <span class="ingredient-weight-row">
+                <span>${escapeHtml(removedWeightText)}</span>
+                ${renderQualityBadge(removedQuality)}
+            </span>
+            <span class="ingredient-included-weight">${escapeHtml(includedWeightText)}</span>
+        `;
+    }
+
+    function renderPortionSize(portion) {
+        if (portion?.fractionOfDish != null) {
+            const resolvedWeight = portion.weightInGrams == null
+                ? ""
+                : `<span class="portion-derived-weight">${formatNumber(portion.weightInGrams)} г по итоговому весу</span>`;
+
+            return `<strong>${formatNumber(Number(portion.fractionOfDish) * 100)}% блюда</strong> ${renderQualityBadge(portion.weightQuality)} ${resolvedWeight}`;
+        }
+
+        if (portion?.weightInGrams != null) {
+            return `<strong>${formatNumber(portion.weightInGrams)} г</strong> ${renderQualityBadge(portion.weightQuality)}`;
+        }
+
+        return "масса неизвестна";
+    }
+
     function formatNumber(value) {
         const number = Number(value);
 
@@ -1261,7 +1794,8 @@
     }
 
     function canSaveLabelDraft(draft) {
-        return String(draft?.basis ?? "").toLowerCase() === "per100grams";
+        return draft?.canCreateProduct === true &&
+            String(draft.basis ?? "").toLowerCase() === "per100grams";
     }
 
     function formatFileSize(size) {
@@ -1278,6 +1812,40 @@
         const month = String(now.getMonth() + 1).padStart(2, "0");
         const day = String(now.getDate()).padStart(2, "0");
         return `${year}-${month}-${day}`;
+    }
+
+    function isValidIsoDate(value) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+        if (!match) {
+            return false;
+        }
+
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const isLeapYear = year % 4 === 0 &&
+            (year % 100 !== 0 || year % 400 === 0);
+        const daysInMonth = [
+            31,
+            isLeapYear ? 29 : 28,
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31
+        ];
+
+        return year >= 1 &&
+            month >= 1 &&
+            month <= 12 &&
+            day >= 1 &&
+            day <= daysInMonth[month - 1];
     }
 
     function escapeHtml(value) {

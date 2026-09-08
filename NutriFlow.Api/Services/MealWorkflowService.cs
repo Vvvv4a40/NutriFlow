@@ -90,19 +90,29 @@ public sealed class MealWorkflowService
                 evaluation.PreviewToken,
                 StringComparison.Ordinal))
         {
-            await _sessionStore.UpdatePreviewAsync(
-                id,
-                evaluation.PreviewJson,
-                evaluation.PreviewToken,
-                evaluation.Status,
-                cancellationToken);
-            session = session with
+            try
             {
-                PreviewJson = evaluation.PreviewJson,
-                PreviewToken = evaluation.PreviewToken,
-                Status = evaluation.Status,
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            };
+                session = await _sessionStore.UpdatePreviewAsync(
+                    id,
+                    session.PreviewToken,
+                    evaluation.PreviewJson,
+                    evaluation.PreviewToken,
+                    evaluation.Status,
+                    cancellationToken);
+            }
+            catch (MealSessionConflictException)
+            {
+                StoredMealSession? latest = await _sessionStore.FindAsync(
+                    id,
+                    cancellationToken);
+
+                return latest is null
+                    ? null
+                    : MapSession(
+                        latest,
+                        DeserializePreview(latest.PreviewJson),
+                        latest.Status);
+            }
         }
 
         return MapSession(session, evaluation.Document, evaluation.Status);
@@ -137,6 +147,7 @@ public sealed class MealWorkflowService
         MealEvaluation evaluation = await EvaluateAsync(draft, cancellationToken);
         StoredMealSession session = await _sessionStore.ReplaceDraftAsync(
             id,
+            existing.PreviewToken,
             validatedMessages,
             draft,
             evaluation.PreviewJson,
@@ -191,9 +202,6 @@ public sealed class MealWorkflowService
                 existingEntries);
         }
 
-        MealPreviewDocument storedDocument = DeserializePreview(
-            session.PreviewJson);
-
         MealEvaluation currentEvaluation = await EvaluateAsync(
             session.Draft,
             cancellationToken);
@@ -204,19 +212,38 @@ public sealed class MealWorkflowService
                 currentEvaluation.PreviewToken,
                 StringComparison.Ordinal))
         {
-            await _sessionStore.UpdatePreviewAsync(
-                id,
-                currentEvaluation.PreviewJson,
-                currentEvaluation.PreviewToken,
-                currentEvaluation.Status,
-                cancellationToken);
-            StoredMealSession updatedSession = session with
+            StoredMealSession updatedSession;
+
+            try
             {
-                PreviewJson = currentEvaluation.PreviewJson,
-                PreviewToken = currentEvaluation.PreviewToken,
-                Status = currentEvaluation.Status,
-                UpdatedAtUtc = DateTimeOffset.UtcNow
-            };
+                updatedSession = await _sessionStore.UpdatePreviewAsync(
+                    id,
+                    session.PreviewToken,
+                    currentEvaluation.PreviewJson,
+                    currentEvaluation.PreviewToken,
+                    currentEvaluation.Status,
+                    cancellationToken);
+            }
+            catch (MealSessionConflictException)
+            {
+                StoredMealSession latest = await _sessionStore.FindAsync(
+                    id,
+                    cancellationToken) ?? session;
+                bool wasConfirmed = latest.Status == MealSessionStatus.Confirmed;
+                IReadOnlyList<MealEntry> concurrentEntries = wasConfirmed
+                    ? await _diaryStore.GetSessionEntriesAsync(id, cancellationToken)
+                    : Array.Empty<MealEntry>();
+
+                return new MealConfirmationOutcome(
+                    wasConfirmed
+                        ? MealConfirmationOutcomeKind.AlreadyConfirmed
+                        : MealConfirmationOutcomeKind.StalePreview,
+                    MapSession(
+                        latest,
+                        DeserializePreview(latest.PreviewJson),
+                        latest.Status),
+                    concurrentEntries);
+            }
 
             return new MealConfirmationOutcome(
                 MealConfirmationOutcomeKind.StalePreview,
@@ -360,7 +387,9 @@ public sealed class MealWorkflowService
                 new List<IngredientPreviewResponse>();
             List<DishIngredient> resolvedIngredients =
                 new List<DishIngredient>();
-            bool dishCanBeCalculated = true;
+            List<DataQuality> ingredientNutritionQualities =
+                new List<DataQuality>();
+            bool ingredientsCanBeCalculated = true;
 
             foreach (IngredientDraft ingredient in dish.Ingredients)
             {
@@ -371,7 +400,7 @@ public sealed class MealWorkflowService
                 if (selection.Product is null)
                 {
                     hasProductIssue = true;
-                    dishCanBeCalculated = false;
+                    ingredientsCanBeCalculated = false;
                     issues.Add(new WorkflowIssueResponse(
                         selection.IsAmbiguous
                             ? "product_ambiguous"
@@ -386,7 +415,7 @@ public sealed class MealWorkflowService
                 if (ingredient.WeightInGrams is null)
                 {
                     hasMissingFacts = true;
-                    dishCanBeCalculated = false;
+                    ingredientsCanBeCalculated = false;
                     issues.Add(new WorkflowIssueResponse(
                         "ingredient_weight_missing",
                         dish.Name,
@@ -394,15 +423,34 @@ public sealed class MealWorkflowService
                         "The ingredient weight is required for calculation."));
                 }
 
+                if (ingredient.RemovedWeightInGrams is null)
+                {
+                    hasMissingFacts = true;
+                    ingredientsCanBeCalculated = false;
+                    issues.Add(new WorkflowIssueResponse(
+                        "removed_weight_missing",
+                        dish.Name,
+                        ingredient.ProductName,
+                        "The removed ingredient weight is required for calculation."));
+                }
+
                 NutritionValues? ingredientNutrition = null;
 
                 if (selection.Product is not null &&
-                    ingredient.WeightInGrams is not null)
+                    ingredient.WeightInGrams is not null &&
+                    ingredient.RemovedWeightInGrams is not null)
                 {
                     DishIngredient resolvedIngredient = new DishIngredient(
                         selection.Product,
-                        ingredient.WeightInGrams.Value);
+                        ingredient.WeightInGrams.Value,
+                        ingredient.RemovedWeightInGrams.Value);
                     resolvedIngredients.Add(resolvedIngredient);
+                    ingredientNutritionQualities.Add(WorstQuality(
+                        [
+                            selection.Product.Source.Quality,
+                            ingredient.WeightQuality,
+                            ingredient.RemovedWeightQuality
+                        ]));
                     ingredientNutrition = resolvedIngredient.CalculateNutrition();
                 }
 
@@ -410,6 +458,9 @@ public sealed class MealWorkflowService
                     ingredient.ProductName,
                     ingredient.WeightInGrams,
                     ingredient.WeightQuality.ToString(),
+                    ingredient.RemovedWeightInGrams,
+                    ingredient.RemovedWeightQuality.ToString(),
+                    ingredient.IncludedWeightInGrams,
                     selection.Product is null
                         ? null
                         : MapProduct(selection.Product),
@@ -421,7 +472,6 @@ public sealed class MealWorkflowService
             if (dish.FinalWeightInGrams is null)
             {
                 hasMissingFacts = true;
-                dishCanBeCalculated = false;
                 issues.Add(new WorkflowIssueResponse(
                     "final_weight_missing",
                     dish.Name,
@@ -432,7 +482,6 @@ public sealed class MealWorkflowService
             if (dish.Portions.Count == 0)
             {
                 hasMissingFacts = true;
-                dishCanBeCalculated = false;
                 issues.Add(new WorkflowIssueResponse(
                     "portion_missing",
                     dish.Name,
@@ -441,46 +490,78 @@ public sealed class MealWorkflowService
             }
 
             NutritionValues? totalNutrition = null;
+            DataQuality? totalNutritionQuality = null;
             NutritionValues? nutritionPer100Grams = null;
+            DataQuality? nutritionPer100GramsQuality = null;
             List<PortionPreviewResponse> portionPreviews =
                 new List<PortionPreviewResponse>();
 
-            if (dishCanBeCalculated)
-            {
-                DishBatch batch = new DishBatch(
-                    dish.Name,
-                    resolvedIngredients,
-                    dish.FinalWeightInGrams!.Value);
-                totalNutrition = batch.CalculateTotalNutrition();
-                nutritionPer100Grams = batch.CalculateNutritionPer100Grams();
+            DishBatch? batch = null;
 
-                for (int portionIndex = 0;
-                     portionIndex < dish.Portions.Count;
-                     portionIndex++)
+            if (ingredientsCanBeCalculated)
+            {
+                totalNutrition = SumNutrition(resolvedIngredients);
+                totalNutritionQuality = WorstQuality(
+                    ingredientNutritionQualities);
+
+                if (dish.FinalWeightInGrams is not null)
                 {
-                    PortionDraft portion = dish.Portions[portionIndex];
-                    NutritionValues portionNutrition =
-                        batch.CalculatePortionNutrition(portion.WeightInGrams);
-                    portionPreviews.Add(new PortionPreviewResponse(
-                        portion.WeightInGrams,
-                        portion.WeightQuality.ToString(),
-                        MapNutrition(portionNutrition)));
-                    string entryName = dish.Portions.Count == 1
-                        ? dish.Name
-                        : $"{dish.Name} — portion {portionIndex + 1}";
-                    entries.Add(new MealEntry(
-                        entryName,
-                        portion.WeightInGrams,
-                        portionNutrition));
+                    batch = new DishBatch(
+                        dish.Name,
+                        resolvedIngredients,
+                        dish.FinalWeightInGrams.Value);
+                    nutritionPer100Grams = batch.CalculateNutritionPer100Grams();
+                    nutritionPer100GramsQuality = WorstQuality(
+                        totalNutritionQuality.Value,
+                        dish.FinalWeightQuality);
                 }
             }
-            else
+
+            for (int portionIndex = 0;
+                 portionIndex < dish.Portions.Count;
+                 portionIndex++)
             {
-                portionPreviews.AddRange(dish.Portions.Select(portion =>
-                    new PortionPreviewResponse(
-                        portion.WeightInGrams,
-                        portion.WeightQuality.ToString(),
-                        null)));
+                PortionDraft portion = dish.Portions[portionIndex];
+                decimal? portionWeight = dish.FinalWeightInGrams is null
+                    ? portion.WeightInGrams
+                    : portion.ResolveWeightInGrams(
+                        dish.FinalWeightInGrams.Value);
+                NutritionValues? portionNutrition = batch is null ||
+                                                    portionWeight is null
+                    ? null
+                    : batch.CalculatePortionNutrition(portionWeight.Value);
+                DataQuality? portionNutritionQuality = portionNutrition is null
+                    ? null
+                    : portion.FractionOfDish is not null
+                        ? WorstQuality(
+                            totalNutritionQuality!.Value,
+                            portion.WeightQuality)
+                        : WorstQuality(
+                            nutritionPer100GramsQuality!.Value,
+                            portion.WeightQuality);
+                portionPreviews.Add(new PortionPreviewResponse(
+                    portionWeight,
+                    portion.FractionOfDish,
+                    portion.WeightQuality.ToString(),
+                    portionNutrition is null
+                        ? null
+                        : MapNutrition(portionNutrition),
+                    portionNutritionQuality?.ToString()));
+
+                if (portionNutrition is not null)
+                {
+                    string entryName = dish.Portions.Count == 1
+                        ? dish.Name
+                        : $"{dish.Name} — порция {portionIndex + 1}";
+                    entries.Add(new MealEntry(
+                        entryName,
+                        portionWeight!.Value,
+                        portionNutrition,
+                        WorstQuality(
+                            ingredientNutritionQualities
+                                .Append(dish.FinalWeightQuality)
+                                .Append(portion.WeightQuality))));
+                }
             }
 
             dishPreviews.Add(new DishPreviewResponse(
@@ -488,9 +569,11 @@ public sealed class MealWorkflowService
                 dish.FinalWeightInGrams,
                 dish.FinalWeightQuality.ToString(),
                 totalNutrition is null ? null : MapNutrition(totalNutrition),
+                totalNutritionQuality?.ToString(),
                 nutritionPer100Grams is null
                     ? null
                     : MapNutrition(nutritionPer100Grams),
+                nutritionPer100GramsQuality?.ToString(),
                 ingredientPreviews,
                 portionPreviews));
         }
@@ -671,6 +754,19 @@ public sealed class MealWorkflowService
         return total;
     }
 
+    private static NutritionValues SumNutrition(
+        IReadOnlyList<DishIngredient> ingredients)
+    {
+        NutritionValues total = new NutritionValues(0m, 0m, 0m, 0m);
+
+        foreach (DishIngredient ingredient in ingredients)
+        {
+            total = total.Add(ingredient.CalculateNutrition());
+        }
+
+        return total;
+    }
+
     private static ProductResponse MapProduct(Product product)
     {
         return new ProductResponse(
@@ -700,7 +796,8 @@ public sealed class MealWorkflowService
         return new MealEntryResponse(
             entry.Name,
             entry.WeightInGrams,
-            MapNutrition(entry.Nutrition));
+            MapNutrition(entry.Nutrition),
+            entry.Quality.ToString());
     }
 
     private static int QualityRank(DataQuality quality)
@@ -712,6 +809,18 @@ public sealed class MealWorkflowService
             DataQuality.Estimated => 1,
             _ => 0
         };
+    }
+
+    private static DataQuality WorstQuality(
+        DataQuality first,
+        DataQuality second)
+    {
+        return QualityRank(first) <= QualityRank(second) ? first : second;
+    }
+
+    private static DataQuality WorstQuality(IEnumerable<DataQuality> qualities)
+    {
+        return qualities.Aggregate(WorstQuality);
     }
 
     private static int SourceRank(NutritionSourceKind kind)

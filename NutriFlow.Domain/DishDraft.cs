@@ -47,6 +47,7 @@ public sealed class DishDraft
         }
 
         decimal totalPortionWeightInGrams = 0m;
+        decimal totalPortionFraction = 0m;
 
         foreach (PortionDraft portion in portions)
         {
@@ -57,16 +58,35 @@ public sealed class DishDraft
                     nameof(portions));
             }
 
+            decimal? resolvedPortionWeight = finalWeightInGrams is null
+                ? portion.WeightInGrams
+                : portion.ResolveWeightInGrams(finalWeightInGrams.Value);
+
             if (finalWeightInGrams is not null &&
-                portion.WeightInGrams > finalWeightInGrams.Value)
+                resolvedPortionWeight > finalWeightInGrams.Value)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(portions),
-                    portion.WeightInGrams,
+                    resolvedPortionWeight,
                     "A portion must be positive and cannot exceed the dish weight.");
             }
 
-            totalPortionWeightInGrams += portion.WeightInGrams;
+            if (resolvedPortionWeight is not null)
+            {
+                totalPortionWeightInGrams += resolvedPortionWeight.Value;
+            }
+
+            if (portion.FractionOfDish is not null)
+            {
+                totalPortionFraction += portion.FractionOfDish.Value;
+            }
+        }
+
+        if (totalPortionFraction > 1m)
+        {
+            throw new ArgumentException(
+                "The total portion fraction cannot exceed the whole dish.",
+                nameof(portions));
         }
 
         if (finalWeightInGrams is not null &&
@@ -83,7 +103,12 @@ public sealed class DishDraft
         FinalWeightQuality = finalWeightQuality;
         Portions = new List<PortionDraft>(portions).AsReadOnly();
         PortionWeightsInGrams = Portions
-            .Select(portion => portion.WeightInGrams)
+            .Where(portion =>
+                portion.WeightInGrams is not null ||
+                finalWeightInGrams is not null)
+            .Select(portion => finalWeightInGrams is null
+                ? portion.WeightInGrams!.Value
+                : portion.ResolveWeightInGrams(finalWeightInGrams.Value))
             .ToArray();
     }
 

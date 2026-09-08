@@ -34,4 +34,28 @@ public sealed class PortionDraftTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new PortionDraft(weightInGrams));
     }
+
+    [Fact]
+    public void FromFraction_ResolvesWeightFromFinalDishWeight()
+    {
+        PortionDraft portion = PortionDraft.FromFraction(
+            0.25m,
+            DataQuality.Estimated);
+
+        Assert.Null(portion.WeightInGrams);
+        Assert.Equal(0.25m, portion.FractionOfDish);
+        Assert.Equal(300m, portion.ResolveWeightInGrams(1200m));
+        Assert.Equal(DataQuality.Estimated, portion.WeightQuality);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-0.1)]
+    [InlineData(1.1)]
+    public void FromFraction_WithInvalidFraction_ThrowsArgumentOutOfRangeException(
+        decimal fraction)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PortionDraft.FromFraction(fraction));
+    }
 }

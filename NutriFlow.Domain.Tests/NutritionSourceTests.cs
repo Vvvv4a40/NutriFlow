@@ -5,6 +5,16 @@ namespace NutriFlow.Domain.Tests;
 public sealed class NutritionSourceTests
 {
     [Fact]
+    public void Constructor_WithTooLongName_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new NutritionSource(
+                NutritionSourceKind.ManualInput,
+                DataQuality.Exact,
+                new string('x', 201)));
+    }
+
+    [Fact]
     public void Constructor_StoresSourceData()
     {
         NutritionSource source = new NutritionSource(
@@ -60,6 +70,30 @@ public sealed class NutritionSourceTests
                 NutritionSourceKind.ManualInput,
                 (DataQuality)int.MaxValue,
                 "Source"));
+    }
+
+    [Fact]
+    public void Constructor_WithUnknownSourceAndKnownQuality_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new NutritionSource(
+                NutritionSourceKind.Unknown,
+                DataQuality.Exact,
+                "Unknown source"));
+    }
+
+    [Theory]
+    [InlineData(DataQuality.Exact)]
+    [InlineData(DataQuality.Verified)]
+    public void Constructor_WithDishPhotoAndReliableQuality_ThrowsArgumentException(
+        DataQuality quality)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new NutritionSource(
+                NutritionSourceKind.DishPhoto,
+                quality,
+                "Dish photo",
+                "dish-photo:42"));
     }
 
     [Fact]

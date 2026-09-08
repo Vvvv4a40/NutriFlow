@@ -1,3 +1,5 @@
+using NutriFlow.Domain;
+
 namespace NutriFlow.Infrastructure.Persistence;
 
 internal sealed class MealEntryRecord
@@ -13,5 +15,6 @@ internal sealed class MealEntryRecord
     public decimal ProteinGrams { get; set; }
     public decimal FatGrams { get; set; }
     public decimal CarbohydratesGrams { get; set; }
+    public DataQuality Quality { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }

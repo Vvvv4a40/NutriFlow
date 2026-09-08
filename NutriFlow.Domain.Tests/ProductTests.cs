@@ -4,6 +4,31 @@ namespace NutriFlow.Domain.Tests;
 
 public sealed class ProductTests
 {
+    [Theory]
+    [InlineData(1000.01, 10, 10, 10)]
+    [InlineData(100, 100.01, 10, 10)]
+    [InlineData(100, 10, 100.01, 10)]
+    [InlineData(100, 10, 10, 100.01)]
+    public void Constructor_WithImpossiblePer100GramNutrition_ThrowsArgumentException(
+        decimal calories,
+        decimal proteinGrams,
+        decimal fatGrams,
+        decimal carbohydratesGrams)
+    {
+        NutritionValues nutrition = new NutritionValues(
+            calories,
+            proteinGrams,
+            fatGrams,
+            carbohydratesGrams);
+        NutritionSource source = new NutritionSource(
+            NutritionSourceKind.ManualInput,
+            DataQuality.Exact,
+            "Test input");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new Product("Test", nutrition, source));
+    }
+
     [Fact]
     public void Constructor_StoresProductData()
     {
@@ -42,6 +67,16 @@ public sealed class ProductTests
     {
         Assert.Throws<ArgumentException>(
             () => new Product(name, CreateNutrition(), CreateSource()));
+    }
+
+    [Fact]
+    public void Constructor_WithTooLongName_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            new Product(
+                new string('x', 201),
+                CreateNutrition(),
+                CreateSource()));
     }
 
     [Fact]

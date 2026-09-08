@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light">
     <meta name="theme-color" content="#185b45">
     <title>NutriFlow — дневник питания</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
@@ -21,8 +22,8 @@
         </div>
 
         <div class="header-actions">
-            <label class="date-control" for="meal-date">
-                <span>День</span>
+            <label id="date-control" class="date-control" for="meal-date">
+                <span id="date-control-label">День</span>
                 <input id="meal-date" type="date">
             </label>
             <span id="api-status" class="status-indicator is-checking">
@@ -42,6 +43,13 @@
                 <p id="global-error-text"></p>
             </div>
             <button id="dismiss-error-button" class="icon-button" type="button" aria-label="Закрыть сообщение">×</button>
+        </div>
+
+        <div id="capabilities-banner" class="capabilities-banner" role="status" hidden>
+            <div>
+                <strong id="capabilities-title">Демонстрационный режим</strong>
+                <p id="capabilities-text"></p>
+            </div>
         </div>
 
         <section class="daily-section" aria-labelledby="daily-title">
@@ -161,24 +169,34 @@
         </section>
     </main>
 
-    <dialog id="catalog-dialog" class="catalog-dialog">
+    <dialog id="catalog-dialog" class="catalog-dialog" aria-labelledby="catalog-dialog-title">
         <div class="dialog-shell">
             <header class="dialog-header">
                 <div>
                     <p class="eyebrow">Каталог</p>
-                    <h2>Добавить данные продукта</h2>
+                    <h2 id="catalog-dialog-title">Добавить данные продукта</h2>
                     <p id="catalog-context" class="dialog-description">Выберите удобный источник.</p>
                 </div>
                 <button id="close-catalog-button" class="icon-button" type="button" aria-label="Закрыть каталог">×</button>
             </header>
 
             <div class="tabs" role="tablist" aria-label="Способ добавления продукта">
-                <button class="tab is-active" type="button" role="tab" aria-selected="true" data-tab="barcode">Штрихкод</button>
-                <button class="tab" type="button" role="tab" aria-selected="false" data-tab="label">Фото этикетки</button>
-                <button class="tab" type="button" role="tab" aria-selected="false" data-tab="manual">Ручной ввод</button>
+                <button id="catalog-tab-barcode" class="tab is-active" type="button" role="tab"
+                        aria-selected="true" aria-controls="catalog-panel-barcode" tabindex="0"
+                        data-tab="barcode">Штрихкод</button>
+                <button id="catalog-tab-label" class="tab" type="button" role="tab"
+                        aria-selected="false" aria-controls="catalog-panel-label" aria-disabled="true"
+                        tabindex="-1" data-tab="label" disabled>
+                    <span>Фото этикетки</span>
+                    <small id="label-tab-note">проверяем</small>
+                </button>
+                <button id="catalog-tab-manual" class="tab" type="button" role="tab"
+                        aria-selected="false" aria-controls="catalog-panel-manual" tabindex="-1"
+                        data-tab="manual">Ручной ввод</button>
             </div>
 
-            <section class="tab-panel is-active" data-panel="barcode" role="tabpanel">
+            <section id="catalog-panel-barcode" class="tab-panel is-active" data-panel="barcode"
+                     role="tabpanel" aria-labelledby="catalog-tab-barcode">
                 <form id="barcode-form" class="stack-form">
                     <label class="field">
                         <span>Штрихкод GTIN</span>
@@ -192,20 +210,27 @@
                 <div id="barcode-result" class="result-slot" aria-live="polite"></div>
             </section>
 
-            <section class="tab-panel" data-panel="label" role="tabpanel" hidden>
+            <section id="catalog-panel-label" class="tab-panel" data-panel="label"
+                     role="tabpanel" aria-labelledby="catalog-tab-label" hidden>
                 <form id="label-form" class="stack-form">
                     <label id="photo-dropzone" class="dropzone">
-                        <input id="label-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp">
+                        <input id="label-photo" name="photo" type="file"
+                               accept="image/jpeg,image/png,image/webp" disabled>
                         <span class="dropzone-icon" aria-hidden="true">＋</span>
                         <strong>Выберите фотографию этикетки</strong>
                         <span>JPEG, PNG или WebP, не более 8 МБ</span>
                     </label>
-                    <button class="button button-primary" type="submit">Распознать этикетку</button>
+                    <button class="button button-primary" type="submit" disabled>Распознать этикетку</button>
                 </form>
+                <div id="label-unavailable" class="notice notice-warning" role="status">
+                    <strong>Распознавание фото пока недоступно</strong>
+                    <span id="label-unavailable-text">Возможности сервера ещё проверяются.</span>
+                </div>
                 <div id="label-result" class="result-slot" aria-live="polite"></div>
             </section>
 
-            <section class="tab-panel" data-panel="manual" role="tabpanel" hidden>
+            <section id="catalog-panel-manual" class="tab-panel" data-panel="manual"
+                     role="tabpanel" aria-labelledby="catalog-tab-manual" hidden>
                 <form id="manual-product-form" class="stack-form">
                     <label class="field">
                         <span>Название продукта</span>
@@ -214,19 +239,19 @@
                     <div class="field-grid field-grid-two">
                         <label class="field">
                             <span>Калории, ккал / 100 г</span>
-                            <input name="calories" type="number" min="0" step="0.01" required>
+                            <input name="calories" type="number" min="0" max="1000" step="0.01" required>
                         </label>
                         <label class="field">
                             <span>Белки, г / 100 г</span>
-                            <input name="proteinGrams" type="number" min="0" step="0.01" required>
+                            <input name="proteinGrams" type="number" min="0" max="100" step="0.01" required>
                         </label>
                         <label class="field">
                             <span>Жиры, г / 100 г</span>
-                            <input name="fatGrams" type="number" min="0" step="0.01" required>
+                            <input name="fatGrams" type="number" min="0" max="100" step="0.01" required>
                         </label>
                         <label class="field">
                             <span>Углеводы, г / 100 г</span>
-                            <input name="carbohydratesGrams" type="number" min="0" step="0.01" required>
+                            <input name="carbohydratesGrams" type="number" min="0" max="100" step="0.01" required>
                         </label>
                     </div>
                     <label class="field">

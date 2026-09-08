@@ -17,7 +17,12 @@ public sealed class OpenAiMealParser : IMealParser
         Never invent a missing mass. Use null with quality unknown and add one compact clarification question.
         Use quality estimated when the user says approximately, about, roughly, or an equivalent phrase.
         Use quality exact for a numeric mass that the user does not qualify as approximate.
-        Assume an ingredient fully entered the dish unless the user explicitly describes a removed part.
+        For every ingredient, keep the original added weight and the explicitly removed weight separate.
+        Use removedWeightInGrams 0 with quality exact when no removal is mentioned. Never subtract it yourself.
+        If removal is mentioned but its weight is unknown, use null with quality unknown and ask one question.
+        A portion must contain either its weight in grams or its fraction of the final dish, never both.
+        For a product eaten directly, create a one-ingredient dish and repeat the eaten mass as the
+        ingredient weight, final weight, and portion weight; copying that mass is not nutrition arithmetic.
         Do not ask about nutritionally insignificant spices.
         Ask a question only when at least two reasonable interpretations materially change the result,
         the answer is not present elsewhere, and a safe assumption could seriously distort the calculation.
@@ -48,11 +53,13 @@ public sealed class OpenAiMealParser : IMealParser
                     "items": {
                       "type": "object",
                       "additionalProperties": false,
-                      "required": ["productName", "weightInGrams", "weightQuality"],
+                      "required": ["productName", "weightInGrams", "weightQuality", "removedWeightInGrams", "removedWeightQuality"],
                       "properties": {
                         "productName": { "type": "string", "minLength": 1, "maxLength": 200 },
                         "weightInGrams": { "type": ["number", "null"], "exclusiveMinimum": 0 },
-                        "weightQuality": { "type": "string", "enum": ["exact", "estimated", "unknown"] }
+                        "weightQuality": { "type": "string", "enum": ["exact", "estimated", "unknown"] },
+                        "removedWeightInGrams": { "type": ["number", "null"], "minimum": 0 },
+                        "removedWeightQuality": { "type": "string", "enum": ["exact", "estimated", "unknown"] }
                       }
                     }
                   },
@@ -64,9 +71,10 @@ public sealed class OpenAiMealParser : IMealParser
                     "items": {
                       "type": "object",
                       "additionalProperties": false,
-                      "required": ["weightInGrams", "weightQuality"],
+                      "required": ["weightInGrams", "fractionOfDish", "weightQuality"],
                       "properties": {
-                        "weightInGrams": { "type": "number", "exclusiveMinimum": 0 },
+                        "weightInGrams": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+                        "fractionOfDish": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1 },
                         "weightQuality": { "type": "string", "enum": ["exact", "estimated"] }
                       }
                     }
@@ -218,16 +226,16 @@ public sealed class OpenAiMealParser : IMealParser
                 "OpenAI response does not contain structured output.");
         }
 
-        foreach (OpenAiOutputItem item in response.Output)
+        foreach (OpenAiOutputItem? item in response.Output)
         {
-            if (item.Content is null)
+            if (item?.Content is null)
             {
                 continue;
             }
 
             string? outputText = item.Content
                 .FirstOrDefault(content =>
-                    content.Type == "output_text" &&
+                    content?.Type == "output_text" &&
                     !string.IsNullOrWhiteSpace(content.Text))
                 ?.Text;
 
@@ -249,11 +257,22 @@ public sealed class OpenAiMealParser : IMealParser
                 "OpenAI structured output is incomplete.");
         }
 
-        List<DishDraft> dishes = draft.Dishes
-            .Select(MapDish)
-            .ToList();
+        if (draft.Dishes.Any(static dish => dish is null) ||
+            draft.ClarificationQuestions.Any(
+                static question => string.IsNullOrWhiteSpace(question)))
+        {
+            throw new InvalidDataException(
+                "OpenAI structured output contains invalid array items.");
+        }
 
-        return new MealDraft(dishes, draft.ClarificationQuestions);
+        List<DishDraft> dishes = draft.Dishes
+            .Select(dish => MapDish(dish!))
+            .ToList();
+        string[] clarificationQuestions = draft.ClarificationQuestions
+            .Select(question => question!)
+            .ToArray();
+
+        return new MealDraft(dishes, clarificationQuestions);
     }
 
     private static DishDraft MapDish(AiDish? dish)
@@ -264,16 +283,32 @@ public sealed class OpenAiMealParser : IMealParser
                 "OpenAI returned an incomplete dish.");
         }
 
+        if (dish.Ingredients.Any(static ingredient => ingredient is null) ||
+            dish.Portions.Any(static portion => portion is null))
+        {
+            throw new InvalidDataException(
+                "OpenAI returned a dish with invalid array items.");
+        }
+
         List<IngredientDraft> ingredients = dish.Ingredients
-            .Select(ingredient => new IngredientDraft(
-                ingredient.ProductName!,
-                ingredient.WeightInGrams,
-                MapWeightQuality(ingredient.WeightQuality)))
+            .Select(ingredient =>
+            {
+                AiIngredient value = ingredient!;
+                bool omittedLegacyRemoval = value.RemovedWeightInGrams is null &&
+                                            value.RemovedWeightQuality is null;
+
+                return new IngredientDraft(
+                    value.ProductName!,
+                    value.WeightInGrams,
+                    MapWeightQuality(value.WeightQuality),
+                    omittedLegacyRemoval ? 0m : value.RemovedWeightInGrams,
+                    omittedLegacyRemoval
+                        ? DataQuality.Exact
+                        : MapWeightQuality(value.RemovedWeightQuality));
+            })
             .ToList();
         List<PortionDraft> portions = dish.Portions
-            .Select(portion => new PortionDraft(
-                portion.WeightInGrams,
-                MapWeightQuality(portion.WeightQuality)))
+            .Select(MapPortion)
             .ToList();
 
         return new DishDraft(
@@ -282,6 +317,23 @@ public sealed class OpenAiMealParser : IMealParser
             dish.FinalWeightInGrams,
             MapWeightQuality(dish.FinalWeightQuality),
             portions);
+    }
+
+    private static PortionDraft MapPortion(AiPortion? portion)
+    {
+        if (portion is null ||
+            (portion.WeightInGrams is null) ==
+            (portion.FractionOfDish is null))
+        {
+            throw new InvalidDataException(
+                "OpenAI returned a portion that must have exactly one weight representation.");
+        }
+
+        DataQuality quality = MapWeightQuality(portion.WeightQuality);
+
+        return portion.WeightInGrams is not null
+            ? new PortionDraft(portion.WeightInGrams.Value, quality)
+            : PortionDraft.FromFraction(portion.FractionOfDish!.Value, quality);
     }
 
     private static DataQuality MapWeightQuality(string? quality)
@@ -298,11 +350,11 @@ public sealed class OpenAiMealParser : IMealParser
 
     private sealed record OpenAiResponse(
         [property: JsonPropertyName("output")]
-        IReadOnlyList<OpenAiOutputItem>? Output);
+        IReadOnlyList<OpenAiOutputItem?>? Output);
 
     private sealed record OpenAiOutputItem(
         [property: JsonPropertyName("content")]
-        IReadOnlyList<OpenAiContent>? Content);
+        IReadOnlyList<OpenAiContent?>? Content);
 
     private sealed record OpenAiContent(
         [property: JsonPropertyName("type")]
@@ -311,22 +363,25 @@ public sealed class OpenAiMealParser : IMealParser
         string? Text);
 
     private sealed record AiMealDraft(
-        IReadOnlyList<AiDish>? Dishes,
-        IReadOnlyList<string>? ClarificationQuestions);
+        IReadOnlyList<AiDish?>? Dishes,
+        IReadOnlyList<string?>? ClarificationQuestions);
 
     private sealed record AiDish(
         string? Name,
-        IReadOnlyList<AiIngredient>? Ingredients,
+        IReadOnlyList<AiIngredient?>? Ingredients,
         decimal? FinalWeightInGrams,
         string? FinalWeightQuality,
-        IReadOnlyList<AiPortion>? Portions);
+        IReadOnlyList<AiPortion?>? Portions);
 
     private sealed record AiIngredient(
         string? ProductName,
         decimal? WeightInGrams,
-        string? WeightQuality);
+        string? WeightQuality,
+        decimal? RemovedWeightInGrams,
+        string? RemovedWeightQuality);
 
     private sealed record AiPortion(
-        decimal WeightInGrams,
+        decimal? WeightInGrams,
+        decimal? FractionOfDish,
         string? WeightQuality);
 }
