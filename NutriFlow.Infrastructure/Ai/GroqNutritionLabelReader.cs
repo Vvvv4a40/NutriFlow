@@ -5,7 +5,7 @@ using NutriFlow.Domain;
 
 namespace NutriFlow.Infrastructure.Ai;
 
-public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
+public sealed class GroqNutritionLabelReader : INutritionLabelReader
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -15,7 +15,7 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
     private readonly HttpClient _httpClient;
     private readonly string _model;
 
-    public OpenAiNutritionLabelReader(HttpClient httpClient, string model)
+    public GroqNutritionLabelReader(HttpClient httpClient, string model)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
@@ -41,10 +41,13 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
         object requestBody = new
         {
             model = _model,
-            store = false,
-            instructions = AiNutritionLabelContract.Instructions,
-            input = new[]
+            messages = new object[]
             {
+                new
+                {
+                    role = "system",
+                    content = AiNutritionLabelContract.Instructions
+                },
                 new
                 {
                     role = "user",
@@ -52,32 +55,50 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
                     {
                         new
                         {
-                            type = "input_text",
+                            type = "text",
                             text = AiNutritionLabelContract.InputPrompt
                         },
                         new
                         {
-                            type = "input_image",
-                            image_url = imageDataUrl,
-                            detail = "high"
+                            type = "image_url",
+                            image_url = new
+                            {
+                                url = imageDataUrl
+                            }
                         }
                     }
                 }
             },
-            text = new
+            response_format = new
             {
-                format = new
+                type = "json_schema",
+                json_schema = new
                 {
-                    type = "json_schema",
                     name = AiNutritionLabelContract.SchemaName,
                     strict = true,
                     schema = AiNutritionLabelContract.Schema
                 }
             },
-            max_output_tokens = 1500
+            max_completion_tokens = 1500,
+            stream = false,
+            reasoning_effort = "none"
         };
 
-        using HttpRequestMessage request = new(HttpMethod.Post, "responses")
+        GroqChatResponse? responseBody = await SendAsync(
+            requestBody,
+            cancellationToken);
+        string structuredOutput = ExtractStructuredOutput(responseBody);
+
+        return AiNutritionLabelContract.Deserialize(structuredOutput, "Groq");
+    }
+
+    private async Task<GroqChatResponse?> SendAsync(
+        object requestBody,
+        CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = new(
+            HttpMethod.Post,
+            "chat/completions")
         {
             Content = JsonContent.Create(requestBody)
         };
@@ -88,65 +109,49 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
 
         response.EnsureSuccessStatusCode();
 
-        OpenAiResponse? responseBody;
-
         try
         {
-            responseBody = await response.Content.ReadFromJsonAsync<OpenAiResponse>(
+            return await response.Content.ReadFromJsonAsync<GroqChatResponse>(
                 SerializerOptions,
                 cancellationToken);
         }
         catch (JsonException exception)
         {
             throw new InvalidDataException(
-                "OpenAI returned malformed response JSON.",
+                "Groq returned malformed response JSON.",
                 exception);
         }
-
-        return AiNutritionLabelContract.Deserialize(
-            ExtractStructuredOutput(responseBody),
-            "OpenAI");
     }
 
-    private static string ExtractStructuredOutput(OpenAiResponse? response)
+    private static string ExtractStructuredOutput(GroqChatResponse? response)
     {
-        if (response?.Output is null)
+        GroqChoice? choice = response?.Choices?.FirstOrDefault();
+
+        if (choice is null ||
+            !string.Equals(
+                choice.FinishReason,
+                "stop",
+                StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(choice.Message?.Content))
         {
             throw new InvalidDataException(
-                "OpenAI response does not contain structured label output.");
+                "Groq response does not contain complete structured label output.");
         }
 
-        if (response.Output.Any(item =>
-                item is null ||
-                item.Content?.Any(content => content is null) == true))
-        {
-            throw new InvalidDataException(
-                "OpenAI response contains null output or content items.");
-        }
-
-        string? outputText = response.Output
-            .SelectMany(item =>
-                item!.Content ?? Array.Empty<OpenAiContent?>())
-            .FirstOrDefault(content =>
-                content!.Type == "output_text" &&
-                !string.IsNullOrWhiteSpace(content.Text))
-            ?.Text;
-
-        return outputText ?? throw new InvalidDataException(
-            "OpenAI response does not contain structured label output.");
+        return choice.Message.Content;
     }
 
-    private sealed record OpenAiResponse(
-        [property: JsonPropertyName("output")]
-        IReadOnlyList<OpenAiOutputItem?>? Output);
+    private sealed record GroqChatResponse(
+        [property: JsonPropertyName("choices")]
+        IReadOnlyList<GroqChoice?>? Choices);
 
-    private sealed record OpenAiOutputItem(
+    private sealed record GroqChoice(
+        [property: JsonPropertyName("message")]
+        GroqMessage? Message,
+        [property: JsonPropertyName("finish_reason")]
+        string? FinishReason);
+
+    private sealed record GroqMessage(
         [property: JsonPropertyName("content")]
-        IReadOnlyList<OpenAiContent?>? Content);
-
-    private sealed record OpenAiContent(
-        [property: JsonPropertyName("type")]
-        string? Type,
-        [property: JsonPropertyName("text")]
-        string? Text);
+        string? Content);
 }

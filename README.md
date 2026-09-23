@@ -56,7 +56,7 @@ NutriFlow — веб-приложение для восстановления с
 - дневная цель, съеденные порции, остаток и превышение по каждому показателю;
 - локальный каталог SQLite с ручным вводом и сохранением происхождения данных;
 - поиск упакованного продукта по штрихкоду через Open Food Facts с local-first кэшированием;
-- разбор произвольного текста через OpenAI Responses API со строгой JSON-схемой;
+- разбор произвольного текста через Groq Chat Completions или OpenAI Responses API со строгой JSON-схемой;
 - извлечение черновика КБЖУ из фотографии этикетки с обязательной проверкой перед сохранением;
 - OpenAPI и Swagger UI в окружении `Development`;
 - liveness- и readiness-проверки приложения.
@@ -76,8 +76,10 @@ flowchart LR
     Workflow --> Parser{IMealParser}
     Parser --> Fake[Fake provider]
     Parser --> OpenAI[OpenAI Responses API]
+    Parser --> Groq[Groq Chat Completions]
     Api --> Labels[Label photo analysis]
     Labels --> OpenAI
+    Labels --> Groq
 ```
 
 Зависимости направлены к доменному ядру: `Domain` не знает об HTTP, EF Core, SQLite или внешних сервисах. `Infrastructure` реализует хранение и интеграции, а `Api` соединяет компоненты и предоставляет HTTP-контракты.
@@ -85,7 +87,7 @@ flowchart LR
 | Проект | Ответственность |
 | --- | --- |
 | `NutriFlow.Domain` | Бизнес-модель, состояния и расчёты КБЖУ |
-| `NutriFlow.Infrastructure` | SQLite, EF Core, Open Food Facts, OpenAI и хранение фотографий |
+| `NutriFlow.Infrastructure` | SQLite, EF Core, Open Food Facts, AI-провайдеры и хранение фотографий |
 | `NutriFlow.Api` | Minimal API, сквозной workflow и веб-интерфейс |
 | `NutriFlow.Console` | Изолированный сценарий расчёта через доменную модель |
 | `NutriFlow.Domain.Tests` | Тесты доменных правил и арифметики |
@@ -119,6 +121,24 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 4. Убедитесь, что порции появились в дневном прогрессе.
 
 Fake-провайдер принимает только заранее определённые последовательности. Поиск по штрихкоду через Open Food Facts остаётся настоящим сетевым запросом при отсутствии продукта в локальном каталоге.
+
+## Подключение Groq
+
+Ключ создаётся в [Groq Console](https://console.groq.com/keys). Он не хранится в
+`appsettings.json` и не должен попадать в Git. Для локального запуска используется
+.NET User Secrets:
+
+```powershell
+dotnet user-secrets set "Ai:Provider" "Groq" --project NutriFlow.Api
+dotnet user-secrets set "Ai:Groq:ApiKey" "<groq-api-key>" --project NutriFlow.Api
+dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
+```
+
+После переключения разбор сообщений и фотографий выполняется облачной моделью
+Groq через Chat Completions API. По умолчанию для обоих режимов выбрана
+`qwen/qwen3.8-27b`; идентификаторы текстовой и vision-моделей вынесены в
+конфигурацию. Ответ запрашивается по строгой JSON-схеме, а итоговое КБЖУ
+по-прежнему рассчитывает только C#-код.
 
 ## Подключение OpenAI
 
@@ -168,10 +188,14 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 | `Storage:LabelPhotosPath` | `data/label-photos` | Каталог сохранённых фотографий этикеток |
 | `OpenFoodFacts:BaseUrl` | `https://world.openfoodfacts.org/` | Базовый URL продуктового сервиса |
 | `OpenFoodFacts:UserAgent` | URL репозитория NutriFlow | Идентификация клиента перед внешним сервисом |
-| `Ai:Provider` | `Fake` | Провайдер разбора: `Fake` или `OpenAI` |
+| `Ai:Provider` | `Fake` | Провайдер разбора: `Fake`, `Groq` или `OpenAI` |
 | `Ai:OpenAI:BaseUrl` | `https://api.openai.com/v1/` | Базовый URL OpenAI API |
 | `Ai:OpenAI:Model` | `gpt-5.4-mini` | Модель для структурированного разбора |
 | `Ai:OpenAI:ApiKey` | не задан | Секрет, обязательный для провайдера `OpenAI` |
+| `Ai:Groq:BaseUrl` | `https://api.groq.com/openai/v1/` | Базовый URL Groq API |
+| `Ai:Groq:TextModel` | `qwen/qwen3.8-27b` | Модель для разбора сообщений |
+| `Ai:Groq:VisionModel` | `qwen/qwen3.8-27b` | Модель для чтения этикеток |
+| `Ai:Groq:ApiKey` | не задан | Секрет, обязательный для провайдера `Groq` |
 | `Demo:SeedData` | `true` | Добавить воспроизводимые продукты для Fake-сценария |
 
 ## Проверка качества
@@ -193,7 +217,7 @@ dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
 GitHub Actions выполняет тот же Release-конвейер, превращает предупреждения
 восстановления пакетов, включая NuGet Audit, в ошибки и дополнительно собирает
 Docker-образ. Тесты внешних адаптеров используют управляемые ответы HTTP и не
-требуют настоящего OpenAI-ключа.
+требуют настоящих ключей Groq или OpenAI.
 
 ## Docker
 
@@ -207,9 +231,10 @@ docker run --rm --name nutriflow `
 
 Приложение будет доступно по адресу `http://localhost:8080`. Контейнер работает от непривилегированного пользователя, применяет миграции перед запуском HTTP endpoint и хранит SQLite вместе с фотографиями в постоянном volume `/data`.
 
-Для внешнего развёртывания TLS завершается на reverse proxy или платформе, а OpenAI-ключ передаётся через её хранилище секретов.
-При включении реального провайдера также нужно установить `Ai__Provider=OpenAI`
-и `Demo__SeedData=false`; ключ нельзя передавать в образ или сохранять в Git.
+Для внешнего развёртывания TLS завершается на reverse proxy или платформе, а
+ключ AI-провайдера передаётся через её хранилище секретов. Для Groq нужно
+установить `Ai__Provider=Groq`, `Ai__Groq__ApiKey` и `Demo__SeedData=false`;
+ключ нельзя передавать в образ или сохранять в Git.
 
 ## Источник Open Food Facts и лицензирование
 
