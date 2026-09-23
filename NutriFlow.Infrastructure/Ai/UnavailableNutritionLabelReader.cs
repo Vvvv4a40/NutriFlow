@@ -10,6 +10,6 @@ public sealed class UnavailableNutritionLabelReader : INutritionLabelReader
         CancellationToken cancellationToken = default)
     {
         throw new NotSupportedException(
-            "Label analysis requires the OpenAI provider to be configured.");
+            "Label analysis requires an AI provider to be configured.");
     }
 }

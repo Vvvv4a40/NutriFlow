@@ -111,16 +111,19 @@ builder.Services.AddHttpClient<IExternalProductProvider, OpenFoodFactsClient>(
             openFoodFactsUserAgent);
     });
 
-string aiProvider = builder.Configuration["Ai:Provider"] ?? "Fake";
+string configuredAiProvider = builder.Configuration["Ai:Provider"] ?? "Fake";
+string aiProvider;
 
-if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
+if (configuredAiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
 {
+    aiProvider = "Fake";
     builder.Services.AddSingleton<IMealParser, FakeMealParser>();
     builder.Services.AddSingleton<INutritionLabelReader,
         UnavailableNutritionLabelReader>();
 }
-else if (aiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+else if (configuredAiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
 {
+    aiProvider = "OpenAI";
     string? apiKey = builder.Configuration["Ai:OpenAI:ApiKey"];
 
     if (string.IsNullOrWhiteSpace(apiKey))
@@ -164,10 +167,62 @@ else if (aiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
             openAiModel);
     });
 }
+else if (configuredAiProvider.Equals("Groq", StringComparison.OrdinalIgnoreCase))
+{
+    aiProvider = "Groq";
+    string? apiKey = builder.Configuration["Ai:Groq:ApiKey"];
+
+    if (string.IsNullOrWhiteSpace(apiKey))
+    {
+        throw new InvalidOperationException(
+            "Ai:Groq:ApiKey must be configured when the Groq provider is enabled.");
+    }
+
+    string groqBaseUrl =
+        builder.Configuration["Ai:Groq:BaseUrl"] ??
+        "https://api.groq.com/openai/v1/";
+    Uri groqBaseAddress = new Uri(
+        $"{groqBaseUrl.TrimEnd('/')}/",
+        UriKind.Absolute);
+    string groqTextModel =
+        builder.Configuration["Ai:Groq:TextModel"] ??
+        "qwen/qwen3.8-27b";
+    string groqVisionModel =
+        builder.Configuration["Ai:Groq:VisionModel"] ??
+        "qwen/qwen3.8-27b";
+
+    builder.Services.AddHttpClient(
+        "Groq",
+        client =>
+        {
+            client.BaseAddress = groqBaseAddress;
+            client.Timeout = TimeSpan.FromSeconds(45);
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+        });
+    builder.Services.AddScoped<IMealParser>(serviceProvider =>
+    {
+        IHttpClientFactory httpClientFactory =
+            serviceProvider.GetRequiredService<IHttpClientFactory>();
+
+        return new GroqMealParser(
+            httpClientFactory.CreateClient("Groq"),
+            groqTextModel);
+    });
+    builder.Services.AddScoped<INutritionLabelReader>(serviceProvider =>
+    {
+        IHttpClientFactory httpClientFactory =
+            serviceProvider.GetRequiredService<IHttpClientFactory>();
+
+        return new GroqNutritionLabelReader(
+            httpClientFactory.CreateClient("Groq"),
+            groqVisionModel);
+    });
+}
 else
 {
     throw new InvalidOperationException(
-        $"Unsupported AI provider '{aiProvider}'. Use 'Fake' or 'OpenAI'.");
+        $"Unsupported AI provider '{configuredAiProvider}'. Use 'Fake', 'OpenAI', or 'Groq'.");
 }
 
 WebApplication app = builder.Build();
@@ -239,13 +294,13 @@ app.MapHealthChecks(
         Predicate = registration => registration.Tags.Contains("ready")
     });
 
-bool supportsAiInput = aiProvider.Equals(
-    "OpenAI",
-    StringComparison.OrdinalIgnoreCase);
+bool supportsAiInput = !aiProvider.Equals(
+    "Fake",
+    StringComparison.Ordinal);
 app.MapGet(
         "/api/capabilities",
         () => Results.Ok(new ApplicationCapabilitiesResponse(
-            supportsAiInput ? "OpenAI" : "Fake",
+            aiProvider,
             supportsAiInput,
             supportsAiInput)))
     .WithName("GetApplicationCapabilities")

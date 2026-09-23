@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Infrastructure.Ai;
 using NutriFlow.Infrastructure.LabelPhotos;
 
 namespace NutriFlow.Api.Tests;
@@ -73,6 +74,42 @@ public sealed class MealWorkflowApiTests
         Assert.Equal("Fake", capabilities.AiProvider);
         Assert.False(capabilities.SupportsFreeText);
         Assert.False(capabilities.SupportsLabelPhotos);
+    }
+
+    [Fact]
+    public async Task Capabilities_WithGroqProvider_ReportsAiFeaturesAndRegistrations()
+    {
+        await using TestApiFactory factory = new TestApiFactory(
+            aiProvider: "Groq");
+        using HttpClient client = factory.CreateClient();
+
+        ApplicationCapabilitiesResponse capabilities =
+            await client.GetFromJsonAsync<ApplicationCapabilitiesResponse>(
+                "/api/capabilities",
+                JsonOptions) ?? throw new InvalidDataException();
+
+        Assert.Equal("Groq", capabilities.AiProvider);
+        Assert.True(capabilities.SupportsFreeText);
+        Assert.True(capabilities.SupportsLabelPhotos);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.IsType<GroqMealParser>(
+            scope.ServiceProvider.GetRequiredService<IMealParser>());
+        Assert.IsType<GroqNutritionLabelReader>(
+            scope.ServiceProvider.GetRequiredService<INutritionLabelReader>());
+
+        IHttpClientFactory httpClientFactory =
+            scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+        using HttpClient groqClient = httpClientFactory.CreateClient("Groq");
+        Assert.Equal(
+            new Uri("https://api.groq.test/openai/v1/"),
+            groqClient.BaseAddress);
+        Assert.Equal(
+            "Bearer",
+            groqClient.DefaultRequestHeaders.Authorization?.Scheme);
+        Assert.Equal(
+            "test-key",
+            groqClient.DefaultRequestHeaders.Authorization?.Parameter);
     }
 
     [Fact]
@@ -752,15 +789,18 @@ public sealed class MealWorkflowApiTests
             $"nutriflow-api-{Guid.NewGuid():N}");
         private readonly bool _seedDemoData;
         private readonly IMealParser? _parser;
+        private readonly string _aiProvider;
 
         public TestApiFactory(
             bool applyMigrations = true,
             bool seedDemoData = true,
-            IMealParser? parser = null)
+            IMealParser? parser = null,
+            string aiProvider = "Fake")
         {
             _applyMigrations = applyMigrations;
             _seedDemoData = seedDemoData;
             _parser = parser;
+            _aiProvider = aiProvider;
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -777,7 +817,13 @@ public sealed class MealWorkflowApiTests
             builder.UseSetting(
                 "Storage:LabelPhotosPath",
                 Path.Combine(_directoryPath, "label-photos"));
-            builder.UseSetting("Ai:Provider", "Fake");
+            builder.UseSetting("Ai:Provider", _aiProvider);
+            builder.UseSetting("Ai:Groq:ApiKey", "test-key");
+            builder.UseSetting(
+                "Ai:Groq:BaseUrl",
+                "https://api.groq.test/openai/v1");
+            builder.UseSetting("Ai:Groq:TextModel", "qwen-test");
+            builder.UseSetting("Ai:Groq:VisionModel", "qwen-vision-test");
             builder.UseSetting("Demo:SeedData", _seedDemoData.ToString());
 
             if (_parser is not null)
