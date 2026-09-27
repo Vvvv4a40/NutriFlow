@@ -12,7 +12,12 @@ internal static class AiNutritionLabelContract
         compact clarification question.
         Prefer a table expressed per 100 grams when present. Do not convert between a serving,
         100 milliliters, and 100 grams. Do not infer or complete values that are not readable.
-        Use null for every missing or unreadable value and add compact clarification questions.
+        Use null for every missing or unreadable requested value and add compact clarification questions.
+        Extract only productName, basis, calories, proteinGrams, fatGrams, and carbohydratesGrams.
+        Ask questions only about missing, unreadable, or genuinely ambiguous requested nutrition values
+        or their basis. Do not ask about sugar, fiber, salt, ingredients, or other unrequested details.
+        Copy the printed carbohydrate value without asking whether it includes sugar or fiber.
+        A complete readable table per 100 grams must have an empty clarificationQuestions list.
         Do not provide confidence percentages. ProductName may be null when it is not visible.
         """;
 
