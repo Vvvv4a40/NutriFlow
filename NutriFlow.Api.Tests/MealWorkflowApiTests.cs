@@ -40,11 +40,35 @@ public sealed class MealWorkflowApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("NutriFlow", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"voice-record-button\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"voice-cancel-button\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"voice-status\"", html, StringComparison.Ordinal);
+        Assert.Contains("src=\"/js/app.js\" type=\"module\"", html, StringComparison.Ordinal);
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
         Assert.Contains(
             "default-src 'self'",
             Assert.Single(response.Headers.GetValues("Content-Security-Policy")),
             StringComparison.Ordinal);
+        Assert.Equal(
+            "camera=(), geolocation=(), microphone=(self)",
+            Assert.Single(response.Headers.GetValues("Permissions-Policy")));
+    }
+
+    [Fact]
+    public async Task SpeechCaptureModule_IsServedAsJavaScriptWithSameOriginPolicy()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/js/speech-capture.mjs");
+        string script = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/javascript", response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("export function createSpeechCapture", script, StringComparison.Ordinal);
+        Assert.Equal(
+            "camera=(), geolocation=(), microphone=(self)",
+            Assert.Single(response.Headers.GetValues("Permissions-Policy")));
     }
 
     [Fact]

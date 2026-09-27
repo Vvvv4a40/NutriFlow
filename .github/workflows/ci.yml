@@ -33,6 +33,17 @@ jobs:
       - name: Restore projects
         run: dotnet restore NutriFlow.sln --locked-mode --warnaserror
 
+      - name: Set up Node.js for frontend checks
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Verify frontend
+        run: |
+          node --check NutriFlow.Api/wwwroot/js/app.js
+          node --test scripts/tests/*.test.mjs
+
       - name: Restore local tools
         run: dotnet tool restore
 

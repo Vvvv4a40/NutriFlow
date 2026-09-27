@@ -274,7 +274,7 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     context.Response.Headers["Permissions-Policy"] =
-        "camera=(), geolocation=(), microphone=()";
+        "camera=(), geolocation=(), microphone=(self)";
 
     bool isDevelopmentSwagger = app.Environment.IsDevelopment() &&
                                 context.Request.Path.StartsWithSegments("/swagger");

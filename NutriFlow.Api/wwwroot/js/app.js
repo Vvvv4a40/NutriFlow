@@ -1,3 +1,5 @@
+import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs";
+
 (() => {
     "use strict";
 
@@ -43,6 +45,9 @@
         messageList: document.querySelector("#message-list"),
         messageForm: document.querySelector("#message-form"),
         messageInput: document.querySelector("#message-input"),
+        voiceRecordButton: document.querySelector("#voice-record-button"),
+        voiceCancelButton: document.querySelector("#voice-cancel-button"),
+        voiceStatus: document.querySelector("#voice-status"),
         addMessageButton: document.querySelector("#add-message-button"),
         exampleButton: document.querySelector("#example-button"),
         buildDraftButton: document.querySelector("#build-draft-button"),
@@ -84,11 +89,39 @@
         localMessages: [],
         session: null,
         sessionBusy: false,
+        voicePhase: "idle",
+        voiceNotice: "",
+        voiceError: false,
         catalogIngredientName: null,
         labelDraft: null,
         labelFile: null,
         toastTimer: null
     };
+
+    const speechCapture = createSpeechCapture({
+        transcribe: transcribeAudio,
+        onStateChange: phase => {
+            state.voicePhase = phase;
+            renderMessages();
+            renderPreview();
+
+            if (phase === "idle" && !elements.messageInput.disabled) {
+                elements.messageInput.focus();
+            }
+        },
+        onTranscript: text => {
+            elements.messageInput.value = text;
+            state.voiceNotice = "Текст распознан. Проверьте названия и массы, затем добавьте сообщение.";
+            state.voiceError = false;
+            renderVoiceControls();
+            elements.messageInput.focus();
+        },
+        onError: message => {
+            state.voiceNotice = message;
+            state.voiceError = true;
+            renderVoiceControls();
+        }
+    });
 
     initialize();
 
@@ -115,7 +148,8 @@
             state.capabilities = {
                 aiProvider: String(capabilities?.aiProvider ?? "Unknown"),
                 supportsFreeText: capabilities?.supportsFreeText === true,
-                supportsLabelPhotos: capabilities?.supportsLabelPhotos === true
+                supportsLabelPhotos: capabilities?.supportsLabelPhotos === true,
+                supportsSpeechTranscription: capabilities?.supportsSpeechTranscription === true
             };
         } catch {
             state.capabilities = null;
@@ -126,6 +160,7 @@
     }
 
     function renderCapabilities() {
+        renderVoiceControls();
         const capabilities = state.capabilities;
         const supportsLabelPhotos = capabilities?.supportsLabelPhotos === true;
         const labelSubmitButton = elements.labelForm.querySelector("button[type='submit']");
@@ -162,6 +197,10 @@
 
         if (!capabilities.supportsLabelPhotos) {
             limitations.push("распознавание фотографий этикеток отключено");
+        }
+
+        if (!capabilities.supportsSpeechTranscription) {
+            limitations.push("голосовой ввод отключён");
         }
 
         if (limitations.length === 0) {
@@ -327,6 +366,11 @@
 
     function bindEvents() {
         elements.mealDate.addEventListener("change", () => {
+            if (isVoiceBusy()) {
+                elements.mealDate.value = state.date;
+                return;
+            }
+
             if (state.session && !isSessionConfirmed(state.session)) {
                 state.date = state.session.mealDate ?? state.date;
                 elements.mealDate.value = state.date;
@@ -356,6 +400,27 @@
         });
 
         elements.messageForm.addEventListener("submit", addMessage);
+        elements.messageInput.addEventListener("input", () => {
+            state.voiceNotice = "";
+            state.voiceError = false;
+            renderVoiceControls();
+        });
+        elements.voiceRecordButton.addEventListener("click", () => {
+            if (state.voicePhase === "recording") {
+                speechCapture.stop();
+            } else if (state.voicePhase === "idle" && !getVoiceBlockedReason()) {
+                state.voiceNotice = "";
+                state.voiceError = false;
+                void speechCapture.start();
+            }
+        });
+        elements.voiceCancelButton.addEventListener("click", cancelVoiceCapture);
+        window.addEventListener("pagehide", () => speechCapture.cancel());
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden && isVoiceBusy()) {
+                cancelVoiceCapture();
+            }
+        });
         elements.exampleButton.addEventListener("click", fillExample);
         elements.buildDraftButton.addEventListener("click", createMealSession);
         elements.newSessionButton.addEventListener("click", startNewSession);
@@ -423,6 +488,107 @@
 
             setLabelFile(event.dataTransfer?.files?.[0] ?? null);
         });
+    }
+
+    function isVoiceBusy() {
+        return state.voicePhase !== "idle";
+    }
+
+    function getVoiceBlockedReason() {
+        if (state.capabilitiesLoading) {
+            return "Проверяем доступность голосового ввода…";
+        }
+
+        if (!state.capabilities) {
+            return "Не удалось определить возможности сервера. Перезагрузите страницу.";
+        }
+
+        if (!state.capabilities.supportsSpeechTranscription) {
+            return "Голосовой ввод доступен при подключённом Groq.";
+        }
+
+        if (!window.isSecureContext) {
+            return "Для микрофона нужен HTTPS. На этом компьютере можно открыть localhost.";
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia || !getRecordingMimeType(window.MediaRecorder)) {
+            return "Этот браузер не поддерживает запись в подходящем аудиоформате.";
+        }
+
+        if (state.sessionBusy || isSessionConfirmed(state.session)) {
+            return "Дождитесь обработки сессии или начните новую после подтверждения.";
+        }
+
+        if (elements.messageInput.value.trim()) {
+            return "Сначала добавьте или очистите введённый текст — голос заполняет новое сообщение.";
+        }
+
+        return "";
+    }
+
+    function renderVoiceControls() {
+        const phase = state.voicePhase;
+        const blockedReason = getVoiceBlockedReason();
+        const labels = {
+            idle: "Записать голос",
+            requesting: "Ждём разрешение…",
+            recording: "Остановить и распознать",
+            transcribing: "Распознаём…"
+        };
+        const notices = {
+            requesting: "Разрешите доступ к микрофону в браузере. Можно отменить ожидание.",
+            recording: "Идёт запись, не более 60 секунд. После остановки аудио отправится в Groq.",
+            transcribing: "Получаем текст из записи. Сообщение ещё не добавлено в сессию."
+        };
+
+        elements.voiceRecordButton.textContent = labels[phase];
+        elements.voiceRecordButton.disabled = phase === "requesting" || phase === "transcribing" ||
+            (phase === "idle" && Boolean(blockedReason));
+        elements.voiceRecordButton.classList.toggle("is-recording", phase === "recording");
+        elements.voiceRecordButton.setAttribute("aria-busy", String(phase === "requesting" || phase === "transcribing"));
+        elements.voiceCancelButton.hidden = phase === "idle";
+        elements.voiceStatus.textContent = notices[phase] ??
+            (state.voiceNotice || blockedReason || "Запишите до 60 секунд речи. Аудио отправится в Groq; перед добавлением проверьте текст.");
+        elements.voiceStatus.classList.toggle("is-error", phase === "idle" && state.voiceError);
+    }
+
+    function cancelVoiceCapture() {
+        speechCapture.cancel();
+        state.voiceNotice = "Голосовой ввод отменён. Запись не будет добавлена в сессию.";
+        state.voiceError = false;
+        renderVoiceControls();
+    }
+
+    async function transcribeAudio(blob, signal) {
+        const mediaType = blob.type.split(";", 1)[0];
+        const extension = mediaType === "audio/mp4" ? "m4a" :
+            mediaType === "audio/ogg" ? "ogg" : "webm";
+        const form = new FormData();
+        form.append("audio", blob, `voice-recording.${extension}`);
+
+        try {
+            const response = await apiRequest("/api/audio/transcribe", {
+                method: "POST",
+                body: form,
+                signal
+            });
+            return response?.text;
+        } catch (error) {
+            const messages = {
+                400: "Запись не подошла для распознавания. Попробуйте записать ещё раз.",
+                422: "Речь не распознана. Попробуйте говорить ближе к микрофону.",
+                429: "Слишком много запросов. Подождите минуту и повторите запись.",
+                502: "Groq временно недоступен. Повторите запись позже.",
+                503: "Распознавание речи не настроено на сервере.",
+                504: "Распознавание заняло слишком много времени. Попробуйте более короткую запись."
+            };
+
+            if (messages[error.status]) {
+                throw new Error(messages[error.status]);
+            }
+
+            throw error;
+        }
     }
 
     async function apiRequest(url, options = {}) {
@@ -696,6 +862,10 @@
     }
 
     function fillExample() {
+        if (isVoiceBusy() || state.sessionBusy) {
+            return;
+        }
+
         if (state.session) {
             showGlobalError(new Error("Сначала начните новую сессию."));
             return;
@@ -720,6 +890,11 @@
 
     async function addMessage(event) {
         event.preventDefault();
+
+        if (isVoiceBusy() || state.sessionBusy) {
+            return;
+        }
+
         const message = elements.messageInput.value.trim();
 
         if (!message) {
@@ -745,6 +920,8 @@
             state.localMessages.push(message);
             savePendingDraft();
             elements.messageInput.value = "";
+            state.voiceNotice = "";
+            state.voiceError = false;
             renderMessages();
             renderPreview();
             return;
@@ -766,6 +943,8 @@
             });
             state.session = response?.id ? response : await fetchCurrentSession();
             elements.messageInput.value = "";
+            state.voiceNotice = "";
+            state.voiceError = false;
             hideGlobalError();
         } catch (error) {
             showGlobalError(error);
@@ -777,7 +956,7 @@
     }
 
     async function createMealSession() {
-        if (state.localMessages.length === 0 || state.sessionBusy) {
+        if (state.localMessages.length === 0 || state.sessionBusy || isVoiceBusy()) {
             return;
         }
 
@@ -821,6 +1000,10 @@
     }
 
     function startNewSession() {
+        if (isVoiceBusy()) {
+            return;
+        }
+
         if (state.sessionBusy) {
             return;
         }
@@ -838,6 +1021,8 @@
         state.session = null;
         state.localMessages = [];
         state.sessionBusy = false;
+        state.voiceNotice = "";
+        state.voiceError = false;
         forgetActiveSession();
         clearPendingDraft();
         hideGlobalError();
@@ -848,7 +1033,8 @@
     }
 
     async function confirmSession() {
-        if (!state.session?.id || !state.session.previewToken || !state.session.canConfirm) {
+        if (state.sessionBusy || isVoiceBusy() || !state.session?.id ||
+            !state.session.previewToken || !state.session.canConfirm) {
             return;
         }
 
@@ -910,7 +1096,8 @@
     function renderMessages() {
         const messages = getVisibleMessages();
         const confirmed = isSessionConfirmed(state.session);
-        const dateLocked = Boolean(state.session) && !confirmed;
+        const voiceBusy = isVoiceBusy();
+        const dateLocked = (Boolean(state.session) && !confirmed) || voiceBusy;
 
         elements.messageList.innerHTML = messages.length === 0
             ? `<div class="message-empty">Можно описать готовку несколькими короткими сообщениями — порядок сохранится.</div>`
@@ -921,20 +1108,24 @@
                 </div>
             `).join("");
 
-        elements.messageInput.disabled = state.sessionBusy || confirmed;
-        elements.addMessageButton.disabled = state.sessionBusy || confirmed;
+        elements.messageInput.disabled = state.sessionBusy || confirmed || voiceBusy;
+        elements.addMessageButton.disabled = state.sessionBusy || confirmed || voiceBusy;
         elements.addMessageButton.textContent = state.session ? "Добавить уточнение" : "Добавить сообщение";
-        elements.exampleButton.disabled = state.sessionBusy || Boolean(state.session);
+        elements.exampleButton.disabled = state.sessionBusy || Boolean(state.session) || voiceBusy;
         elements.buildDraftButton.hidden = Boolean(state.session);
-        elements.buildDraftButton.disabled = state.sessionBusy || state.localMessages.length === 0;
+        elements.buildDraftButton.disabled = state.sessionBusy || state.localMessages.length === 0 || voiceBusy;
         elements.newSessionButton.hidden = !state.session;
-        elements.newSessionButton.disabled = state.sessionBusy;
+        elements.newSessionButton.disabled = state.sessionBusy || voiceBusy;
+        elements.openCatalogButton.disabled = voiceBusy;
         elements.mealDate.disabled = dateLocked;
         elements.dateControl.classList.toggle("is-locked", dateLocked);
-        elements.dateControlLabel.textContent = dateLocked ? "День сессии" : "День";
-        elements.dateControl.title = dateLocked
-            ? "Дата закреплена до подтверждения или начала новой сессии"
-            : "Выберите день для дневного баланса";
+        elements.dateControlLabel.textContent = voiceBusy ? "Голосовой ввод" :
+            dateLocked ? "День сессии" : "День";
+        elements.dateControl.title = voiceBusy
+            ? "Дата закреплена до завершения голосового ввода"
+            : dateLocked
+                ? "Дата закреплена до подтверждения или начала новой сессии"
+                : "Выберите день для дневного баланса";
 
         if (state.sessionBusy) {
             elements.captureHint.textContent = "NutriFlow обрабатывает сессию…";
@@ -947,6 +1138,8 @@
         } else {
             elements.captureHint.textContent = `Сообщений: ${state.localMessages.length}. Теперь можно собрать черновик.`;
         }
+
+        renderVoiceControls();
     }
 
     function renderPreviewLoading(message) {
@@ -1047,7 +1240,8 @@
         }
 
         elements.confirmBar.hidden = false;
-        elements.confirmButton.disabled = !session.canConfirm || !session.previewToken || state.sessionBusy;
+        elements.confirmButton.disabled = !session.canConfirm || !session.previewToken ||
+            state.sessionBusy || isVoiceBusy();
 
         if (session.canConfirm) {
             elements.confirmTitle.textContent = "Черновик готов к записи";
