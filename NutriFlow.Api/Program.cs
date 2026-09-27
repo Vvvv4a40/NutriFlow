@@ -10,6 +10,7 @@ using NutriFlow.Api.Services;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure;
 using NutriFlow.Infrastructure.Ai;
+using NutriFlow.Infrastructure.Audio;
 using NutriFlow.Infrastructure.ExternalProducts;
 using NutriFlow.Infrastructure.LabelPhotos;
 using NutriFlow.Infrastructure.Persistence;
@@ -83,7 +84,9 @@ builder.Services.AddScoped<MealWorkflowService>();
 builder.Services.Configure<FormOptions>(options =>
 {
     options.MultipartBodyLengthLimit =
-        LabelPhotoValidator.MaximumFileSizeInBytes + 64 * 1024;
+        Math.Max(
+            LabelPhotoValidator.MaximumFileSizeInBytes,
+            AudioUploadValidator.MaximumFileSizeInBytes) + 64 * 1024;
 });
 
 string configuredLabelPhotoPath =
@@ -120,10 +123,14 @@ if (configuredAiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddSingleton<IMealParser, FakeMealParser>();
     builder.Services.AddSingleton<INutritionLabelReader,
         UnavailableNutritionLabelReader>();
+    builder.Services.AddSingleton<ISpeechTranscriber,
+        UnavailableSpeechTranscriber>();
 }
 else if (configuredAiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
 {
     aiProvider = "OpenAI";
+    builder.Services.AddSingleton<ISpeechTranscriber,
+        UnavailableSpeechTranscriber>();
     string? apiKey = builder.Configuration["Ai:OpenAI:ApiKey"];
 
     if (string.IsNullOrWhiteSpace(apiKey))
@@ -190,6 +197,11 @@ else if (configuredAiProvider.Equals("Groq", StringComparison.OrdinalIgnoreCase)
     string groqVisionModel =
         builder.Configuration["Ai:Groq:VisionModel"] ??
         "qwen/qwen3.8-27b";
+    string groqSpeechModel =
+        builder.Configuration["Ai:Groq:SpeechModel"] ??
+        "whisper-large-v3-turbo";
+    string? groqSpeechLanguage =
+        builder.Configuration["Ai:Groq:SpeechLanguage"];
 
     builder.Services.AddHttpClient(
         "Groq",
@@ -218,6 +230,16 @@ else if (configuredAiProvider.Equals("Groq", StringComparison.OrdinalIgnoreCase)
             httpClientFactory.CreateClient("Groq"),
             groqVisionModel);
     });
+    builder.Services.AddScoped<ISpeechTranscriber>(serviceProvider =>
+    {
+        IHttpClientFactory httpClientFactory =
+            serviceProvider.GetRequiredService<IHttpClientFactory>();
+
+        return new GroqSpeechTranscriber(
+            httpClientFactory.CreateClient("Groq"),
+            groqSpeechModel,
+            groqSpeechLanguage);
+    });
 }
 else
 {
@@ -227,7 +249,12 @@ else
 
 WebApplication app = builder.Build();
 
-app.UseExceptionHandler();
+app.UseExceptionHandler(new ExceptionHandlerOptions
+{
+    StatusCodeSelector = exception => exception is BadHttpRequestException badRequest
+        ? badRequest.StatusCode
+        : StatusCodes.Status500InternalServerError
+});
 
 if (builder.Configuration.GetValue(
         "Database:ApplyMigrationsOnStartup",
@@ -302,7 +329,8 @@ app.MapGet(
         () => Results.Ok(new ApplicationCapabilitiesResponse(
             aiProvider,
             supportsAiInput,
-            supportsAiInput)))
+            supportsAiInput,
+            aiProvider == "Groq")))
     .WithName("GetApplicationCapabilities")
     .WithSummary("Reports input features enabled by the configured AI provider.")
     .WithTags("Application")
@@ -416,6 +444,20 @@ app.MapGet("/api/products/barcode/{barcode}", FindProductByBarcodeAsync)
     .ProducesProblem(StatusCodes.Status404NotFound)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+    .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+app.MapPost("/api/audio/transcribe", TranscribeSpeechAsync)
+    .WithName("TranscribeSpeech")
+    .RequireRateLimiting("external-services")
+    .WithSummary("Transcribes an audio upload into text for user review.")
+    .WithTags("Audio")
+    .DisableAntiforgery()
+    .Produces<SpeechTranscriptionResponse>(StatusCodes.Status200OK)
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+    .ProducesProblem(StatusCodes.Status502BadGateway)
+    .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
     .ProducesProblem(StatusCodes.Status504GatewayTimeout)
     .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
@@ -851,6 +893,84 @@ static async Task<IResult> AddProductAliasAsync(
             statusCode: StatusCodes.Status404NotFound,
             title: "Product not found.");
     }
+}
+
+static async Task<IResult> TranscribeSpeechAsync(
+    IFormFile? audio,
+    ISpeechTranscriber transcriber,
+    CancellationToken cancellationToken)
+{
+    if (audio is null || audio.Length == 0 ||
+        audio.Length > AudioUploadValidator.MaximumFileSizeInBytes)
+    {
+        return InvalidAudio("An audio recording between 1 byte and 8 MB is required.");
+    }
+
+    ValidatedAudio validatedAudio;
+
+    try
+    {
+        await using MemoryStream buffer = new((int)audio.Length);
+        await audio.CopyToAsync(buffer, cancellationToken);
+        validatedAudio = AudioUploadValidator.Validate(
+            buffer.ToArray(),
+            audio.ContentType);
+    }
+    catch (InvalidDataException exception)
+    {
+        return InvalidAudio(exception.Message);
+    }
+
+    try
+    {
+        string text = await transcriber.TranscribeAsync(
+            validatedAudio,
+            cancellationToken);
+
+        return string.IsNullOrWhiteSpace(text)
+            ? Results.Problem(
+                detail: "No speech was recognized. Try a clearer recording.",
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "No speech recognized.")
+            : Results.Ok(new SpeechTranscriptionResponse(text));
+    }
+    catch (NotSupportedException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Speech transcription is not configured.");
+    }
+    catch (InvalidDataException)
+    {
+        return Results.Problem(
+            detail: "The AI provider returned invalid transcription data.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Speech transcription failed.");
+    }
+    catch (HttpRequestException)
+    {
+        return Results.Problem(
+            detail: "The AI provider is temporarily unavailable.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Speech transcription failed.");
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.Problem(
+            detail: "The AI provider did not respond before the timeout.",
+            statusCode: StatusCodes.Status504GatewayTimeout,
+            title: "Speech transcription timed out.");
+    }
+}
+
+static IResult InvalidAudio(string message)
+{
+    return Results.ValidationProblem(
+        new Dictionary<string, string[]>
+        {
+            ["audio"] = new[] { message }
+        });
 }
 
 static async Task<IResult> AnalyzeNutritionLabelAsync(

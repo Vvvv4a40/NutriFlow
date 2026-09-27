@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure.Ai;
+using NutriFlow.Infrastructure.Audio;
 using NutriFlow.Infrastructure.LabelPhotos;
 
 namespace NutriFlow.Api.Tests;
@@ -74,6 +76,11 @@ public sealed class MealWorkflowApiTests
         Assert.Equal("Fake", capabilities.AiProvider);
         Assert.False(capabilities.SupportsFreeText);
         Assert.False(capabilities.SupportsLabelPhotos);
+        Assert.False(capabilities.SupportsSpeechTranscription);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.IsType<UnavailableSpeechTranscriber>(
+            scope.ServiceProvider.GetRequiredService<ISpeechTranscriber>());
     }
 
     [Fact]
@@ -91,12 +98,15 @@ public sealed class MealWorkflowApiTests
         Assert.Equal("Groq", capabilities.AiProvider);
         Assert.True(capabilities.SupportsFreeText);
         Assert.True(capabilities.SupportsLabelPhotos);
+        Assert.True(capabilities.SupportsSpeechTranscription);
 
         using IServiceScope scope = factory.Services.CreateScope();
         Assert.IsType<GroqMealParser>(
             scope.ServiceProvider.GetRequiredService<IMealParser>());
         Assert.IsType<GroqNutritionLabelReader>(
             scope.ServiceProvider.GetRequiredService<INutritionLabelReader>());
+        Assert.IsType<GroqSpeechTranscriber>(
+            scope.ServiceProvider.GetRequiredService<ISpeechTranscriber>());
 
         IHttpClientFactory httpClientFactory =
             scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
@@ -110,6 +120,223 @@ public sealed class MealWorkflowApiTests
         Assert.Equal(
             "test-key",
             groqClient.DefaultRequestHeaders.Authorization?.Parameter);
+    }
+
+    [Fact]
+    public async Task Capabilities_WithOpenAiProvider_ReportsSpeechUnavailable()
+    {
+        await using TestApiFactory factory = new TestApiFactory(
+            aiProvider: "OpenAI");
+        using HttpClient client = factory.CreateClient();
+
+        ApplicationCapabilitiesResponse capabilities =
+            await client.GetFromJsonAsync<ApplicationCapabilitiesResponse>(
+                "/api/capabilities",
+                JsonOptions) ?? throw new InvalidDataException();
+
+        Assert.Equal("OpenAI", capabilities.AiProvider);
+        Assert.True(capabilities.SupportsFreeText);
+        Assert.True(capabilities.SupportsLabelPhotos);
+        Assert.False(capabilities.SupportsSpeechTranscription);
+
+        using IServiceScope scope = factory.Services.CreateScope();
+        Assert.IsType<UnavailableSpeechTranscriber>(
+            scope.ServiceProvider.GetRequiredService<ISpeechTranscriber>());
+    }
+
+    [Theory]
+    [InlineData("audio/wav")]
+    [InlineData("application/octet-stream")]
+    [InlineData("")]
+    public async Task TranscribeAudio_WithValidUpload_ReturnsOnlyTextAndPreservesBytes(
+        string mediaType)
+    {
+        RecordingSpeechTranscriber transcriber = new("Съел 250 граммов говядины.");
+        await using TestApiFactory factory = new TestApiFactory(
+            transcriber: transcriber);
+        using HttpClient client = factory.CreateClient();
+        byte[] uploadedAudio = CreateWaveAudio();
+        using MultipartFormDataContent form = CreateAudioForm(uploadedAudio, mediaType);
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+        using JsonDocument result = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        JsonProperty property = Assert.Single(result.RootElement.EnumerateObject());
+        Assert.Equal("text", property.Name);
+        Assert.Equal("Съел 250 граммов говядины.", property.Value.GetString());
+        Assert.Equal(1, transcriber.CallCount);
+        Assert.NotNull(transcriber.Audio);
+        Assert.Equal(uploadedAudio, transcriber.Audio.Content.ToArray());
+        Assert.Equal("audio/wav", transcriber.Audio.MediaType);
+    }
+
+    [Theory]
+    [InlineData("empty", "audio/wav")]
+    [InlineData("invalid", "audio/wav")]
+    [InlineData("valid", "image/png")]
+    [InlineData("invalid", "")]
+    public async Task TranscribeAudio_WithInvalidUpload_RejectsBeforeProviderCall(
+        string contentKind,
+        string mediaType)
+    {
+        RecordingSpeechTranscriber transcriber = new();
+        await using TestApiFactory factory = new TestApiFactory(
+            transcriber: transcriber);
+        using HttpClient client = factory.CreateClient();
+        byte[] audio = contentKind switch
+        {
+            "empty" => Array.Empty<byte>(),
+            "invalid" => new byte[] { 1, 2, 3 },
+            _ => CreateWaveAudio()
+        };
+        using MultipartFormDataContent form = CreateAudioForm(audio, mediaType);
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+        using JsonDocument problem = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.NotEmpty(problem.RootElement.GetProperty("errors")
+            .GetProperty("audio").EnumerateArray());
+        Assert.Equal(0, transcriber.CallCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TranscribeAudio_WithoutAudioField_RejectsBeforeProviderCall(
+        bool includeWrongField)
+    {
+        RecordingSpeechTranscriber transcriber = new();
+        await using TestApiFactory factory = new TestApiFactory(
+            transcriber: transcriber);
+        using HttpClient client = factory.CreateClient();
+        using MultipartFormDataContent form = includeWrongField
+            ? CreateAudioForm(CreateWaveAudio(), fieldName: "file")
+            : new MultipartFormDataContent();
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, transcriber.CallCount);
+    }
+
+    [Fact]
+    public async Task TranscribeAudio_WithOversizedUpload_RejectsBeforeProviderCall()
+    {
+        RecordingSpeechTranscriber transcriber = new();
+        await using TestApiFactory factory = new TestApiFactory(
+            transcriber: transcriber);
+        using HttpClient client = factory.CreateClient();
+        byte[] audio = new byte[8 * 1024 * 1024 + 1];
+        CreateWaveAudio().CopyTo(audio, 0);
+        using MultipartFormDataContent form = CreateAudioForm(audio);
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, transcriber.CallCount);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \r\n\t")]
+    public async Task TranscribeAudio_WithoutRecognizedSpeech_ReturnsUnprocessableEntity(
+        string text)
+    {
+        RecordingSpeechTranscriber transcriber = new(text);
+        await using TestApiFactory factory = new TestApiFactory(
+            transcriber: transcriber);
+        using HttpClient client = factory.CreateClient();
+        using MultipartFormDataContent form = CreateAudioForm(CreateWaveAudio());
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(1, transcriber.CallCount);
+    }
+
+    [Fact]
+    public async Task TranscribeAudio_WithFakeProvider_ReturnsServiceUnavailable()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+        using MultipartFormDataContent form = CreateAudioForm(CreateWaveAudio());
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("invalid", HttpStatusCode.BadGateway)]
+    [InlineData("http", HttpStatusCode.BadGateway)]
+    [InlineData("timeout", HttpStatusCode.GatewayTimeout)]
+    public async Task TranscribeAudio_WhenProviderFails_MapsStatusWithoutLeakingDetails(
+        string failure,
+        HttpStatusCode expectedStatus)
+    {
+        const string upstreamDetail = "sensitive upstream detail";
+        Exception exception = failure switch
+        {
+            "invalid" => new InvalidDataException(upstreamDetail),
+            "http" => new HttpRequestException(upstreamDetail),
+            _ => new OperationCanceledException(upstreamDetail)
+        };
+        RecordingSpeechTranscriber transcriber = new(exception: exception);
+        await using TestApiFactory factory = new TestApiFactory(
+            transcriber: transcriber);
+        using HttpClient client = factory.CreateClient();
+        using MultipartFormDataContent form = CreateAudioForm(CreateWaveAudio());
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/audio/transcribe",
+            form);
+        string body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.DoesNotContain(upstreamDetail, body, StringComparison.Ordinal);
+        Assert.Equal(1, transcriber.CallCount);
+    }
+
+    [Fact]
+    public async Task OpenApi_DescribesAudioMultipartUploadAndResponses()
+    {
+        await using TestApiFactory factory = new TestApiFactory();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/openapi/v1.json");
+        using JsonDocument document = JsonDocument.Parse(
+            await response.Content.ReadAsStringAsync());
+        JsonElement operation = document.RootElement.GetProperty("paths")
+            .GetProperty("/api/audio/transcribe").GetProperty("post");
+        JsonElement uploadSchema = operation.GetProperty("requestBody")
+            .GetProperty("content").GetProperty("multipart/form-data")
+            .GetProperty("schema");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(uploadSchema.GetProperty("properties").TryGetProperty("audio", out _));
+        JsonElement responses = operation.GetProperty("responses");
+        foreach (string status in new[] { "200", "400", "422", "429", "502", "503", "504" })
+        {
+            Assert.True(responses.TryGetProperty(status, out _));
+        }
     }
 
     [Fact]
@@ -731,6 +958,36 @@ public sealed class MealWorkflowApiTests
                 .GetString());
     }
 
+    private static byte[] CreateWaveAudio()
+    {
+        return new byte[]
+        {
+            0x52, 0x49, 0x46, 0x46, 0x26, 0x00, 0x00, 0x00,
+            0x57, 0x41, 0x56, 0x45, 0x66, 0x6D, 0x74, 0x20,
+            0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+            0x80, 0x3E, 0x00, 0x00, 0x00, 0x7D, 0x00, 0x00,
+            0x02, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61,
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00
+        };
+    }
+
+    private static MultipartFormDataContent CreateAudioForm(
+        byte[] audio,
+        string mediaType = "audio/wav",
+        string fieldName = "audio")
+    {
+        MultipartFormDataContent form = new();
+        ByteArrayContent file = new(audio);
+
+        if (!string.IsNullOrEmpty(mediaType))
+        {
+            file.Headers.ContentType = new MediaTypeHeaderValue(mediaType);
+        }
+
+        form.Add(file, fieldName, "capture.wav");
+        return form;
+    }
+
     private static async Task<MealSessionResponse> CreateDemoSessionAsync(
         HttpClient client,
         DateOnly date)
@@ -790,17 +1047,20 @@ public sealed class MealWorkflowApiTests
         private readonly bool _seedDemoData;
         private readonly IMealParser? _parser;
         private readonly string _aiProvider;
+        private readonly ISpeechTranscriber? _transcriber;
 
         public TestApiFactory(
             bool applyMigrations = true,
             bool seedDemoData = true,
             IMealParser? parser = null,
-            string aiProvider = "Fake")
+            string aiProvider = "Fake",
+            ISpeechTranscriber? transcriber = null)
         {
             _applyMigrations = applyMigrations;
             _seedDemoData = seedDemoData;
             _parser = parser;
             _aiProvider = aiProvider;
+            _transcriber = transcriber;
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -818,12 +1078,14 @@ public sealed class MealWorkflowApiTests
                 "Storage:LabelPhotosPath",
                 Path.Combine(_directoryPath, "label-photos"));
             builder.UseSetting("Ai:Provider", _aiProvider);
+            builder.UseSetting("Ai:OpenAI:ApiKey", "test-key");
             builder.UseSetting("Ai:Groq:ApiKey", "test-key");
             builder.UseSetting(
                 "Ai:Groq:BaseUrl",
                 "https://api.groq.test/openai/v1");
             builder.UseSetting("Ai:Groq:TextModel", "qwen-test");
             builder.UseSetting("Ai:Groq:VisionModel", "qwen-vision-test");
+            builder.UseSetting("Ai:Groq:SpeechModel", "whisper-test");
             builder.UseSetting("Demo:SeedData", _seedDemoData.ToString());
 
             if (_parser is not null)
@@ -832,6 +1094,15 @@ public sealed class MealWorkflowApiTests
                 {
                     services.RemoveAll<IMealParser>();
                     services.AddSingleton(_parser);
+                });
+            }
+
+            if (_transcriber is not null)
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<ISpeechTranscriber>();
+                    services.AddSingleton(_transcriber);
                 });
             }
         }
@@ -845,6 +1116,37 @@ public sealed class MealWorkflowApiTests
             {
                 Directory.Delete(_directoryPath, recursive: true);
             }
+        }
+    }
+
+    private sealed class RecordingSpeechTranscriber : ISpeechTranscriber
+    {
+        private readonly string _text;
+        private readonly Exception? _exception;
+
+        public RecordingSpeechTranscriber(
+            string text = "Распознанный текст.",
+            Exception? exception = null)
+        {
+            _text = text;
+            _exception = exception;
+        }
+
+        public int CallCount { get; private set; }
+
+        public ValidatedAudio? Audio { get; private set; }
+
+        public Task<string> TranscribeAsync(
+            ValidatedAudio audio,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallCount++;
+            Audio = audio;
+
+            return _exception is null
+                ? Task.FromResult(_text)
+                : Task.FromException<string>(_exception);
         }
     }
 
