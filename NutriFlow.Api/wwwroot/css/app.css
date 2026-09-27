@@ -643,6 +643,31 @@ h3 {
     margin-top: 18px;
 }
 
+.voice-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.voice-controls .is-recording {
+    color: #fff;
+    border-color: #ad3535;
+    background: #ad3535;
+}
+
+.voice-controls .is-recording:not(:disabled):hover {
+    background: #942d2d;
+}
+
+.voice-status {
+    margin-bottom: 0;
+}
+
+.voice-status.is-error {
+    color: #a32e2e;
+}
+
 .composer-actions,
 .form-actions {
     display: flex;

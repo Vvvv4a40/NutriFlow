@@ -124,6 +124,14 @@
                                   maxlength="4000"
                                   placeholder="Например: добавил примерно 600 г говядины"></textarea>
                     </label>
+                    <div class="voice-controls" aria-label="Голосовой ввод">
+                        <button id="voice-record-button" class="button button-secondary" type="button"
+                                aria-describedby="voice-status" disabled>Записать голос</button>
+                        <button id="voice-cancel-button" class="button button-quiet" type="button" hidden>Отмена</button>
+                    </div>
+                    <p id="voice-status" class="form-hint voice-status" role="status" aria-live="polite">
+                        Проверяем доступность голосового ввода…
+                    </p>
                     <div class="composer-actions">
                         <button id="example-button" class="button button-quiet" type="button">Заполнить пример</button>
                         <button id="add-message-button" class="button button-secondary" type="submit">Добавить сообщение</button>
@@ -272,6 +280,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-    <script src="/js/app.js" defer></script>
+    <script src="/js/app.js" type="module"></script>
 </body>
 </html>
