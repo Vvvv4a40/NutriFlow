@@ -256,6 +256,16 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
         : StatusCodes.Status500InternalServerError
 });
 
+app.UseStatusCodePages(async statusCodeContext =>
+{
+    HttpContext context = statusCodeContext.HttpContext;
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        await Results.Problem(statusCode: context.Response.StatusCode)
+            .ExecuteAsync(context);
+    }
+});
+
 if (builder.Configuration.GetValue(
         "Database:ApplyMigrationsOnStartup",
         true))
@@ -343,6 +353,7 @@ app.MapPost("/api/meal-sessions", CreateMealSessionAsync)
     .WithTags("Meal sessions")
     .Produces<MealSessionResponse>(StatusCodes.Status201Created)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
     .ProducesProblem(StatusCodes.Status504GatewayTimeout)
@@ -364,6 +375,7 @@ app.MapPost("/api/meal-sessions/{id:guid}/messages", AddMealSessionMessageAsync)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
     .ProducesProblem(StatusCodes.Status404NotFound)
     .ProducesProblem(StatusCodes.Status409Conflict)
+    .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
     .ProducesProblem(StatusCodes.Status504GatewayTimeout)
@@ -376,6 +388,7 @@ app.MapPost("/api/meal-sessions/{id:guid}/confirm", ConfirmMealSessionAsync)
     .Produces<ConfirmMealSessionResponse>(StatusCodes.Status200OK)
     .Produces<ConfirmMealSessionResponse>(StatusCodes.Status409Conflict)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
     .ProducesProblem(StatusCodes.Status404NotFound);
 
 app.MapPut("/api/daily-goals/{date}", SetDailyGoalAsync)
@@ -383,13 +396,15 @@ app.MapPut("/api/daily-goals/{date}", SetDailyGoalAsync)
     .WithSummary("Creates or replaces the nutrition goal for a date.")
     .WithTags("Daily diary")
     .Produces<DailyProgressResponse>(StatusCodes.Status200OK)
-    .ProducesValidationProblem(StatusCodes.Status400BadRequest);
+    .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
 app.MapGet("/api/daily-progress/{date}", GetDailyProgressAsync)
     .WithName("GetDailyProgress")
     .WithSummary("Returns consumed, remaining and exceeded nutrition for a date.")
     .WithTags("Daily diary")
-    .Produces<DailyProgressResponse>(StatusCodes.Status200OK);
+    .Produces<DailyProgressResponse>(StatusCodes.Status200OK)
+    .ProducesProblem(StatusCodes.Status400BadRequest);
 
 app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
     .WithName("ParseMealDraft")

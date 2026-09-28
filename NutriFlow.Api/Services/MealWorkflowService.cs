@@ -46,7 +46,7 @@ public sealed class MealWorkflowService
     {
         IReadOnlyList<string> validatedMessages = ValidateMessages(messages);
         MealDraft draft = await ParseAsync(validatedMessages, cancellationToken);
-        MealEvaluation evaluation = await EvaluateAsync(draft, cancellationToken);
+        MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken);
         StoredMealSession session = await _sessionStore.CreateAsync(
             validatedMessages,
             draft,
@@ -82,6 +82,7 @@ public sealed class MealWorkflowService
 
         MealEvaluation evaluation = await EvaluateAsync(
             session.Draft,
+            session.Messages,
             cancellationToken);
 
         if (session.Status != evaluation.Status ||
@@ -115,7 +116,7 @@ public sealed class MealWorkflowService
             }
         }
 
-        return MapSession(session, evaluation.Document, evaluation.Status);
+        return MapSession(session, DeserializePreview(session.PreviewJson), session.Status);
     }
 
     public async Task<MealSessionResponse?> AddMessageAsync(
@@ -144,7 +145,7 @@ public sealed class MealWorkflowService
             .ToList();
         IReadOnlyList<string> validatedMessages = ValidateMessages(messages);
         MealDraft draft = await ParseAsync(validatedMessages, cancellationToken);
-        MealEvaluation evaluation = await EvaluateAsync(draft, cancellationToken);
+        MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken);
         StoredMealSession session = await _sessionStore.ReplaceDraftAsync(
             id,
             existing.PreviewToken,
@@ -155,7 +156,7 @@ public sealed class MealWorkflowService
             evaluation.Status,
             cancellationToken);
 
-        return MapSession(session, evaluation.Document, evaluation.Status);
+        return MapSession(session, DeserializePreview(session.PreviewJson), session.Status);
     }
 
     public async Task<MealConfirmationOutcome?> ConfirmAsync(
@@ -204,6 +205,7 @@ public sealed class MealWorkflowService
 
         MealEvaluation currentEvaluation = await EvaluateAsync(
             session.Draft,
+            session.Messages,
             cancellationToken);
 
         if (session.Status != currentEvaluation.Status ||
@@ -249,8 +251,8 @@ public sealed class MealWorkflowService
                 MealConfirmationOutcomeKind.StalePreview,
                 MapSession(
                     updatedSession,
-                    currentEvaluation.Document,
-                    currentEvaluation.Status),
+                    DeserializePreview(updatedSession.PreviewJson),
+                    updatedSession.Status),
                 Array.Empty<MealEntry>());
         }
 
@@ -373,6 +375,7 @@ public sealed class MealWorkflowService
 
     private async Task<MealEvaluation> EvaluateAsync(
         MealDraft draft,
+        IReadOnlyList<string> messages,
         CancellationToken cancellationToken)
     {
         List<WorkflowIssueResponse> issues = new List<WorkflowIssueResponse>();
@@ -590,9 +593,10 @@ public sealed class MealWorkflowService
         string previewJson = JsonSerializer.Serialize(
             document,
             SerializerOptions);
+        // новые сообщения меняют версию, даже если расчёт остался прежним
         string previewToken = Convert.ToHexString(
             SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
-                document,
+                new { Messages = messages, Preview = document },
                 SerializerOptions)));
 
         return new MealEvaluation(
