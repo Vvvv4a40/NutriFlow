@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Api.Services;
@@ -349,10 +350,12 @@ app.MapGet(
 app.MapPost("/api/meal-sessions", CreateMealSessionAsync)
     .WithName("CreateMealSession")
     .RequireRateLimiting("external-services")
-    .WithSummary("Parses messages and creates a persistent calculated meal preview.")
+    .WithSummary("Creates a meal preview; an Idempotency-Key makes mobile retries safe.")
     .WithTags("Meal sessions")
     .Produces<MealSessionResponse>(StatusCodes.Status201Created)
+    .Produces<MealSessionResponse>(StatusCodes.Status200OK)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+    .ProducesProblem(StatusCodes.Status409Conflict)
     .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
     .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
     .ProducesProblem(StatusCodes.Status502BadGateway)
@@ -521,6 +524,8 @@ static async Task SeedDemoDataAsync(IServiceProvider services)
 
 static async Task<IResult> CreateMealSessionAsync(
     CreateMealSessionRequest? request,
+    [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader,
+    HttpContext context,
     MealWorkflowService workflow,
     CancellationToken cancellationToken)
 {
@@ -529,18 +534,62 @@ static async Task<IResult> CreateMealSessionAsync(
         return InvalidMessages("A meal session request is required.");
     }
 
+    Guid? idempotencyKey = null;
+
+    if (context.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+    {
+        if (values.Count != 1 ||
+            !Guid.TryParseExact(idempotencyKeyHeader, "D", out Guid parsedKey) ||
+            parsedKey == Guid.Empty)
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["Idempotency-Key"] =
+                    ["The idempotency key must be one non-empty UUID in the standard format."]
+                });
+        }
+
+        idempotencyKey = parsedKey;
+
+        if (request.MealDate is null)
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["mealDate"] =
+                    ["An explicit meal date is required with an idempotency key."]
+                });
+        }
+    }
+
     try
     {
-        MealSessionResponse response = await workflow.CreateAsync(
+        MealSessionCreationResult creation = await workflow.CreateAsync(
             request.Messages,
             request.MealDate ?? DateOnly.FromDateTime(DateTime.Today),
-            cancellationToken);
+            cancellationToken,
+            idempotencyKey);
+        string sessionPath = $"/api/meal-sessions/{creation.Session.Id}";
 
-        return Results.Created($"/api/meal-sessions/{response.Id}", response);
+        if (creation.Created)
+        {
+            return Results.Created(sessionPath, creation.Session);
+        }
+
+        context.Response.Headers.Location = sessionPath;
+        return Results.Ok(creation.Session);
     }
     catch (ArgumentException exception)
     {
         return InvalidMessages(exception.Message);
+    }
+    catch (MealSessionConflictException exception)
+    {
+        return Results.Problem(
+            detail: exception.Message,
+            statusCode: StatusCodes.Status409Conflict,
+            title: "The idempotency key conflicts with an existing request.");
     }
     catch (NotSupportedException exception)
     {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure.Persistence;
@@ -21,7 +22,7 @@ public sealed class MealSessionStore
         _dbContext = dbContext;
     }
 
-    public async Task<StoredMealSession> CreateAsync(
+    public Task<StoredMealSession> CreateAsync(
         IReadOnlyList<string> messages,
         MealDraft draft,
         string previewJson,
@@ -29,6 +30,91 @@ public sealed class MealSessionStore
         MealSessionStatus status,
         DateOnly mealDate,
         CancellationToken cancellationToken = default)
+    {
+        return CreateCoreAsync(
+            messages,
+            draft,
+            previewJson,
+            previewToken,
+            status,
+            mealDate,
+            null,
+            null,
+            cancellationToken);
+    }
+
+    public async Task<(StoredMealSession Session, bool Created)> CreateWithIdempotencyKeyAsync(
+        IReadOnlyList<string> messages,
+        MealDraft draft,
+        string previewJson,
+        string previewToken,
+        MealSessionStatus status,
+        DateOnly mealDate,
+        Guid idempotencyKey,
+        string originalRequestHash,
+        CancellationToken cancellationToken = default)
+    {
+        if (idempotencyKey == Guid.Empty)
+        {
+            throw new ArgumentException("An idempotency key cannot be empty.", nameof(idempotencyKey));
+        }
+
+        ValidateHash(originalRequestHash, nameof(originalRequestHash), "An original request hash");
+
+        try
+        {
+            StoredMealSession created = await CreateCoreAsync(
+                messages,
+                draft,
+                previewJson,
+                previewToken,
+                status,
+                mealDate,
+                idempotencyKey,
+                originalRequestHash,
+                cancellationToken);
+
+            return (created, true);
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is SqliteException { SqliteExtendedErrorCode: 2067 })
+        {
+            StoredMealSession? existing = await FindByIdempotencyKeyAsync(
+                idempotencyKey,
+                cancellationToken);
+
+            if (existing is null)
+            {
+                throw;
+            }
+
+            return (existing, false);
+        }
+    }
+
+    public async Task<StoredMealSession?> FindByIdempotencyKeyAsync(
+        Guid idempotencyKey,
+        CancellationToken cancellationToken = default)
+    {
+        MealSessionRecord? record = await _dbContext.MealSessions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                session => session.IdempotencyKey == idempotencyKey,
+                cancellationToken);
+
+        return record is null ? null : MapSession(record);
+    }
+
+    private async Task<StoredMealSession> CreateCoreAsync(
+        IReadOnlyList<string> messages,
+        MealDraft draft,
+        string previewJson,
+        string previewToken,
+        MealSessionStatus status,
+        DateOnly mealDate,
+        Guid? idempotencyKey,
+        string? originalRequestHash,
+        CancellationToken cancellationToken)
     {
         ValidateMessages(messages);
         ArgumentNullException.ThrowIfNull(draft);
@@ -46,11 +132,21 @@ public sealed class MealSessionStore
             Status = status,
             MealDate = mealDate,
             CreatedAtUtc = now,
-            UpdatedAtUtc = now
+            UpdatedAtUtc = now,
+            IdempotencyKey = idempotencyKey,
+            OriginalRequestHash = originalRequestHash
         };
 
         _dbContext.MealSessions.Add(record);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            _dbContext.Entry(record).State = EntityState.Detached;
+            throw;
+        }
 
         return MapSession(record);
     }
@@ -172,7 +268,9 @@ public sealed class MealSessionStore
             record.MealDate,
             record.CreatedAtUtc,
             record.UpdatedAtUtc,
-            record.ConfirmedAtUtc);
+            record.ConfirmedAtUtc,
+            record.IdempotencyKey,
+            record.OriginalRequestHash);
     }
 
     private static string SerializeDraft(MealDraft draft)
@@ -305,13 +403,21 @@ public sealed class MealSessionStore
 
     private static void ValidatePreviewToken(string previewToken, string parameterName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(previewToken, parameterName);
+        ValidateHash(previewToken, parameterName, "A preview token");
+    }
 
-        if (previewToken.Length != 64 ||
-            previewToken.Any(character => !Uri.IsHexDigit(character)))
+    private static void ValidateHash(
+        string value,
+        string parameterName,
+        string description)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+
+        if (value.Length != 64 ||
+            value.Any(character => !Uri.IsHexDigit(character)))
         {
             throw new ArgumentException(
-                "A preview token must be a 64-character hexadecimal SHA-256 value.",
+                $"{description} must be a 64-character hexadecimal SHA-256 value.",
                 parameterName);
         }
     }
