@@ -14,5 +14,7 @@ internal sealed class MealSessionRecord
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
     public DateTimeOffset? ConfirmedAtUtc { get; set; }
+    public Guid? IdempotencyKey { get; set; }
+    public string? OriginalRequestHash { get; set; }
     public List<MealEntryRecord> MealEntries { get; set; } = new();
 }

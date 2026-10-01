@@ -12,4 +12,6 @@ public sealed record StoredMealSession(
     DateOnly MealDate,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    DateTimeOffset? ConfirmedAtUtc);
+    DateTimeOffset? ConfirmedAtUtc,
+    Guid? IdempotencyKey,
+    string? OriginalRequestHash);

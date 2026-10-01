@@ -93,6 +93,9 @@ public sealed class NutriFlowDbContext : DbContext
             entity.Property(session => session.CreatedAtUtc).HasColumnType("TEXT");
             entity.Property(session => session.UpdatedAtUtc).HasColumnType("TEXT");
             entity.Property(session => session.ConfirmedAtUtc).HasColumnType("TEXT");
+            entity.HasIndex(session => session.IdempotencyKey).IsUnique();
+            entity.Property(session => session.OriginalRequestHash)
+                .HasMaxLength(64);
         });
 
         modelBuilder.Entity<MealEntryRecord>(entity =>

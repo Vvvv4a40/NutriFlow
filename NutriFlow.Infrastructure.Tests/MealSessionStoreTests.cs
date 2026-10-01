@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure.Persistence;
 
@@ -9,6 +10,163 @@ public sealed class MealSessionStoreTests
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     private const string UpdatedToken =
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private const string OriginalRequestHash =
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+    [Fact]
+    public async Task Migration_PreservesSessionsCreatedBeforeIdempotencyFields()
+    {
+        await using TestDatabase database = new TestDatabase();
+        Guid legacyId = Guid.NewGuid();
+        const string legacyDraftJson = """
+            {
+              "Dishes": [
+                {
+                  "Name": "Рагу",
+                  "Ingredients": [
+                    {
+                      "ProductName": "Говядина",
+                      "WeightInGrams": 600,
+                      "WeightQuality": 3,
+                      "RemovedWeightInGrams": 0,
+                      "RemovedWeightQuality": 1,
+                      "RemovalSpecified": true
+                    }
+                  ],
+                  "FinalWeightInGrams": 500,
+                  "FinalWeightQuality": 1,
+                  "Portions": []
+                }
+              ],
+              "ClarificationQuestions": []
+            }
+            """;
+
+        await using (NutriFlowDbContext oldContext = database.CreateContext())
+        {
+            await oldContext.Database.MigrateAsync(
+                "20260907111329_HardenProductResolutionAndMealQuality");
+
+            await oldContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "MealSessions"
+                    ("Id", "MessagesJson", "DraftJson", "PreviewJson", "PreviewToken",
+                     "Status", "MealDate", "CreatedAtUtc", "UpdatedAtUtc")
+                VALUES
+                    ({legacyId}, {"[\"Готовлю рагу\"]"}, {legacyDraftJson}, {"{}"}, {InitialToken},
+                     {(int)MealSessionStatus.ReadyForConfirmation}, {"2026-09-06"},
+                     {"2026-09-06T12:00:00+00:00"}, {"2026-09-06T12:00:00+00:00"})
+                """);
+        }
+
+        await using NutriFlowDbContext upgradedContext = database.CreateContext();
+        await upgradedContext.Database.MigrateAsync();
+        StoredMealSession restored = Assert.IsType<StoredMealSession>(
+            await new MealSessionStore(upgradedContext).FindAsync(legacyId));
+
+        Assert.Equal(["Готовлю рагу"], restored.Messages);
+        Assert.Equal("Рагу", Assert.Single(restored.Draft.Dishes).Name);
+        Assert.Null(restored.IdempotencyKey);
+        Assert.Null(restored.OriginalRequestHash);
+
+        Assert.Equal(
+            1,
+            await upgradedContext.Database.SqlQuery<int>($"""
+                SELECT COUNT(*) AS Value FROM "MealSessions"
+                WHERE "Id" = {legacyId}
+                    AND "IdempotencyKey" IS NULL
+                    AND "OriginalRequestHash" IS NULL
+                """).SingleAsync());
+    }
+
+    [Fact]
+    public async Task CreateAsync_AllowsMultipleLegacySessionsWithoutIdempotencyKeys()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+
+        await using NutriFlowDbContext context = database.CreateContext();
+        MealSessionStore store = new MealSessionStore(context);
+        StoredMealSession first = await store.CreateAsync(
+            ["Первое блюдо"],
+            CreateReadyDraft(),
+            "{}",
+            InitialToken,
+            MealSessionStatus.ReadyForConfirmation,
+            new DateOnly(2026, 9, 6));
+        StoredMealSession second = await store.CreateAsync(
+            ["Второе блюдо"],
+            CreateReadyDraft(),
+            "{}",
+            InitialToken,
+            MealSessionStatus.ReadyForConfirmation,
+            new DateOnly(2026, 9, 6));
+
+        Assert.NotEqual(first.Id, second.Id);
+        Assert.Null(first.IdempotencyKey);
+        Assert.Null(first.OriginalRequestHash);
+        Assert.Null(second.IdempotencyKey);
+        Assert.Null(second.OriginalRequestHash);
+        Assert.Equal(
+            2,
+            await context.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS Value FROM \"MealSessions\"").SingleAsync());
+    }
+
+    [Fact]
+    public async Task CreateWithIdempotencyKeyAsync_PersistsKeyAndReturnsExistingSessionOnRetry()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid key = Guid.NewGuid();
+        StoredMealSession created;
+
+        await using (NutriFlowDbContext createContext = database.CreateContext())
+        {
+            MealSessionStore store = new MealSessionStore(createContext);
+            (created, bool wasCreated) = await store.CreateWithIdempotencyKeyAsync(
+                ["Первоначальное сообщение"],
+                CreateReadyDraft(),
+                "{}",
+                InitialToken,
+                MealSessionStatus.ReadyForConfirmation,
+                new DateOnly(2026, 9, 6),
+                key,
+                OriginalRequestHash);
+
+            Assert.True(wasCreated);
+            Assert.Equal(key, created.IdempotencyKey);
+            Assert.Equal(OriginalRequestHash, created.OriginalRequestHash);
+        }
+
+        await using (NutriFlowDbContext retryContext = database.CreateContext())
+        {
+            MealSessionStore store = new MealSessionStore(retryContext);
+            StoredMealSession found = Assert.IsType<StoredMealSession>(
+                await store.FindByIdempotencyKeyAsync(key));
+            Assert.Equal(created.Id, found.Id);
+            Assert.Equal(OriginalRequestHash, found.OriginalRequestHash);
+
+            (StoredMealSession existing, bool wasCreated) =
+                await store.CreateWithIdempotencyKeyAsync(
+                    ["Повтор с другим сообщением"],
+                    CreateReadyDraft(),
+                    "{}",
+                    UpdatedToken,
+                    MealSessionStatus.NeedsProducts,
+                    new DateOnly(2026, 9, 7),
+                    key,
+                    new string('d', 64));
+
+            Assert.False(wasCreated);
+            Assert.Equal(created.Id, existing.Id);
+            Assert.Equal(["Первоначальное сообщение"], existing.Messages);
+            Assert.Equal(OriginalRequestHash, existing.OriginalRequestHash);
+            Assert.Equal(
+                1,
+                await retryContext.Database.SqlQueryRaw<int>(
+                    "SELECT COUNT(*) AS Value FROM \"MealSessions\"").SingleAsync());
+        }
+    }
 
     [Fact]
     public async Task CreateAsync_ThenFindAsync_RestoresCompleteDraftAndPreview()

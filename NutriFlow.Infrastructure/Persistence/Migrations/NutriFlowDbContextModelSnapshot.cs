@@ -106,11 +106,18 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("IdempotencyKey")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly>("MealDate")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("MessagesJson")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginalRequestHash")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PreviewJson")
@@ -129,6 +136,9 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
 
                     b.ToTable("MealSessions", (string)null);
                 });

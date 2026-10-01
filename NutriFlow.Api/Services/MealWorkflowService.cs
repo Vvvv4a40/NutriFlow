@@ -39,15 +39,68 @@ public sealed class MealWorkflowService
         _diaryStore = diaryStore;
     }
 
-    public async Task<MealSessionResponse> CreateAsync(
+    public async Task<MealSessionCreationResult> CreateAsync(
         IReadOnlyList<string?>? messages,
         DateOnly mealDate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? idempotencyKey = null)
     {
         IReadOnlyList<string> validatedMessages = ValidateMessages(messages);
+        string? originalRequestHash = null;
+
+        if (idempotencyKey is not null)
+        {
+            if (idempotencyKey == Guid.Empty)
+            {
+                throw new ArgumentException(
+                    "The idempotency key cannot be empty.",
+                    nameof(idempotencyKey));
+            }
+
+            originalRequestHash = ComputeOriginalRequestHash(
+                validatedMessages,
+                mealDate);
+            StoredMealSession? existing =
+                await _sessionStore.FindByIdempotencyKeyAsync(
+                    idempotencyKey.Value,
+                    cancellationToken);
+
+            if (existing is not null)
+            {
+                return await ReuseSessionAsync(
+                    existing,
+                    originalRequestHash,
+                    cancellationToken);
+            }
+        }
+
         MealDraft draft = await ParseAsync(validatedMessages, cancellationToken);
         MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken);
-        StoredMealSession session = await _sessionStore.CreateAsync(
+        if (idempotencyKey is not null)
+        {
+            (StoredMealSession session, bool created) =
+                await _sessionStore.CreateWithIdempotencyKeyAsync(
+                    validatedMessages,
+                    draft,
+                    evaluation.PreviewJson,
+                    evaluation.PreviewToken,
+                    evaluation.Status,
+                    mealDate,
+                    idempotencyKey.Value,
+                    originalRequestHash!,
+                    cancellationToken);
+
+            return created
+                ? new MealSessionCreationResult(
+                    MapSession(session, evaluation.Document, evaluation.Status),
+                    Created: true)
+                : await ReuseSessionAsync(
+                    session,
+                    originalRequestHash!,
+                    cancellationToken);
+        }
+
+        StoredMealSession newSession = await _sessionStore.CreateAsync(
             validatedMessages,
             draft,
             evaluation.PreviewJson,
@@ -56,7 +109,42 @@ public sealed class MealWorkflowService
             mealDate,
             cancellationToken);
 
-        return MapSession(session, evaluation.Document, evaluation.Status);
+        return new MealSessionCreationResult(
+            MapSession(newSession, evaluation.Document, evaluation.Status),
+            Created: true);
+    }
+
+    private async Task<MealSessionCreationResult> ReuseSessionAsync(
+        StoredMealSession existing,
+        string originalRequestHash,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(
+                existing.OriginalRequestHash,
+                originalRequestHash,
+                StringComparison.Ordinal))
+        {
+            throw new MealSessionConflictException(
+                "The idempotency key was already used for different messages or meal date.");
+        }
+
+        MealSessionResponse response = await FindAsync(
+            existing.Id,
+            cancellationToken) ?? throw new InvalidDataException(
+                "The existing meal session could not be loaded.");
+
+        return new MealSessionCreationResult(response, Created: false);
+    }
+
+    private static string ComputeOriginalRequestHash(
+        IReadOnlyList<string> messages,
+        DateOnly mealDate)
+    {
+        byte[] requestBytes = JsonSerializer.SerializeToUtf8Bytes(
+            new { Messages = messages, MealDate = mealDate },
+            SerializerOptions);
+
+        return Convert.ToHexString(SHA256.HashData(requestBytes));
     }
 
     public async Task<MealSessionResponse?> FindAsync(
@@ -855,6 +943,10 @@ public sealed class MealWorkflowService
         MealSessionStatus Status,
         IReadOnlyList<MealEntry> Entries);
 }
+
+public sealed record MealSessionCreationResult(
+    MealSessionResponse Session,
+    bool Created);
 
 public sealed record MealConfirmationOutcome(
     MealConfirmationOutcomeKind Kind,
