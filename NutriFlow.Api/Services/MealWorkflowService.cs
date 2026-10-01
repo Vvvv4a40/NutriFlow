@@ -210,7 +210,8 @@ public sealed class MealWorkflowService
     public async Task<MealSessionResponse?> AddMessageAsync(
         Guid id,
         string? message,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? idempotencyKey = null)
     {
         StoredMealSession? existing = await _sessionStore.FindAsync(
             id,
@@ -219,6 +220,32 @@ public sealed class MealWorkflowService
         if (existing is null)
         {
             return null;
+        }
+
+        string? messageRequestHash = null;
+
+        if (idempotencyKey is not null)
+        {
+            if (idempotencyKey == Guid.Empty)
+            {
+                throw new ArgumentException(
+                    "The idempotency key cannot be empty.",
+                    nameof(idempotencyKey));
+            }
+
+            messageRequestHash = Convert.ToHexString(SHA256.HashData(
+                JsonSerializer.SerializeToUtf8Bytes(message, SerializerOptions)));
+
+            if (existing.MessageRequestHashes.TryGetValue(
+                    idempotencyKey.Value,
+                    out string? originalHash))
+            {
+                return await ReuseMessageAsync(
+                    existing,
+                    originalHash,
+                    messageRequestHash,
+                    cancellationToken);
+            }
         }
 
         if (existing.Status == MealSessionStatus.Confirmed)
@@ -234,17 +261,70 @@ public sealed class MealWorkflowService
         IReadOnlyList<string> validatedMessages = ValidateMessages(messages);
         MealDraft draft = await ParseAsync(validatedMessages, cancellationToken);
         MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken);
-        StoredMealSession session = await _sessionStore.ReplaceDraftAsync(
-            id,
-            existing.PreviewToken,
-            validatedMessages,
-            draft,
-            evaluation.PreviewJson,
-            evaluation.PreviewToken,
-            evaluation.Status,
-            cancellationToken);
+        IReadOnlyDictionary<Guid, string>? updatedHashes = null;
+
+        if (idempotencyKey is not null)
+        {
+            Dictionary<Guid, string> hashes = new(existing.MessageRequestHashes)
+            {
+                [idempotencyKey.Value] = messageRequestHash!
+            };
+            updatedHashes = hashes;
+        }
+
+        StoredMealSession session;
+
+        try
+        {
+            session = await _sessionStore.ReplaceDraftAsync(
+                id,
+                existing.PreviewToken,
+                validatedMessages,
+                draft,
+                evaluation.PreviewJson,
+                evaluation.PreviewToken,
+                evaluation.Status,
+                cancellationToken,
+                updatedHashes);
+        }
+        catch (MealSessionConflictException) when (idempotencyKey is not null)
+        {
+            StoredMealSession? latest = await _sessionStore.FindAsync(
+                id,
+                cancellationToken);
+
+            if (latest is not null && latest.MessageRequestHashes.TryGetValue(
+                    idempotencyKey.Value,
+                    out string? originalHash))
+            {
+                return await ReuseMessageAsync(
+                    latest,
+                    originalHash,
+                    messageRequestHash!,
+                    cancellationToken);
+            }
+
+            throw;
+        }
 
         return MapSession(session, DeserializePreview(session.PreviewJson), session.Status);
+    }
+
+    private async Task<MealSessionResponse> ReuseMessageAsync(
+        StoredMealSession session,
+        string originalHash,
+        string messageRequestHash,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(originalHash, messageRequestHash, StringComparison.Ordinal))
+        {
+            throw new MealSessionConflictException(
+                "The idempotency key was already used for a different message.");
+        }
+
+        return await FindAsync(session.Id, cancellationToken) ??
+               throw new InvalidDataException(
+                   "The existing meal session could not be loaded.");
     }
 
     public async Task<MealConfirmationOutcome?> ConfirmAsync(

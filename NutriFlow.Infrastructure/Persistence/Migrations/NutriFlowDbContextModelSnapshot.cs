@@ -112,6 +112,12 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly>("MealDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("MessageRequestHashesJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("{}");
+
                     b.Property<string>("MessagesJson")
                         .IsRequired()
                         .HasColumnType("TEXT");

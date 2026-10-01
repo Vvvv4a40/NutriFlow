@@ -372,7 +372,7 @@ app.MapGet("/api/meal-sessions/{id:guid}", GetMealSessionAsync)
 app.MapPost("/api/meal-sessions/{id:guid}/messages", AddMealSessionMessageAsync)
     .WithName("AddMealSessionMessage")
     .RequireRateLimiting("external-services")
-    .WithSummary("Adds a clarification and rebuilds the structured preview.")
+    .WithSummary("Adds a clarification; an Idempotency-Key makes retries safe.")
     .WithTags("Meal sessions")
     .Produces<MealSessionResponse>(StatusCodes.Status200OK)
     .ProducesValidationProblem(StatusCodes.Status400BadRequest)
@@ -629,6 +629,8 @@ static async Task<IResult> GetMealSessionAsync(
 static async Task<IResult> AddMealSessionMessageAsync(
     Guid id,
     AddMealSessionMessageRequest? request,
+    [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader,
+    HttpContext context,
     MealWorkflowService workflow,
     CancellationToken cancellationToken)
 {
@@ -637,12 +639,32 @@ static async Task<IResult> AddMealSessionMessageAsync(
         return InvalidMessages("A message request is required.");
     }
 
+    Guid? idempotencyKey = null;
+
+    if (context.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+    {
+        if (values.Count != 1 ||
+            !Guid.TryParseExact(idempotencyKeyHeader, "D", out Guid parsedKey) ||
+            parsedKey == Guid.Empty)
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["Idempotency-Key"] =
+                    ["The idempotency key must be one non-empty UUID in the standard format."]
+                });
+        }
+
+        idempotencyKey = parsedKey;
+    }
+
     try
     {
         MealSessionResponse? response = await workflow.AddMessageAsync(
             id,
             request.Message,
-            cancellationToken);
+            cancellationToken,
+            idempotencyKey);
 
         return response is null
             ? MealSessionNotFound(id)
