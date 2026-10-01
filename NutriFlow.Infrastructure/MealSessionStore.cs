@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,8 @@ namespace NutriFlow.Infrastructure;
 
 public sealed class MealSessionStore
 {
+    private const int MaxMessageRequestHashes = 50;
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -170,7 +173,8 @@ public sealed class MealSessionStore
         string previewJson,
         string previewToken,
         MealSessionStatus status,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<Guid, string>? messageRequestHashes = null)
     {
         ValidateMessages(messages);
         ArgumentNullException.ThrowIfNull(draft);
@@ -180,6 +184,9 @@ public sealed class MealSessionStore
 
         string messagesJson = JsonSerializer.Serialize(messages, SerializerOptions);
         string draftJson = SerializeDraft(draft);
+        string? messageRequestHashesJson = messageRequestHashes is null
+            ? null
+            : SerializeMessageRequestHashes(messageRequestHashes);
         DateTimeOffset now = DateTimeOffset.UtcNow;
         int updatedCount = await _dbContext.MealSessions
             .Where(session =>
@@ -193,6 +200,9 @@ public sealed class MealSessionStore
                     .SetProperty(session => session.PreviewJson, previewJson)
                     .SetProperty(session => session.PreviewToken, previewToken)
                     .SetProperty(session => session.Status, status)
+                    .SetProperty(
+                        session => session.MessageRequestHashesJson,
+                        session => messageRequestHashesJson ?? session.MessageRequestHashesJson)
                     .SetProperty(session => session.UpdatedAtUtc, now),
                 cancellationToken);
 
@@ -270,7 +280,66 @@ public sealed class MealSessionStore
             record.UpdatedAtUtc,
             record.ConfirmedAtUtc,
             record.IdempotencyKey,
-            record.OriginalRequestHash);
+            record.OriginalRequestHash,
+            DeserializeMessageRequestHashes(record.MessageRequestHashesJson));
+    }
+
+    private static string SerializeMessageRequestHashes(
+        IReadOnlyDictionary<Guid, string> messageRequestHashes)
+    {
+        ValidateMessageRequestHashes(messageRequestHashes);
+
+        return JsonSerializer.Serialize(messageRequestHashes, SerializerOptions);
+    }
+
+    private static IReadOnlyDictionary<Guid, string> DeserializeMessageRequestHashes(string json)
+    {
+        try
+        {
+            Dictionary<Guid, string>? messageRequestHashes =
+                JsonSerializer.Deserialize<Dictionary<Guid, string>>(json, SerializerOptions);
+
+            if (messageRequestHashes is null)
+            {
+                throw new InvalidDataException("Stored message request hashes are invalid.");
+            }
+
+            ValidateMessageRequestHashes(messageRequestHashes);
+
+            return new ReadOnlyDictionary<Guid, string>(messageRequestHashes);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Stored message request hashes JSON is invalid.", exception);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException("Stored message request hashes are invalid.", exception);
+        }
+    }
+
+    private static void ValidateMessageRequestHashes(
+        IReadOnlyDictionary<Guid, string> messageRequestHashes)
+    {
+        if (messageRequestHashes.Count > MaxMessageRequestHashes)
+        {
+            throw new ArgumentException(
+                "A meal session cannot contain more than 50 message request hashes.",
+                nameof(messageRequestHashes));
+        }
+
+        foreach ((Guid key, string hash) in messageRequestHashes)
+        {
+            if (key == Guid.Empty ||
+                hash is null ||
+                hash.Length != 64 ||
+                hash.Any(character => character is not (>= '0' and <= '9' or >= 'A' and <= 'F')))
+            {
+                throw new ArgumentException(
+                    "Message request hashes require nonempty keys and uppercase SHA-256 values.",
+                    nameof(messageRequestHashes));
+            }
+        }
     }
 
     private static string SerializeDraft(MealDraft draft)

@@ -14,4 +14,5 @@ public sealed record StoredMealSession(
     DateTimeOffset UpdatedAtUtc,
     DateTimeOffset? ConfirmedAtUtc,
     Guid? IdempotencyKey,
-    string? OriginalRequestHash);
+    string? OriginalRequestHash,
+    IReadOnlyDictionary<Guid, string> MessageRequestHashes);

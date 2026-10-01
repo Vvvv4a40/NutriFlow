@@ -67,6 +67,7 @@ public sealed class MealSessionStoreTests
         Assert.Equal("Рагу", Assert.Single(restored.Draft.Dishes).Name);
         Assert.Null(restored.IdempotencyKey);
         Assert.Null(restored.OriginalRequestHash);
+        Assert.Empty(restored.MessageRequestHashes);
 
         Assert.Equal(
             1,
@@ -75,6 +76,7 @@ public sealed class MealSessionStoreTests
                 WHERE "Id" = {legacyId}
                     AND "IdempotencyKey" IS NULL
                     AND "OriginalRequestHash" IS NULL
+                    AND "MessageRequestHashesJson" = {"{}"}
                 """).SingleAsync());
     }
 
@@ -279,6 +281,240 @@ public sealed class MealSessionStoreTests
         Assert.Empty(restored.Draft.ClarificationQuestions);
         Assert.Equal(800m, Assert.Single(restored.Draft.Dishes).FinalWeightInGrams);
         Assert.True(restored.UpdatedAtUtc >= initial.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public async Task ReplaceDraftAsync_PersistsMessageRequestHashWithAppendedMessage()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid requestKey = Guid.NewGuid();
+        string requestHash = new('A', 64);
+        Guid sessionId;
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            StoredMealSession session = await new MealSessionStore(context).CreateAsync(
+                ["Готовлю рагу"],
+                CreateReadyDraft(),
+                "{}",
+                InitialToken,
+                MealSessionStatus.ReadyForConfirmation,
+                new DateOnly(2026, 9, 6));
+            sessionId = session.Id;
+        }
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await new MealSessionStore(context).ReplaceDraftAsync(
+                sessionId,
+                InitialToken,
+                ["Готовлю рагу", "Добавил масло"],
+                CreateReadyDraft(),
+                "{}",
+                UpdatedToken,
+                MealSessionStatus.ReadyForConfirmation,
+                messageRequestHashes: new Dictionary<Guid, string>
+                {
+                    [requestKey] = requestHash
+                });
+        }
+
+        await using NutriFlowDbContext readContext = database.CreateContext();
+        StoredMealSession restored = Assert.IsType<StoredMealSession>(
+            await new MealSessionStore(readContext).FindAsync(sessionId));
+
+        Assert.Equal(["Готовлю рагу", "Добавил масло"], restored.Messages);
+        Assert.Equal(requestHash, restored.MessageRequestHashes[requestKey]);
+        Assert.Single(restored.MessageRequestHashes);
+    }
+
+    [Fact]
+    public async Task ReplaceDraftAsync_WithStaleToken_DoesNotPersistMessageRequestHash()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid acceptedKey = Guid.NewGuid();
+        Guid staleKey = Guid.NewGuid();
+        StoredMealSession session;
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            session = await new MealSessionStore(context).CreateAsync(
+                ["Готовлю рагу"],
+                CreateReadyDraft(),
+                "{}",
+                InitialToken,
+                MealSessionStatus.ReadyForConfirmation,
+                new DateOnly(2026, 9, 6));
+        }
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await new MealSessionStore(context).ReplaceDraftAsync(
+                session.Id,
+                InitialToken,
+                ["Готовлю рагу", "Добавил масло"],
+                CreateReadyDraft(),
+                "{}",
+                UpdatedToken,
+                MealSessionStatus.ReadyForConfirmation,
+                messageRequestHashes: new Dictionary<Guid, string>
+                {
+                    [acceptedKey] = new string('A', 64)
+                });
+        }
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await Assert.ThrowsAsync<MealSessionConflictException>(() =>
+                new MealSessionStore(context).ReplaceDraftAsync(
+                    session.Id,
+                    InitialToken,
+                    ["Готовлю рагу", "Изменённое сообщение"],
+                    CreateReadyDraft(),
+                    "{}",
+                    new string('d', 64),
+                    MealSessionStatus.ReadyForConfirmation,
+                    messageRequestHashes: new Dictionary<Guid, string>
+                    {
+                        [staleKey] = new string('B', 64)
+                    }));
+        }
+
+        await using NutriFlowDbContext readContext = database.CreateContext();
+        StoredMealSession restored = Assert.IsType<StoredMealSession>(
+            await new MealSessionStore(readContext).FindAsync(session.Id));
+
+        Assert.Equal(["Готовлю рагу", "Добавил масло"], restored.Messages);
+        Assert.Equal(UpdatedToken, restored.PreviewToken);
+        Assert.Equal(new string('A', 64), restored.MessageRequestHashes[acceptedKey]);
+        Assert.False(restored.MessageRequestHashes.ContainsKey(staleKey));
+    }
+
+    [Fact]
+    public async Task ReplaceDraftAsync_WithoutMessageRequestHashes_PreservesExistingReceipt()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid requestKey = Guid.NewGuid();
+        StoredMealSession session;
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            session = await new MealSessionStore(context).CreateAsync(
+                ["Готовлю рагу"],
+                CreateReadyDraft(),
+                "{}",
+                InitialToken,
+                MealSessionStatus.ReadyForConfirmation,
+                new DateOnly(2026, 9, 6));
+        }
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await new MealSessionStore(context).ReplaceDraftAsync(
+                session.Id,
+                InitialToken,
+                ["Готовлю рагу", "Добавил масло"],
+                CreateReadyDraft(),
+                "{}",
+                UpdatedToken,
+                MealSessionStatus.ReadyForConfirmation,
+                messageRequestHashes: new Dictionary<Guid, string>
+                {
+                    [requestKey] = new string('A', 64)
+                });
+        }
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await new MealSessionStore(context).ReplaceDraftAsync(
+                session.Id,
+                UpdatedToken,
+                ["Готовлю рагу", "Добавил масло", "И немного соли"],
+                CreateReadyDraft(),
+                "{}",
+                new string('d', 64),
+                MealSessionStatus.ReadyForConfirmation);
+        }
+
+        await using NutriFlowDbContext readContext = database.CreateContext();
+        StoredMealSession restored = Assert.IsType<StoredMealSession>(
+            await new MealSessionStore(readContext).FindAsync(session.Id));
+
+        Assert.Equal(3, restored.Messages.Count);
+        Assert.Equal(new string('A', 64), restored.MessageRequestHashes[requestKey]);
+        Assert.Single(restored.MessageRequestHashes);
+    }
+
+    [Fact]
+    public async Task ReplaceDraftAsync_RejectsInvalidOrUnboundedMessageRequestHashes()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        await using NutriFlowDbContext context = database.CreateContext();
+        MealSessionStore store = new MealSessionStore(context);
+        StoredMealSession session = await store.CreateAsync(
+            ["Готовлю рагу"],
+            CreateReadyDraft(),
+            "{}",
+            InitialToken,
+            MealSessionStatus.ReadyForConfirmation,
+            new DateOnly(2026, 9, 6));
+
+        IReadOnlyDictionary<Guid, string>[] invalidReceipts =
+        [
+            new Dictionary<Guid, string> { [Guid.Empty] = new string('A', 64) },
+            new Dictionary<Guid, string> { [Guid.NewGuid()] = new string('a', 64) },
+            Enumerable.Range(0, 51).ToDictionary(
+                _ => Guid.NewGuid(),
+                _ => new string('A', 64))
+        ];
+
+        foreach (IReadOnlyDictionary<Guid, string> receipts in invalidReceipts)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                store.ReplaceDraftAsync(
+                    session.Id,
+                    InitialToken,
+                    ["Готовлю рагу", "Добавил масло"],
+                    CreateReadyDraft(),
+                    "{}",
+                    UpdatedToken,
+                    MealSessionStatus.ReadyForConfirmation,
+                    messageRequestHashes: receipts));
+        }
+
+        StoredMealSession unchanged = Assert.IsType<StoredMealSession>(
+            await store.FindAsync(session.Id));
+        Assert.Equal(["Готовлю рагу"], unchanged.Messages);
+        Assert.Empty(unchanged.MessageRequestHashes);
+        Assert.Equal(InitialToken, unchanged.PreviewToken);
+    }
+
+    [Fact]
+    public async Task FindAsync_RejectsCorruptMessageRequestHashes()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        await using NutriFlowDbContext context = database.CreateContext();
+        MealSessionStore store = new MealSessionStore(context);
+        StoredMealSession session = await store.CreateAsync(
+            ["Готовлю рагу"],
+            CreateReadyDraft(),
+            "{}",
+            InitialToken,
+            MealSessionStatus.ReadyForConfirmation,
+            new DateOnly(2026, 9, 6));
+
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE "MealSessions"
+            SET "MessageRequestHashesJson" = {"{\"not-a-guid\":\"ABC\"}"}
+            WHERE "Id" = {session.Id}
+            """);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.FindAsync(session.Id));
     }
 
     [Fact]

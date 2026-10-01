@@ -96,6 +96,9 @@ public sealed class NutriFlowDbContext : DbContext
             entity.HasIndex(session => session.IdempotencyKey).IsUnique();
             entity.Property(session => session.OriginalRequestHash)
                 .HasMaxLength(64);
+            entity.Property(session => session.MessageRequestHashesJson)
+                .HasDefaultValue("{}")
+                .IsRequired();
         });
 
         modelBuilder.Entity<MealEntryRecord>(entity =>
