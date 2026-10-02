@@ -17,12 +17,30 @@ public sealed class MealSessionStore
     };
 
     private readonly NutriFlowDbContext _dbContext;
+    private readonly Guid _ownerId;
 
     public MealSessionStore(NutriFlowDbContext dbContext)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
 
         _dbContext = dbContext;
+        _ownerId = dbContext.Users
+            .AsNoTracking()
+            .Single(user => user.IsLegacyLocal)
+            .Id;
+    }
+
+    public MealSessionStore(NutriFlowDbContext dbContext, Guid ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+
+        if (ownerId == Guid.Empty)
+        {
+            throw new ArgumentException("An owner ID cannot be empty.", nameof(ownerId));
+        }
+
+        _dbContext = dbContext;
+        _ownerId = ownerId;
     }
 
     public Task<StoredMealSession> CreateAsync(
@@ -102,7 +120,8 @@ public sealed class MealSessionStore
         MealSessionRecord? record = await _dbContext.MealSessions
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                session => session.IdempotencyKey == idempotencyKey,
+                session => session.UserId == _ownerId &&
+                    session.IdempotencyKey == idempotencyKey,
                 cancellationToken);
 
         return record is null ? null : MapSession(record);
@@ -128,6 +147,7 @@ public sealed class MealSessionStore
         MealSessionRecord record = new MealSessionRecord
         {
             Id = Guid.NewGuid(),
+            UserId = _ownerId,
             MessagesJson = JsonSerializer.Serialize(messages, SerializerOptions),
             DraftJson = SerializeDraft(draft),
             PreviewJson = previewJson,
@@ -160,7 +180,9 @@ public sealed class MealSessionStore
     {
         MealSessionRecord? record = await _dbContext.MealSessions
             .AsNoTracking()
-            .SingleOrDefaultAsync(session => session.Id == id, cancellationToken);
+            .SingleOrDefaultAsync(
+                session => session.Id == id && session.UserId == _ownerId,
+                cancellationToken);
 
         return record is null ? null : MapSession(record);
     }
@@ -191,6 +213,7 @@ public sealed class MealSessionStore
         int updatedCount = await _dbContext.MealSessions
             .Where(session =>
                 session.Id == id &&
+                session.UserId == _ownerId &&
                 session.Status != MealSessionStatus.Confirmed &&
                 session.PreviewToken == expectedPreviewToken)
             .ExecuteUpdateAsync(
@@ -213,7 +236,9 @@ public sealed class MealSessionStore
 
         MealSessionRecord record = await _dbContext.MealSessions
             .AsNoTracking()
-            .SingleAsync(session => session.Id == id, cancellationToken);
+            .SingleAsync(
+                session => session.Id == id && session.UserId == _ownerId,
+                cancellationToken);
 
         return MapSession(record);
     }
@@ -234,6 +259,7 @@ public sealed class MealSessionStore
         int updatedCount = await _dbContext.MealSessions
             .Where(session =>
                 session.Id == id &&
+                session.UserId == _ownerId &&
                 session.Status != MealSessionStatus.Confirmed &&
                 session.PreviewToken == expectedPreviewToken)
             .ExecuteUpdateAsync(
@@ -251,7 +277,9 @@ public sealed class MealSessionStore
 
         MealSessionRecord record = await _dbContext.MealSessions
             .AsNoTracking()
-            .SingleAsync(session => session.Id == id, cancellationToken);
+            .SingleAsync(
+                session => session.Id == id && session.UserId == _ownerId,
+                cancellationToken);
 
         return MapSession(record);
     }
@@ -497,7 +525,7 @@ public sealed class MealSessionStore
     {
         MealSessionStatus? currentStatus = await _dbContext.MealSessions
             .AsNoTracking()
-            .Where(session => session.Id == id)
+            .Where(session => session.Id == id && session.UserId == _ownerId)
             .Select(session => (MealSessionStatus?)session.Status)
             .SingleOrDefaultAsync(cancellationToken);
 

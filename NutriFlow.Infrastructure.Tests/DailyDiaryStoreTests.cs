@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure.Persistence;
 
@@ -52,6 +53,101 @@ public sealed class DailyDiaryStoreTests
             fat: 55m,
             carbohydrates: 190m);
         Assert.Null(await readStore.FindGoalAsync(secondDate.AddDays(1)));
+    }
+
+    [Fact]
+    public async Task Owners_HaveIndependentGoalsAndEntries_AndCannotConfirmForeignSessions()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid otherOwnerId = Guid.NewGuid();
+        DateOnly mealDate = new DateOnly(2026, 9, 6);
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Users" ("Id", "CreatedAtUtc", "IsLegacyLocal")
+                VALUES ({otherOwnerId}, {DateTimeOffset.UtcNow}, {false})
+                """);
+
+            DailyDiaryStore legacyDiary = new DailyDiaryStore(context);
+            DailyDiaryStore otherDiary = new DailyDiaryStore(context, otherOwnerId);
+            await legacyDiary.SetGoalAsync(
+                mealDate,
+                CreateGoal(2200m, 150m, 70m, 230m));
+            await otherDiary.SetGoalAsync(
+                mealDate,
+                CreateGoal(1800m, 110m, 55m, 190m));
+        }
+
+        StoredMealSession legacySession = await CreateSessionAsync(
+            database,
+            MealSessionStatus.ReadyForConfirmation,
+            mealDate);
+        StoredMealSession otherSession = await CreateSessionAsync(
+            database,
+            MealSessionStatus.ReadyForConfirmation,
+            mealDate,
+            otherOwnerId);
+        MealEntry legacyEntry = MealSessionStoreTests.CreateEntry(
+            "Обед первого владельца",
+            200m,
+            250m);
+        MealEntry otherEntry = MealSessionStoreTests.CreateEntry(
+            "Обед второго владельца",
+            150m,
+            190m);
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            DailyDiaryStore legacyDiary = new DailyDiaryStore(context);
+            DailyDiaryStore otherDiary = new DailyDiaryStore(context, otherOwnerId);
+
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                legacyDiary.ConfirmSessionAsync(
+                    otherSession.Id,
+                    PreviewToken,
+                    [otherEntry]));
+            Assert.Empty(await legacyDiary.GetSessionEntriesAsync(otherSession.Id));
+            Assert.Equal(
+                MealSessionConfirmationResult.Confirmed,
+                await legacyDiary.ConfirmSessionAsync(
+                    legacySession.Id,
+                    PreviewToken,
+                    [legacyEntry]));
+            Assert.Equal(
+                MealSessionConfirmationResult.Confirmed,
+                await otherDiary.ConfirmSessionAsync(
+                    otherSession.Id,
+                    PreviewToken,
+                    [otherEntry]));
+            await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+                otherDiary.ConfirmSessionAsync(
+                    legacySession.Id,
+                    PreviewToken,
+                    [legacyEntry]));
+        }
+
+        await using NutriFlowDbContext readContext = database.CreateContext();
+        DailyDiaryStore legacyReadDiary = new DailyDiaryStore(readContext);
+        DailyDiaryStore otherReadDiary = new DailyDiaryStore(readContext, otherOwnerId);
+        DailyGoal legacyGoal = Assert.IsType<DailyGoal>(
+            await legacyReadDiary.FindGoalAsync(mealDate));
+        DailyGoal otherGoal = Assert.IsType<DailyGoal>(
+            await otherReadDiary.FindGoalAsync(mealDate));
+
+        Assert.Equal(2200m, legacyGoal.TargetNutrition.Calories);
+        Assert.Equal(1800m, otherGoal.TargetNutrition.Calories);
+        AssertEntry(legacyEntry, Assert.Single(await legacyReadDiary.GetEntriesAsync(mealDate)));
+        AssertEntry(otherEntry, Assert.Single(await otherReadDiary.GetEntriesAsync(mealDate)));
+        AssertEntry(
+            legacyEntry,
+            Assert.Single(await legacyReadDiary.GetSessionEntriesAsync(legacySession.Id)));
+        AssertEntry(
+            otherEntry,
+            Assert.Single(await otherReadDiary.GetSessionEntriesAsync(otherSession.Id)));
+        Assert.Empty(await legacyReadDiary.GetSessionEntriesAsync(otherSession.Id));
+        Assert.Empty(await otherReadDiary.GetSessionEntriesAsync(legacySession.Id));
     }
 
     [Fact]
@@ -213,10 +309,13 @@ public sealed class DailyDiaryStoreTests
     private static async Task<StoredMealSession> CreateSessionAsync(
         TestDatabase database,
         MealSessionStatus status,
-        DateOnly mealDate)
+        DateOnly mealDate,
+        Guid? ownerId = null)
     {
         await using NutriFlowDbContext context = database.CreateContext();
-        MealSessionStore store = new MealSessionStore(context);
+        MealSessionStore store = ownerId is Guid id
+            ? new MealSessionStore(context, id)
+            : new MealSessionStore(context);
 
         return await store.CreateAsync(
             ["Готовое рагу весит 800 г, съел 200 г"],

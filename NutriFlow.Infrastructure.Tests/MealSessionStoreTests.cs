@@ -171,6 +171,78 @@ public sealed class MealSessionStoreTests
     }
 
     [Fact]
+    public async Task Owners_CanReuseIdempotencyKeyWithoutReadingOrEditingEachOthersSessions()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid otherOwnerId = Guid.NewGuid();
+        Guid requestKey = Guid.NewGuid();
+        await using NutriFlowDbContext context = database.CreateContext();
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Users" ("Id", "CreatedAtUtc", "IsLegacyLocal")
+            VALUES ({otherOwnerId}, {DateTimeOffset.UtcNow}, {false})
+            """);
+
+        MealSessionStore localStore = new(context);
+        MealSessionStore otherStore = new(context, otherOwnerId);
+        (StoredMealSession localSession, bool localCreated) =
+            await localStore.CreateWithIdempotencyKeyAsync(
+                ["Обед первого владельца"],
+                CreateReadyDraft(),
+                "{}",
+                InitialToken,
+                MealSessionStatus.ReadyForConfirmation,
+                new DateOnly(2026, 9, 6),
+                requestKey,
+                OriginalRequestHash);
+
+        Assert.True(localCreated);
+        Assert.Null(await otherStore.FindAsync(localSession.Id));
+        Assert.Null(await otherStore.FindByIdempotencyKeyAsync(requestKey));
+
+        (StoredMealSession otherSession, bool otherCreated) =
+            await otherStore.CreateWithIdempotencyKeyAsync(
+                ["Обед второго владельца"],
+                CreateReadyDraft(),
+                "{}",
+                InitialToken,
+                MealSessionStatus.ReadyForConfirmation,
+                new DateOnly(2026, 9, 6),
+                requestKey,
+                OriginalRequestHash);
+
+        Assert.True(otherCreated);
+        Assert.NotEqual(localSession.Id, otherSession.Id);
+        Assert.Equal(localSession.Id,
+            (await localStore.FindByIdempotencyKeyAsync(requestKey))?.Id);
+        Assert.Equal(otherSession.Id,
+            (await otherStore.FindByIdempotencyKeyAsync(requestKey))?.Id);
+        Assert.Null(await localStore.FindAsync(otherSession.Id));
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            otherStore.ReplaceDraftAsync(
+                localSession.Id,
+                InitialToken,
+                ["Обед первого владельца", "Чужое изменение"],
+                CreateReadyDraft(),
+                "{}",
+                UpdatedToken,
+                MealSessionStatus.ReadyForConfirmation));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            localStore.UpdatePreviewAsync(
+                otherSession.Id,
+                InitialToken,
+                "{}",
+                UpdatedToken,
+                MealSessionStatus.ReadyForConfirmation));
+
+        Assert.Equal(["Обед первого владельца"],
+            (await localStore.FindAsync(localSession.Id))?.Messages);
+        Assert.Equal(["Обед второго владельца"],
+            (await otherStore.FindAsync(otherSession.Id))?.Messages);
+    }
+
+    [Fact]
     public async Task CreateAsync_ThenFindAsync_RestoresCompleteDraftAndPreview()
     {
         await using TestDatabase database = new TestDatabase();

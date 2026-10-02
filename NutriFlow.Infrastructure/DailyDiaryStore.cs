@@ -7,12 +7,30 @@ namespace NutriFlow.Infrastructure;
 public sealed class DailyDiaryStore
 {
     private readonly NutriFlowDbContext _dbContext;
+    private readonly Guid _ownerId;
 
     public DailyDiaryStore(NutriFlowDbContext dbContext)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
 
         _dbContext = dbContext;
+        _ownerId = dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.IsLegacyLocal)
+            .Select(user => user.Id)
+            .Single();
+    }
+
+    public DailyDiaryStore(NutriFlowDbContext dbContext, Guid ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+        if (ownerId == Guid.Empty)
+        {
+            throw new ArgumentException("Owner ID cannot be empty.", nameof(ownerId));
+        }
+
+        _dbContext = dbContext;
+        _ownerId = ownerId;
     }
 
     public async Task SetGoalAsync(
@@ -24,7 +42,7 @@ public sealed class DailyDiaryStore
 
         NutritionValues nutrition = goal.TargetNutrition;
         int updatedCount = await _dbContext.DailyGoals
-            .Where(item => item.Date == date)
+            .Where(item => item.UserId == _ownerId && item.Date == date)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(item => item.Calories, nutrition.Calories)
@@ -44,6 +62,7 @@ public sealed class DailyDiaryStore
 
         DailyGoalRecord record = new DailyGoalRecord
         {
+            UserId = _ownerId,
             Date = date,
             Calories = nutrition.Calories,
             ProteinGrams = nutrition.ProteinGrams,
@@ -60,7 +79,7 @@ public sealed class DailyDiaryStore
         {
             _dbContext.ChangeTracker.Clear();
             updatedCount = await _dbContext.DailyGoals
-                .Where(item => item.Date == date)
+                .Where(item => item.UserId == _ownerId && item.Date == date)
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(item => item.Calories, nutrition.Calories)
@@ -86,7 +105,9 @@ public sealed class DailyDiaryStore
     {
         DailyGoalRecord? record = await _dbContext.DailyGoals
             .AsNoTracking()
-            .SingleOrDefaultAsync(item => item.Date == date, cancellationToken);
+            .SingleOrDefaultAsync(
+                item => item.UserId == _ownerId && item.Date == date,
+                cancellationToken);
 
         return record is null
             ? null
@@ -103,7 +124,9 @@ public sealed class DailyDiaryStore
     {
         List<MealEntryRecord> records = await _dbContext.MealEntries
             .AsNoTracking()
-            .Where(entry => entry.MealDate == date)
+            .Where(entry =>
+                entry.MealDate == date &&
+                entry.MealSession.UserId == _ownerId)
             .ToListAsync(cancellationToken);
 
         return records
@@ -120,7 +143,9 @@ public sealed class DailyDiaryStore
     {
         List<MealEntryRecord> records = await _dbContext.MealEntries
             .AsNoTracking()
-            .Where(entry => entry.MealSessionId == sessionId)
+            .Where(entry =>
+                entry.MealSessionId == sessionId &&
+                entry.MealSession.UserId == _ownerId)
             .OrderBy(entry => entry.Sequence)
             .ToListAsync(cancellationToken);
 
@@ -149,6 +174,7 @@ public sealed class DailyDiaryStore
         int claimedSessionCount = await _dbContext.MealSessions
             .Where(session =>
                 session.Id == sessionId &&
+                session.UserId == _ownerId &&
                 session.Status == MealSessionStatus.ReadyForConfirmation &&
                 session.PreviewToken == expectedPreviewToken)
             .ExecuteUpdateAsync(
@@ -165,7 +191,9 @@ public sealed class DailyDiaryStore
             MealSessionRecord? current = await _dbContext.MealSessions
                 .AsNoTracking()
                 .SingleOrDefaultAsync(
-                    session => session.Id == sessionId,
+                    session =>
+                        session.Id == sessionId &&
+                        session.UserId == _ownerId,
                     cancellationToken);
 
             if (current is null)
@@ -186,7 +214,9 @@ public sealed class DailyDiaryStore
 
         DateOnly mealDate = await _dbContext.MealSessions
             .AsNoTracking()
-            .Where(session => session.Id == sessionId)
+            .Where(session =>
+                session.Id == sessionId &&
+                session.UserId == _ownerId)
             .Select(session => session.MealDate)
             .SingleAsync(cancellationToken);
 
