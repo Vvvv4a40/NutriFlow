@@ -19,6 +19,9 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.DailyGoalRecord", b =>
                 {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly>("Date")
                         .HasColumnType("TEXT");
 
@@ -34,7 +37,7 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Property<decimal>("ProteinGrams")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Date");
+                    b.HasKey("UserId", "Date");
 
                     b.ToTable("DailyGoals", (string)null);
                 });
@@ -141,9 +144,12 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("IdempotencyKey")
+                    b.HasIndex("UserId", "IdempotencyKey")
                         .IsUnique();
 
                     b.ToTable("MealSessions", (string)null);
@@ -235,6 +241,36 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("Products", (string)null);
                 });
 
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.UserRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsLegacyLocal")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsLegacyLocal")
+                        .IsUnique()
+                        .HasFilter("\"IsLegacyLocal\" = 1");
+
+                    b.ToTable("Users", (string)null);
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.DailyGoalRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryRecord", b =>
                 {
                     b.HasOne("NutriFlow.Infrastructure.Persistence.MealSessionRecord", "MealSession")
@@ -244,6 +280,15 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("MealSession");
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealSessionRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.ProductAliasRecord", b =>

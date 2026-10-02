@@ -14,10 +14,21 @@ public sealed class NutriFlowDbContext : DbContext
     internal DbSet<MealSessionRecord> MealSessions => Set<MealSessionRecord>();
     internal DbSet<MealEntryRecord> MealEntries => Set<MealEntryRecord>();
     internal DbSet<DailyGoalRecord> DailyGoals => Set<DailyGoalRecord>();
+    internal DbSet<UserRecord> Users => Set<UserRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<UserRecord>(entity =>
+        {
+            entity.ToTable("Users");
+            entity.HasKey(user => user.Id);
+            entity.Property(user => user.CreatedAtUtc).HasColumnType("TEXT");
+            entity.HasIndex(user => user.IsLegacyLocal)
+                .IsUnique()
+                .HasFilter("\"IsLegacyLocal\" = 1");
+        });
 
         modelBuilder.Entity<ProductRecord>(entity =>
         {
@@ -82,6 +93,10 @@ public sealed class NutriFlowDbContext : DbContext
         {
             entity.ToTable("MealSessions");
             entity.HasKey(session => session.Id);
+            entity.HasOne<UserRecord>()
+                .WithMany()
+                .HasForeignKey(session => session.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.Property(session => session.MessagesJson).IsRequired();
             entity.Property(session => session.DraftJson).IsRequired();
             entity.Property(session => session.PreviewJson).IsRequired();
@@ -93,7 +108,11 @@ public sealed class NutriFlowDbContext : DbContext
             entity.Property(session => session.CreatedAtUtc).HasColumnType("TEXT");
             entity.Property(session => session.UpdatedAtUtc).HasColumnType("TEXT");
             entity.Property(session => session.ConfirmedAtUtc).HasColumnType("TEXT");
-            entity.HasIndex(session => session.IdempotencyKey).IsUnique();
+            entity.HasIndex(session => new
+            {
+                session.UserId,
+                session.IdempotencyKey
+            }).IsUnique();
             entity.Property(session => session.OriginalRequestHash)
                 .HasMaxLength(64);
             entity.Property(session => session.MessageRequestHashesJson)
@@ -131,7 +150,11 @@ public sealed class NutriFlowDbContext : DbContext
         modelBuilder.Entity<DailyGoalRecord>(entity =>
         {
             entity.ToTable("DailyGoals");
-            entity.HasKey(goal => goal.Date);
+            entity.HasKey(goal => new { goal.UserId, goal.Date });
+            entity.HasOne<UserRecord>()
+                .WithMany()
+                .HasForeignKey(goal => goal.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.Property(goal => goal.Date).HasColumnType("TEXT");
             entity.Property(goal => goal.Calories).HasColumnType("TEXT");
             entity.Property(goal => goal.ProteinGrams).HasColumnType("TEXT");

@@ -5,6 +5,7 @@ namespace NutriFlow.Infrastructure.Persistence;
 internal sealed class MealSessionRecord
 {
     public Guid Id { get; set; }
+    public Guid UserId { get; set; }
     public string MessagesJson { get; set; } = string.Empty;
     public string DraftJson { get; set; } = string.Empty;
     public string PreviewJson { get; set; } = string.Empty;
