@@ -146,7 +146,7 @@ internal static class MealSessionEndpoints
                 statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: "The input sequence is not supported.");
         }
-        catch (InvalidDataException)
+        catch (MealParserResponseException)
         {
             return MealParserFailure();
         }
@@ -236,7 +236,7 @@ internal static class MealSessionEndpoints
                 statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: "The input sequence is not supported.");
         }
-        catch (InvalidDataException)
+        catch (MealParserResponseException)
         {
             return MealParserFailure();
         }

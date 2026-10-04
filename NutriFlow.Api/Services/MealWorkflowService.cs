@@ -538,7 +538,14 @@ public sealed class MealWorkflowService
 
         captureSession.FinishCollecting();
 
-        return await _parser.ParseAsync(captureSession, cancellationToken);
+        try
+        {
+            return await _parser.ParseAsync(captureSession, cancellationToken);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new MealParserResponseException(exception);
+        }
     }
 
     private async Task<MealEvaluation> EvaluateAsync(
