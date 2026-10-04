@@ -900,21 +900,11 @@ public sealed class MealWorkflowService
     {
         try
         {
-            MealPreviewDocument? document =
-                JsonSerializer.Deserialize<MealPreviewDocument>(
-                    json,
-                    SerializerOptions);
+            using JsonDocument document = JsonDocument.Parse(json);
+            MealPreviewValidator.Validate(document.RootElement);
 
-            if (document is null ||
-                document.ClarificationQuestions is null ||
-                document.Issues is null ||
-                document.Dishes is null)
-            {
-                throw new InvalidDataException(
-                    "Stored meal preview is incomplete.");
-            }
-
-            return document;
+            return document.RootElement.Deserialize<MealPreviewDocument>(SerializerOptions)
+                ?? throw new InvalidDataException("Stored meal preview is incomplete.");
         }
         catch (JsonException exception)
         {
