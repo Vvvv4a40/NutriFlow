@@ -88,7 +88,7 @@ public sealed class GroqMealParser : IMealParser
         };
         using HttpResponseMessage response = await _httpClient.SendAsync(
             request,
-            HttpCompletionOption.ResponseHeadersRead,
+            HttpCompletionOption.ResponseContentRead,
             cancellationToken);
 
         response.EnsureSuccessStatusCode();

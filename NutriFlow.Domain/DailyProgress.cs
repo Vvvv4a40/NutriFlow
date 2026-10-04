@@ -2,6 +2,8 @@ namespace NutriFlow.Domain;
 
 public sealed class DailyProgress
 {
+    private NutritionValues? _consumedNutrition;
+
     public DailyProgress(
         DailyGoal goal,
         IReadOnlyList<MealEntry> mealEntries)
@@ -28,6 +30,11 @@ public sealed class DailyProgress
 
     public NutritionValues CalculateConsumedNutrition()
     {
+        if (_consumedNutrition is not null)
+        {
+            return _consumedNutrition;
+        }
+
         NutritionValues consumedNutrition = new NutritionValues(
             calories: 0m,
             proteinGrams: 0m,
@@ -39,6 +46,7 @@ public sealed class DailyProgress
             consumedNutrition = consumedNutrition.Add(mealEntry.Nutrition);
         }
 
+        _consumedNutrition = consumedNutrition;
         return consumedNutrition;
     }
 

@@ -21,6 +21,35 @@ public sealed class DailyProgressTests
     }
 
     [Fact]
+    public void CalculateConsumedNutrition_ReusesImmutableResult()
+    {
+        DailyProgress progress = new DailyProgress(
+            CreateGoal(),
+            new List<MealEntry> { CreateMealEntry("Meal", 300m, 20m, 10m, 40m) });
+
+        NutritionValues first = progress.CalculateConsumedNutrition();
+
+        Assert.Same(first, progress.CalculateConsumedNutrition());
+        AssertNutrition(progress.CalculateRemainingNutrition(), 1700m, 80m, 60m, 210m);
+        AssertNutrition(progress.CalculateExceededNutrition(), 0m, 0m, 0m, 0m);
+    }
+
+    [Fact]
+    public void CalculateConsumedNutrition_WithOverflow_ThrowsOnlyWhenCalculated()
+    {
+        DailyProgress progress = new DailyProgress(
+            CreateGoal(),
+            new List<MealEntry>
+            {
+                CreateMealEntry("First", decimal.MaxValue, 0m, 0m, 0m),
+                CreateMealEntry("Second", 1m, 0m, 0m, 0m)
+            });
+
+        Assert.Throws<OverflowException>(() => progress.CalculateConsumedNutrition());
+        Assert.Throws<OverflowException>(() => progress.CalculateRemainingNutrition());
+    }
+
+    [Fact]
     public void CalculateConsumedNutrition_WithNoEntries_ReturnsZero()
     {
         DailyProgress progress = new DailyProgress(

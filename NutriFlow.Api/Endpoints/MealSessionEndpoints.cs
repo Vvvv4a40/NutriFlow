@@ -1,0 +1,470 @@
+using Microsoft.AspNetCore.Mvc;
+using NutriFlow.Api.Contracts;
+using NutriFlow.Api.Services;
+using NutriFlow.Domain;
+using NutriFlow.Infrastructure;
+
+namespace NutriFlow.Api.Endpoints;
+
+internal static class MealSessionEndpoints
+{
+    public static void MapMealSessionEndpoints(this WebApplication app)
+    {
+        app.MapPost("/api/meal-sessions", CreateMealSessionAsync)
+            .WithName("CreateMealSession")
+            .RequireRateLimiting("external-services")
+            .WithSummary("Creates a meal preview; an Idempotency-Key makes mobile retries safe.")
+            .WithTags("Meal sessions")
+            .Produces<MealSessionResponse>(StatusCodes.Status201Created)
+            .Produces<MealSessionResponse>(StatusCodes.Status200OK)
+            .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        app.MapGet("/api/meal-sessions/{id:guid}", GetMealSessionAsync)
+            .WithName("GetMealSession")
+            .WithSummary("Returns the current server-side preview of a meal session.")
+            .WithTags("Meal sessions")
+            .Produces<MealSessionResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        app.MapPost("/api/meal-sessions/{id:guid}/messages", AddMealSessionMessageAsync)
+            .WithName("AddMealSessionMessage")
+            .RequireRateLimiting("external-services")
+            .WithSummary("Adds a clarification; an Idempotency-Key makes retries safe.")
+            .WithTags("Meal sessions")
+            .Produces<MealSessionResponse>(StatusCodes.Status200OK)
+            .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        app.MapPost("/api/meal-sessions/{id:guid}/confirm", ConfirmMealSessionAsync)
+            .WithName("ConfirmMealSession")
+            .WithSummary("Atomically records the portions from the reviewed preview.")
+            .WithTags("Meal sessions")
+            .Produces<ConfirmMealSessionResponse>(StatusCodes.Status200OK)
+            .Produces<ConfirmMealSessionResponse>(StatusCodes.Status409Conflict)
+            .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
+            .WithName("ParseMealDraft")
+            .RequireRateLimiting("external-services")
+            .WithSummary("Builds a structured meal draft from captured messages.")
+            .WithTags("Meal drafts")
+            .Produces<MealDraftResponse>(StatusCodes.Status200OK)
+            .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status504GatewayTimeout)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+    }
+
+    private static async Task<IResult> CreateMealSessionAsync(
+        CreateMealSessionRequest? request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader,
+        HttpContext context,
+        MealWorkflowService workflow,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return InvalidMessages("A meal session request is required.");
+        }
+
+        Guid? idempotencyKey = null;
+
+        if (context.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+        {
+            if (values.Count != 1 ||
+                !Guid.TryParseExact(idempotencyKeyHeader, "D", out Guid parsedKey) ||
+                parsedKey == Guid.Empty)
+            {
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["Idempotency-Key"] =
+                        ["The idempotency key must be one non-empty UUID in the standard format."]
+                    });
+            }
+
+            idempotencyKey = parsedKey;
+
+            if (request.MealDate is null)
+            {
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["mealDate"] =
+                        ["An explicit meal date is required with an idempotency key."]
+                    });
+            }
+        }
+
+        try
+        {
+            MealSessionCreationResult creation = await workflow.CreateAsync(
+                request.Messages,
+                request.MealDate ?? DateOnly.FromDateTime(DateTime.Today),
+                cancellationToken,
+                idempotencyKey);
+            string sessionPath = $"/api/meal-sessions/{creation.Session.Id}";
+
+            if (creation.Created)
+            {
+                return Results.Created(sessionPath, creation.Session);
+            }
+
+            context.Response.Headers.Location = sessionPath;
+            return Results.Ok(creation.Session);
+        }
+        catch (ArgumentException exception)
+        {
+            return InvalidMessages(exception.Message);
+        }
+        catch (MealSessionConflictException exception)
+        {
+            return Results.Problem(
+                detail: exception.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The idempotency key conflicts with an existing request.");
+        }
+        catch (NotSupportedException exception)
+        {
+            return Results.Problem(
+                detail: exception.Message,
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "The input sequence is not supported.");
+        }
+        catch (InvalidDataException)
+        {
+            return MealParserFailure();
+        }
+        catch (HttpRequestException)
+        {
+            return MealParserUnavailable();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return MealParserTimeout();
+        }
+    }
+
+    private static async Task<IResult> GetMealSessionAsync(
+        Guid id,
+        MealWorkflowService workflow,
+        CancellationToken cancellationToken)
+    {
+        MealSessionResponse? response = await workflow.FindAsync(
+            id,
+            cancellationToken);
+
+        return response is null
+            ? MealSessionNotFound(id)
+            : Results.Ok(response);
+    }
+
+    private static async Task<IResult> AddMealSessionMessageAsync(
+        Guid id,
+        AddMealSessionMessageRequest? request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader,
+        HttpContext context,
+        MealWorkflowService workflow,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return InvalidMessages("A message request is required.");
+        }
+
+        Guid? idempotencyKey = null;
+
+        if (context.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+        {
+            if (values.Count != 1 ||
+                !Guid.TryParseExact(idempotencyKeyHeader, "D", out Guid parsedKey) ||
+                parsedKey == Guid.Empty)
+            {
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["Idempotency-Key"] =
+                        ["The idempotency key must be one non-empty UUID in the standard format."]
+                    });
+            }
+
+            idempotencyKey = parsedKey;
+        }
+
+        try
+        {
+            MealSessionResponse? response = await workflow.AddMessageAsync(
+                id,
+                request.Message,
+                cancellationToken,
+                idempotencyKey);
+
+            return response is null
+                ? MealSessionNotFound(id)
+                : Results.Ok(response);
+        }
+        catch (ArgumentException exception)
+        {
+            return InvalidMessages(exception.Message);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.Problem(
+                detail: exception.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The meal session cannot be changed.");
+        }
+        catch (NotSupportedException exception)
+        {
+            return Results.Problem(
+                detail: exception.Message,
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "The input sequence is not supported.");
+        }
+        catch (InvalidDataException)
+        {
+            return MealParserFailure();
+        }
+        catch (HttpRequestException)
+        {
+            return MealParserUnavailable();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return MealParserTimeout();
+        }
+    }
+
+    private static async Task<IResult> ConfirmMealSessionAsync(
+        Guid id,
+        ConfirmMealSessionRequest? request,
+        MealWorkflowService workflow,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.PreviewToken))
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]>
+                {
+                    ["previewToken"] = new[]
+                    {
+                        "The preview token returned by the server is required."
+                    }
+                });
+        }
+
+        MealConfirmationOutcome? outcome = await workflow.ConfirmAsync(
+            id,
+            request.PreviewToken,
+            cancellationToken);
+
+        if (outcome is null)
+        {
+            return MealSessionNotFound(id);
+        }
+
+        string? message = outcome.Kind switch
+        {
+            MealConfirmationOutcomeKind.StalePreview =>
+                "The preview changed. Review the current values before confirming again.",
+            MealConfirmationOutcomeKind.NotReady =>
+                "Resolve the listed questions and product issues before confirmation.",
+            _ => null
+        };
+        ConfirmMealSessionResponse response = new ConfirmMealSessionResponse(
+            outcome.Kind.ToString(),
+            message,
+            outcome.Session,
+            outcome.Entries.Select(ResponseMapper.ToMealEntryResponse).ToArray());
+
+        return outcome.Kind is MealConfirmationOutcomeKind.Confirmed or
+            MealConfirmationOutcomeKind.AlreadyConfirmed
+            ? Results.Ok(response)
+            : Results.Json(response, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    private static async Task<IResult> ParseMealDraftAsync(
+        ParseMealDraftRequest? request,
+        IMealParser parser,
+        CancellationToken cancellationToken)
+    {
+        if (request is null ||
+            request.Messages is null ||
+            request.Messages.Count == 0)
+        {
+            return InvalidMessages(
+                "At least one captured message is required.");
+        }
+
+        if (request.Messages.Count > 50)
+        {
+            return InvalidMessages("A capture session cannot contain more than 50 messages.");
+        }
+
+        CaptureSession session = new CaptureSession();
+        int totalCharacterCount = 0;
+
+        foreach (string? message in request.Messages)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return InvalidMessages(
+                    "Messages cannot contain null, empty, or whitespace-only values.");
+            }
+
+            if (message.Length > 4000)
+            {
+                return InvalidMessages("A single message cannot exceed 4000 characters.");
+            }
+
+            totalCharacterCount += message.Length;
+
+            if (totalCharacterCount > 20_000)
+            {
+                return InvalidMessages("Captured messages cannot exceed 20000 characters in total.");
+            }
+
+            session.AddEvent(new InputEvent(message));
+        }
+
+        session.FinishCollecting();
+
+        try
+        {
+            MealDraft mealDraft = await parser.ParseAsync(
+                session,
+                cancellationToken);
+            return Results.Ok(MapResponse(session, mealDraft));
+        }
+        catch (NotSupportedException exception)
+        {
+            return Results.Problem(
+                detail: exception.Message,
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "The input sequence is not supported.");
+        }
+        catch (InvalidDataException)
+        {
+            return Results.Problem(
+                detail: "The AI provider returned an invalid structured meal draft.",
+                statusCode: StatusCodes.Status502BadGateway,
+                title: "Meal parsing failed.");
+        }
+        catch (HttpRequestException)
+        {
+            return Results.Problem(
+                detail: "The AI provider is temporarily unavailable.",
+                statusCode: StatusCodes.Status502BadGateway,
+                title: "Meal parsing failed.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Results.Problem(
+                detail: "The AI provider did not respond before the timeout.",
+                statusCode: StatusCodes.Status504GatewayTimeout,
+                title: "Meal parsing timed out.");
+        }
+    }
+
+    private static IResult InvalidMessages(string message)
+    {
+        return Results.ValidationProblem(
+            new Dictionary<string, string[]>
+            {
+                [nameof(ParseMealDraftRequest.Messages)] = new[] { message }
+            });
+    }
+
+    private static IResult MealSessionNotFound(Guid id)
+    {
+        return Results.Problem(
+            detail: $"Meal session '{id}' was not found.",
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Meal session not found.");
+    }
+
+    private static IResult MealParserFailure()
+    {
+        return Results.Problem(
+            detail: "The AI provider returned an invalid structured meal draft.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Meal parsing failed.");
+    }
+
+    private static IResult MealParserUnavailable()
+    {
+        return Results.Problem(
+            detail: "The AI provider is temporarily unavailable.",
+            statusCode: StatusCodes.Status502BadGateway,
+            title: "Meal parsing failed.");
+    }
+
+    private static IResult MealParserTimeout()
+    {
+        return Results.Problem(
+            detail: "The AI provider did not respond before the timeout.",
+            statusCode: StatusCodes.Status504GatewayTimeout,
+            title: "Meal parsing timed out.");
+    }
+
+    private static MealDraftResponse MapResponse(
+        CaptureSession session,
+        MealDraft mealDraft)
+    {
+        List<DishDraftResponse> dishes = new List<DishDraftResponse>();
+
+        foreach (DishDraft dish in mealDraft.Dishes)
+        {
+            List<IngredientDraftResponse> ingredients =
+                new List<IngredientDraftResponse>();
+
+            foreach (IngredientDraft ingredient in dish.Ingredients)
+            {
+                ingredients.Add(
+                    new IngredientDraftResponse(
+                        ingredient.ProductName,
+                        ingredient.WeightInGrams,
+                        ingredient.WeightQuality.ToString(),
+                        ingredient.RemovedWeightInGrams,
+                        ingredient.RemovedWeightQuality.ToString(),
+                        ingredient.IncludedWeightInGrams));
+            }
+
+            List<PortionDraftResponse> portions = dish.Portions
+                .Select(portion => new PortionDraftResponse(
+                    portion.WeightInGrams,
+                    portion.FractionOfDish,
+                    portion.WeightQuality.ToString()))
+                .ToList();
+
+            dishes.Add(
+                new DishDraftResponse(
+                    dish.Name,
+                    ingredients,
+                    dish.FinalWeightInGrams,
+                    dish.FinalWeightQuality.ToString(),
+                    portions));
+        }
+
+        return new MealDraftResponse(
+            session.State.ToString(),
+            dishes,
+            new List<string>(mealDraft.ClarificationQuestions),
+            mealDraft.RequiresClarification);
+    }
+}

@@ -125,7 +125,7 @@ internal static class AiMealDraftContract
                 $"{providerName} returned malformed structured output.",
                 exception);
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (exception is ArgumentException or OverflowException)
         {
             throw new InvalidDataException(
                 $"{providerName} returned a meal draft that violates domain rules.",

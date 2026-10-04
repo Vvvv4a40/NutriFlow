@@ -137,6 +137,49 @@ public sealed class GroqMealParserTests
     }
 
     [Fact]
+    public async Task ParseAsync_WithOverflowingPortionWeights_ThrowsInvalidDataException()
+    {
+        string structuredOutput = """
+            {
+              "dishes": [{
+                "name": "Блюдо",
+                "ingredients": [{
+                  "productName": "Продукт",
+                  "weightInGrams": 100,
+                  "weightQuality": "exact",
+                  "removedWeightInGrams": 0,
+                  "removedWeightQuality": "exact"
+                }],
+                "finalWeightInGrams": null,
+                "finalWeightQuality": "unknown",
+                "portions": [
+                  {
+                    "weightInGrams": 79228162514264337593543950335,
+                    "fractionOfDish": null,
+                    "weightQuality": "exact"
+                  },
+                  {
+                    "weightInGrams": 79228162514264337593543950335,
+                    "fractionOfDish": null,
+                    "weightQuality": "exact"
+                  }
+                ]
+              }],
+              "clarificationQuestions": []
+            }
+            """;
+        RecordingHttpMessageHandler handler = new(
+            HttpStatusCode.OK,
+            CreateGroqResponse(structuredOutput));
+        GroqMealParser parser = CreateParser(handler);
+
+        InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => parser.ParseAsync(CreateReadySession("Message")));
+
+        Assert.IsType<OverflowException>(exception.InnerException);
+    }
+
+    [Fact]
     public async Task ParseAsync_WhenServiceRejectsRequest_ThrowsHttpRequestException()
     {
         RecordingHttpMessageHandler handler = new(

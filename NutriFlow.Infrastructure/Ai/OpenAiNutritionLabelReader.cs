@@ -83,7 +83,7 @@ public sealed class OpenAiNutritionLabelReader : INutritionLabelReader
         };
         using HttpResponseMessage response = await _httpClient.SendAsync(
             request,
-            HttpCompletionOption.ResponseHeadersRead,
+            HttpCompletionOption.ResponseContentRead,
             cancellationToken);
 
         response.EnsureSuccessStatusCode();

@@ -1,0 +1,88 @@
+# Ревью и полировка кода
+
+Дата: 5 октября 2026 года. Проверялись существующие доменные расчёты, хранение, внешние клиенты, HTTP-обработчики и состояние временного клиента. Новые продуктовые функции, зависимости, комментарии и миграции не добавлялись.
+
+## Исправленные дефекты
+
+1. Обновление продукта сохранялось раньше алиаса прежнего имени. При ошибке или отмене второй записи продукт оставался частично изменённым. Обе операции теперь находятся в одной транзакции; условный конкурентный повтор выполняется после её закрытия. Тесты воспроизводят сбой, отмену и конкурентное повышение качества.
+2. Пять внешних клиентов завершали ожидание `HttpClient.Timeout` после заголовков, оставляя чтение тела без этого ограничения. Буферизация ответа теперь входит в ожидание HTTP-клиента; тесты используют тело ответа, которое не завершается.
+3. Неудачное сохранение фотографии оставляло пустой или частичный файл. Предварительная отмена проверяется до создания, а ошибка записи удаляет только файл текущей операции. Проверены отмена, отказ записи и сохранность существующего файла.
+4. Переполнение при преобразовании некорректного AI-черновика не попадало в обработку неверного ответа провайдера. На границе AI оно теперь оборачивается в `InvalidDataException`; прямое поведение доменных вычислений не изменено.
+5. Дата могла измениться во время создания сессии, а запоздавшее обновление каталога — восстановить сброшенную сессию или затереть уточнение. Клиент блокирует смену даты при операции и проверяет актуальность ответа перед применением.
+6. Производный список масс порций выдавал изменяемый массив за `IReadOnlyList`. Теперь его представление действительно защищено от внешней записи.
+
+## Упрощение и оптимизация
+
+- `Program.cs` сокращён с 1413 до 35 строк; регистрация зависимостей, настройка pipeline и четыре группы endpoints разделены по назначению. Маршруты и публичные JSON-контракты сохранены.
+- Повторяющееся преобразование доменных объектов в DTO находится в одном `ResponseMapper`.
+- Повторяющийся продукт разрешается один раз в пределах одного предпросмотра. Тест подтверждает один SQL-поиск для трёх повторов имени в двух блюдах и обновление данных при следующем запросе; глобального кеша каталога нет.
+- Итоги неизменяемого блюда и дневного прогресса вычисляются лениво один раз на объект. Промежуточного округления не добавлено, момент возникновения доменного переполнения сохранён.
+- Убрана загрузка всех алиасов при проверке штрихкода; нужный алиас проверяется точечным запросом. При ошибках отсоединяется собственная новая запись, а не очищается весь `ChangeTracker`.
+- Убрано дублирование обновления дневной цели, лишняя копия аудиобуфера и создание числового форматтера для каждого значения.
+
+Это локальные изменения с проверяемыми причинами, не заявление об измеренном росте пропускной способности. Нагрузочный профиль публичного сервиса отдельно не измерялся.
+
+## Проверка
+
+- Release-сборка семи проектов: 0 ошибок и предупреждений.
+- .NET: 468 пройдено, 0 провалено / пропущено — Domain 180, Infrastructure 183, API 105.
+- Node: 36 пройдено, 0 провалено / пропущено.
+- `dotnet format --verify-no-changes`: успешно.
+- EF Core: изменений модели после последней миграции нет.
+- Проверки выполнялись с временными тестовыми базами и заменами провайдеров; реальные AI-вызовы не выполнялись. Исходная SQLite сохранила SHA-256 `1BE16F1CF7E8...`, три фотографии совпадают с прежней резервной копией.
+
+Вход, права на фотографии, мобильный клиент и публичное развёртывание не входят в это ревью и не объявляются готовыми.
+
+## Изменённые файлы
+
+Запуск и HTTP:
+
+- `NutriFlow.Api/Program.cs`
+- `NutriFlow.Api/Configuration/ServiceRegistration.cs`
+- `NutriFlow.Api/Configuration/ApplicationSetup.cs`
+- `NutriFlow.Api/Endpoints/MealSessionEndpoints.cs`
+- `NutriFlow.Api/Endpoints/DailyDiaryEndpoints.cs`
+- `NutriFlow.Api/Endpoints/ProductEndpoints.cs`
+- `NutriFlow.Api/Endpoints/MediaEndpoints.cs`
+- `NutriFlow.Api/Contracts/ResponseMapper.cs`
+- `NutriFlow.Api/Services/MealWorkflowService.cs`
+
+Домен и клиент:
+
+- `NutriFlow.Domain/DishBatch.cs`
+- `NutriFlow.Domain/DailyProgress.cs`
+- `NutriFlow.Domain/DishDraft.cs`
+- `NutriFlow.Api/wwwroot/js/app.js`
+
+Хранение и внешние вызовы:
+
+- `NutriFlow.Infrastructure/LocalProductCatalog.cs`
+- `NutriFlow.Infrastructure/DailyDiaryStore.cs`
+- `NutriFlow.Infrastructure/MealSessionStore.cs`
+- `NutriFlow.Infrastructure/Ai/AiMealDraftContract.cs`
+- `NutriFlow.Infrastructure/Ai/GroqMealParser.cs`
+- `NutriFlow.Infrastructure/Ai/GroqNutritionLabelReader.cs`
+- `NutriFlow.Infrastructure/Ai/GroqSpeechTranscriber.cs`
+- `NutriFlow.Infrastructure/Ai/OpenAiMealParser.cs`
+- `NutriFlow.Infrastructure/Ai/OpenAiNutritionLabelReader.cs`
+- `NutriFlow.Infrastructure/ExternalProducts/OpenFoodFactsClient.cs`
+- `NutriFlow.Infrastructure/LabelPhotos/LabelPhotoStore.cs`
+
+Тесты:
+
+- `NutriFlow.Api.Tests/MealWorkflowQueryTests.cs`
+- `NutriFlow.Domain.Tests/DishBatchTests.cs`
+- `NutriFlow.Domain.Tests/DailyProgressTests.cs`
+- `NutriFlow.Domain.Tests/DishDraftTests.cs`
+- `NutriFlow.Infrastructure.Tests/CatalogAtomicityTests.cs`
+- `NutriFlow.Infrastructure.Tests/ExternalTransportTimeoutTests.cs`
+- `NutriFlow.Infrastructure.Tests/GroqMealParserTests.cs`
+- `NutriFlow.Infrastructure.Tests/LabelPhotoStoreTests.cs`
+- `scripts/tests/voice-ui.test.mjs`
+
+Документация:
+
+- `README.md`
+- `docs/CODE_MAP.md`
+- `docs/CODE_REVIEW.md`
+- `docs/PROGRESS.md`

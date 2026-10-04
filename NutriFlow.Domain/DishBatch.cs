@@ -2,6 +2,8 @@ namespace NutriFlow.Domain;
 
 public sealed class DishBatch
 {
+    private NutritionValues? _totalNutrition;
+
     public DishBatch(
         string name,
         IReadOnlyList<DishIngredient> ingredients,
@@ -36,6 +38,11 @@ public sealed class DishBatch
 
     public NutritionValues CalculateTotalNutrition()
     {
+        if (_totalNutrition is not null)
+        {
+            return _totalNutrition;
+        }
+
         NutritionValues totalNutrition = new NutritionValues(
             calories: 0m,
             proteinGrams: 0m,
@@ -47,6 +54,7 @@ public sealed class DishBatch
             totalNutrition = totalNutrition.Add(ingredient.CalculateNutrition());
         }
 
+        _totalNutrition = totalNutrition;
         return totalNutrition;
     }
 

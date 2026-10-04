@@ -33,7 +33,7 @@ public sealed class OpenFoodFactsClient : IExternalProductProvider
 
         using HttpResponseMessage response = await _httpClient.GetAsync(
             requestUri,
-            HttpCompletionOption.ResponseHeadersRead,
+            HttpCompletionOption.ResponseContentRead,
             cancellationToken);
 
         if (response.StatusCode == HttpStatusCode.NotFound)

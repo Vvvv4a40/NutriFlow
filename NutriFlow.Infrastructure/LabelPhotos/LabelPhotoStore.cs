@@ -18,18 +18,33 @@ public sealed class LabelPhotoStore
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(photo);
+        cancellationToken.ThrowIfCancellationRequested();
 
         string fileName = $"{Guid.NewGuid():N}{photo.FileExtension}";
         string filePath = Path.Combine(_storagePath, fileName);
+        bool fileCreated = false;
 
-        await using FileStream stream = new FileStream(
-            filePath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 81920,
-            useAsync: true);
-        await stream.WriteAsync(photo.Content, cancellationToken);
+        try
+        {
+            await using FileStream stream = new FileStream(
+                filePath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                useAsync: true);
+            fileCreated = true;
+            await stream.WriteAsync(photo.Content, cancellationToken);
+        }
+        catch
+        {
+            if (fileCreated)
+            {
+                File.Delete(filePath);
+            }
+
+            throw;
+        }
 
         return $"{ReferencePrefix}{fileName}";
     }

@@ -29,6 +29,23 @@ public sealed class DishDraftTests
     }
 
     [Fact]
+    public void PortionWeightsInGrams_CannotBeChangedAfterConstruction()
+    {
+        DishDraft dish = new DishDraft(
+            "Dish",
+            CreateIngredients(),
+            150m,
+            new List<decimal> { 50m });
+
+        IList<decimal> portionWeights = Assert.IsAssignableFrom<IList<decimal>>(
+            dish.PortionWeightsInGrams);
+
+        Assert.Throws<NotSupportedException>(() => portionWeights[0] = 100m);
+        Assert.Equal(50m, dish.PortionWeightsInGrams[0]);
+        Assert.Equal(50m, dish.Portions[0].WeightInGrams);
+    }
+
+    [Fact]
     public void Constructor_AllowsNoConsumedPortions()
     {
         DishDraft dish = new DishDraft(

@@ -505,24 +505,24 @@ public sealed class MealWorkflowService
         IReadOnlyList<MealEntry> entries = await _diaryStore.GetEntriesAsync(
             date,
             cancellationToken);
-        NutritionValues consumed = SumNutrition(entries);
+        DailyProgress? progress = goal is null ? null : new DailyProgress(goal, entries);
+        NutritionValues consumed = progress?.CalculateConsumedNutrition() ?? SumNutrition(entries);
         NutritionValues? remaining = null;
         NutritionValues? exceeded = null;
 
-        if (goal is not null)
+        if (progress is not null)
         {
-            DailyProgress progress = new DailyProgress(goal, entries);
             remaining = progress.CalculateRemainingNutrition();
             exceeded = progress.CalculateExceededNutrition();
         }
 
         return new DailyProgressResponse(
             date,
-            goal is null ? null : MapNutrition(goal.TargetNutrition),
-            MapNutrition(consumed),
-            remaining is null ? null : MapNutrition(remaining),
-            exceeded is null ? null : MapNutrition(exceeded),
-            entries.Select(MapEntry).ToArray());
+            goal is null ? null : ResponseMapper.ToNutritionResponse(goal.TargetNutrition),
+            ResponseMapper.ToNutritionResponse(consumed),
+            remaining is null ? null : ResponseMapper.ToNutritionResponse(remaining),
+            exceeded is null ? null : ResponseMapper.ToNutritionResponse(exceeded),
+            entries.Select(ResponseMapper.ToMealEntryResponse).ToArray());
     }
 
     private async Task<MealDraft> ParseAsync(
@@ -549,6 +549,7 @@ public sealed class MealWorkflowService
         List<WorkflowIssueResponse> issues = new List<WorkflowIssueResponse>();
         List<DishPreviewResponse> dishPreviews = new List<DishPreviewResponse>();
         List<MealEntry> entries = new List<MealEntry>();
+        Dictionary<string, ProductSelection> productSelections = new(StringComparer.Ordinal);
         bool hasMissingFacts = draft.RequiresClarification;
         bool hasProductIssue = false;
 
@@ -564,9 +565,12 @@ public sealed class MealWorkflowService
 
             foreach (IngredientDraft ingredient in dish.Ingredients)
             {
-                ProductSelection selection = await ResolveProductAsync(
-                    ingredient.ProductName,
-                    cancellationToken);
+                string productKey = ingredient.ProductName.Trim().Normalize().ToUpperInvariant();
+                if (!productSelections.TryGetValue(productKey, out ProductSelection? selection))
+                {
+                    selection = await ResolveProductAsync(ingredient.ProductName, cancellationToken);
+                    productSelections.Add(productKey, selection);
+                }
 
                 if (selection.Product is null)
                 {
@@ -634,10 +638,10 @@ public sealed class MealWorkflowService
                     ingredient.IncludedWeightInGrams,
                     selection.Product is null
                         ? null
-                        : MapProduct(selection.Product),
+                        : ResponseMapper.ToProductResponse(selection.Product),
                     ingredientNutrition is null
                         ? null
-                        : MapNutrition(ingredientNutrition)));
+                        : ResponseMapper.ToNutritionResponse(ingredientNutrition)));
             }
 
             if (dish.FinalWeightInGrams is null)
@@ -716,7 +720,7 @@ public sealed class MealWorkflowService
                     portion.WeightQuality.ToString(),
                     portionNutrition is null
                         ? null
-                        : MapNutrition(portionNutrition),
+                        : ResponseMapper.ToNutritionResponse(portionNutrition),
                     portionNutritionQuality?.ToString()));
 
                 if (portionNutrition is not null)
@@ -739,11 +743,11 @@ public sealed class MealWorkflowService
                 dish.Name,
                 dish.FinalWeightInGrams,
                 dish.FinalWeightQuality.ToString(),
-                totalNutrition is null ? null : MapNutrition(totalNutrition),
+                totalNutrition is null ? null : ResponseMapper.ToNutritionResponse(totalNutrition),
                 totalNutritionQuality?.ToString(),
                 nutritionPer100Grams is null
                     ? null
-                    : MapNutrition(nutritionPer100Grams),
+                    : ResponseMapper.ToNutritionResponse(nutritionPer100Grams),
                 nutritionPer100GramsQuality?.ToString(),
                 ingredientPreviews,
                 portionPreviews));
@@ -937,39 +941,6 @@ public sealed class MealWorkflowService
         }
 
         return total;
-    }
-
-    private static ProductResponse MapProduct(Product product)
-    {
-        return new ProductResponse(
-            product.Name,
-            product.NutritionPer100Grams.Calories,
-            product.NutritionPer100Grams.ProteinGrams,
-            product.NutritionPer100Grams.FatGrams,
-            product.NutritionPer100Grams.CarbohydratesGrams,
-            product.Source.Kind.ToString(),
-            product.Source.Quality.ToString(),
-            product.Source.Name,
-            product.Source.Reference,
-            product.Barcode);
-    }
-
-    private static NutritionResponse MapNutrition(NutritionValues nutrition)
-    {
-        return new NutritionResponse(
-            nutrition.Calories,
-            nutrition.ProteinGrams,
-            nutrition.FatGrams,
-            nutrition.CarbohydratesGrams);
-    }
-
-    private static MealEntryResponse MapEntry(MealEntry entry)
-    {
-        return new MealEntryResponse(
-            entry.Name,
-            entry.WeightInGrams,
-            MapNutrition(entry.Nutrition),
-            entry.Quality.ToString());
     }
 
     private static int QualityRank(DataQuality quality)
