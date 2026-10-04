@@ -104,7 +104,7 @@ public sealed class GroqNutritionLabelReader : INutritionLabelReader
         };
         using HttpResponseMessage response = await _httpClient.SendAsync(
             request,
-            HttpCompletionOption.ResponseHeadersRead,
+            HttpCompletionOption.ResponseContentRead,
             cancellationToken);
 
         response.EnsureSuccessStatusCode();

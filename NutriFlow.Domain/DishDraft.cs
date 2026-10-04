@@ -102,14 +102,14 @@ public sealed class DishDraft
         FinalWeightInGrams = finalWeightInGrams;
         FinalWeightQuality = finalWeightQuality;
         Portions = new List<PortionDraft>(portions).AsReadOnly();
-        PortionWeightsInGrams = Portions
+        PortionWeightsInGrams = Array.AsReadOnly(Portions
             .Where(portion =>
                 portion.WeightInGrams is not null ||
                 finalWeightInGrams is not null)
             .Select(portion => finalWeightInGrams is null
                 ? portion.WeightInGrams!.Value
                 : portion.ResolveWeightInGrams(finalWeightInGrams.Value))
-            .ToArray();
+            .ToArray());
     }
 
     public string Name { get; }

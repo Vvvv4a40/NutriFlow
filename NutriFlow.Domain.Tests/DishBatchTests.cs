@@ -18,6 +18,35 @@ public sealed class DishBatchTests
     }
 
     [Fact]
+    public void CalculateTotalNutrition_ReusesImmutableResult()
+    {
+        DishBatch dish = CreateDish();
+
+        NutritionValues first = dish.CalculateTotalNutrition();
+
+        Assert.Same(first, dish.CalculateTotalNutrition());
+        Assert.Equal(200m, dish.CalculatePortionNutrition(125m).Calories);
+        Assert.Equal(160m, dish.CalculateNutritionPer100Grams().Calories);
+    }
+
+    [Fact]
+    public void CalculateTotalNutrition_WithOverflow_ThrowsOnlyWhenCalculated()
+    {
+        Product product = new Product(
+            "Product",
+            new NutritionValues(1000m, 0m, 0m, 0m),
+            CreateSource());
+        DishBatch dish = new DishBatch(
+            "Dish",
+            new List<DishIngredient> { new DishIngredient(product, decimal.MaxValue) },
+            1m);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => dish.CalculatePortionNutrition(0m));
+        Assert.Throws<OverflowException>(() => dish.CalculateTotalNutrition());
+        Assert.Throws<OverflowException>(() => dish.CalculateTotalNutrition());
+    }
+
+    [Fact]
     public void CalculateNutritionPer100Grams_UsesFinalDishWeight()
     {
         DishBatch dish = CreateDish();

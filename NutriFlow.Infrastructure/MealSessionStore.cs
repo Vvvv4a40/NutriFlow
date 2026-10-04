@@ -26,8 +26,9 @@ public sealed class MealSessionStore
         _dbContext = dbContext;
         _ownerId = dbContext.Users
             .AsNoTracking()
-            .Single(user => user.IsLegacyLocal)
-            .Id;
+            .Where(user => user.IsLegacyLocal)
+            .Select(user => user.Id)
+            .Single();
     }
 
     public MealSessionStore(NutriFlowDbContext dbContext, Guid ownerId)

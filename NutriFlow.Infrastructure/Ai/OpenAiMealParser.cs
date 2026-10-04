@@ -76,7 +76,7 @@ public sealed class OpenAiMealParser : IMealParser
         };
         using HttpResponseMessage response = await _httpClient.SendAsync(
             request,
-            HttpCompletionOption.ResponseHeadersRead,
+            HttpCompletionOption.ResponseContentRead,
             cancellationToken);
 
         response.EnsureSuccessStatusCode();

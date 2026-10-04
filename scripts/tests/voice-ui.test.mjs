@@ -13,6 +13,7 @@ class Element {
         this.hidden = false;
         this.textContent = "";
         this.innerHTML = "";
+        this.elements = {};
         this.lastChild = { textContent: "" };
         this.children = new Map();
         this.listeners = new Map();
@@ -70,7 +71,7 @@ async function createPage(options = {}) {
         addEventListener: (name, listener) => windowListeners.set(name, listener),
         setTimeout: () => 1,
         clearTimeout: () => {},
-        confirm: () => { throw new Error("Unexpected confirmation dialog."); }
+        confirm: options.confirm ?? (() => { throw new Error("Unexpected confirmation dialog."); })
     };
     const capabilities = options.capabilities ?? {
         aiProvider: "Groq",
@@ -110,6 +111,8 @@ async function createPage(options = {}) {
         createSpeechCapture: value => { callbacks = value; return capture; },
         fetch: async (url, settings) => {
             requests.push({ url, settings });
+            const customResponse = await options.fetch?.(url, settings);
+            if (customResponse !== undefined) return customResponse;
             const audioRequest = url === "/api/audio/transcribe";
             const status = audioRequest ? options.audioStatus ?? 200 : 200;
             const body = url === "/api/capabilities" ? capabilities :
@@ -222,3 +225,109 @@ test("provider errors are shown in Russian and allow another recording", async (
     assert.equal(page.element("#message-input").value, "");
     assert.equal(page.storage.size, 0);
 });
+
+function deferred() {
+    let resolve;
+    const promise = new Promise(accept => { resolve = accept; });
+    return { promise, resolve };
+}
+
+function jsonResponse(body, status = 200) {
+    return { ok: status < 400, status, text: async () => JSON.stringify(body) };
+}
+
+function sessionResponse(date, messages) {
+    return {
+        id: "session-1",
+        mealDate: date,
+        messages,
+        status: "NeedsProducts",
+        canConfirm: false,
+        dishes: [],
+        issues: [],
+        clarificationQuestions: []
+    };
+}
+
+function prepareManualProductForm(page) {
+    page.element("#manual-product-form").elements = {
+        name: { value: "Product" },
+        barcode: { value: "" },
+        isEstimated: { checked: false },
+        calories: { valueAsNumber: 100 },
+        proteinGrams: { valueAsNumber: 10 },
+        fatGrams: { valueAsNumber: 5 },
+        carbohydratesGrams: { valueAsNumber: 15 }
+    };
+}
+
+test("meal date stays locked while session creation is in flight", async () => {
+    const creation = deferred();
+    const page = await createPage({
+        fetch: (url, settings) => url === "/api/meal-sessions" && settings.method === "POST"
+            ? creation.promise : undefined
+    });
+    const originalDate = page.element("#meal-date").value;
+    page.element("#message-input").value = "Original message";
+    await page.element("#message-form").emit("submit");
+    const building = page.element("#build-draft-button").emit("click");
+
+    assert.equal(page.element("#meal-date").disabled, true);
+    page.element("#meal-date").value = "2026-01-01";
+    await page.element("#meal-date").emit("change");
+    assert.equal(page.element("#meal-date").value, originalDate);
+
+    creation.resolve(jsonResponse(sessionResponse(originalDate, ["Original message"])));
+    await building;
+    assert.equal(page.element("#meal-date").value, originalDate);
+    assert.equal(page.element("#meal-date").disabled, true);
+});
+
+for (const action of ["reset", "append"]) {
+    test(`late catalog refresh cannot overwrite a session after ${action}`, async () => {
+        const refresh = deferred();
+        const page = await createPage({
+            confirm: () => true,
+            fetch: (url, settings) => {
+                if (url === "/api/meal-sessions" && settings.method === "POST") {
+                    const body = JSON.parse(settings.body);
+                    return jsonResponse(sessionResponse(body.mealDate, body.messages));
+                }
+                if (url === "/api/products/manual") {
+                    return jsonResponse({ name: "Product" });
+                }
+                if (url === "/api/meal-sessions/session-1") {
+                    return refresh.promise;
+                }
+                if (url === "/api/meal-sessions/session-1/messages") {
+                    return jsonResponse(sessionResponse("2026-01-01", ["Original message", "New message"]));
+                }
+            }
+        });
+        page.element("#message-input").value = "Original message";
+        await page.element("#message-form").emit("submit");
+        await page.element("#build-draft-button").emit("click");
+        prepareManualProductForm(page);
+        const saving = page.element("#manual-product-form").emit("submit");
+        await flushPromises();
+        assert.equal(page.requests.filter(request => request.url === "/api/meal-sessions/session-1").length, 1);
+
+        if (action === "reset") {
+            await page.element("#new-session-button").emit("click");
+        } else {
+            page.element("#message-input").value = "New message";
+            await page.element("#message-form").emit("submit");
+        }
+
+        refresh.resolve(jsonResponse(sessionResponse("2026-01-01", ["Stale message"])));
+        await saving;
+        assert.doesNotMatch(page.element("#message-list").innerHTML, /Stale message/);
+        if (action === "reset") {
+            assert.equal(page.element("#build-draft-button").hidden, false);
+            assert.doesNotMatch(page.element("#message-list").innerHTML, /Original message/);
+        } else {
+            assert.match(page.element("#message-list").innerHTML, /New message/);
+            assert.equal(page.element("#build-draft-button").hidden, true);
+        }
+    });
+}

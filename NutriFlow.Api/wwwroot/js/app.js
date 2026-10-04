@@ -6,6 +6,9 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
     const MAX_PHOTO_SIZE = 8 * 1024 * 1024;
     const ACTIVE_SESSION_STORAGE_KEY = "nutriflow.activeMealSessionId";
     const PENDING_DRAFT_STORAGE_KEY = "nutriflow.pendingMealDraft";
+    const numberFormatter = new Intl.NumberFormat("ru-RU", {
+        maximumFractionDigits: 2
+    });
     const ALLOWED_PHOTO_TYPES = new Set([
         "image/jpeg",
         "image/png",
@@ -89,6 +92,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         localMessages: [],
         session: null,
         sessionBusy: false,
+        sessionRequestSequence: 0,
         voicePhase: "idle",
         voiceNotice: "",
         voiceError: false,
@@ -226,6 +230,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             return;
         }
 
+        state.sessionRequestSequence++;
         state.sessionBusy = true;
         renderMessages();
 
@@ -366,7 +371,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
 
     function bindEvents() {
         elements.mealDate.addEventListener("change", () => {
-            if (isVoiceBusy()) {
+            if (isVoiceBusy() || state.sessionBusy) {
                 elements.mealDate.value = state.date;
                 return;
             }
@@ -932,6 +937,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             return;
         }
 
+        state.sessionRequestSequence++;
         state.sessionBusy = true;
         renderMessages();
         renderPreviewLoading("Добавляем уточнение и пересобираем черновик…");
@@ -941,7 +947,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                 method: "POST",
                 body: { message }
             });
-            state.session = response?.id ? response : await fetchCurrentSession();
+            state.session = response?.id ? response : await fetchCurrentSession(state.session.id);
             elements.messageInput.value = "";
             state.voiceNotice = "";
             state.voiceError = false;
@@ -960,6 +966,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             return;
         }
 
+        state.sessionRequestSequence++;
         state.sessionBusy = true;
         renderMessages();
         renderPreviewLoading("Разбираем сообщения и рассчитываем предпросмотр…");
@@ -985,18 +992,27 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
     }
 
     async function refreshCurrentSession() {
-        if (!state.session?.id) {
+        const session = state.session;
+
+        if (!session?.id) {
             return null;
         }
 
-        state.session = await fetchCurrentSession();
+        const requestSequence = ++state.sessionRequestSequence;
+        const response = await fetchCurrentSession(session.id);
+
+        if (requestSequence !== state.sessionRequestSequence || state.session !== session) {
+            return state.session;
+        }
+
+        state.session = response;
         renderMessages();
         renderPreview();
         return state.session;
     }
 
-    function fetchCurrentSession() {
-        return apiRequest(`/api/meal-sessions/${encodeURIComponent(state.session.id)}`);
+    function fetchCurrentSession(sessionId) {
+        return apiRequest(`/api/meal-sessions/${encodeURIComponent(sessionId)}`);
     }
 
     function startNewSession() {
@@ -1018,6 +1034,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             }
         }
 
+        state.sessionRequestSequence++;
         state.session = null;
         state.localMessages = [];
         state.sessionBusy = false;
@@ -1040,6 +1057,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
 
         const sessionId = state.session.id;
         const previewToken = state.session.previewToken;
+        state.sessionRequestSequence++;
         state.sessionBusy = true;
         renderMessages();
         renderPreview();
@@ -1055,7 +1073,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             } else if (response?.id && response?.status) {
                 state.session = response;
             } else {
-                state.session = await fetchCurrentSession();
+                state.session = await fetchCurrentSession(sessionId);
             }
 
             forgetActiveSession();
@@ -1097,7 +1115,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         const messages = getVisibleMessages();
         const confirmed = isSessionConfirmed(state.session);
         const voiceBusy = isVoiceBusy();
-        const dateLocked = (Boolean(state.session) && !confirmed) || voiceBusy;
+        const dateLocked = state.sessionBusy || (Boolean(state.session) && !confirmed) || voiceBusy;
 
         elements.messageList.innerHTML = messages.length === 0
             ? `<div class="message-empty">Можно описать готовку несколькими короткими сообщениями — порядок сохранится.</div>`
@@ -1945,9 +1963,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             return "—";
         }
 
-        return new Intl.NumberFormat("ru-RU", {
-            maximumFractionDigits: 2
-        }).format(number);
+        return numberFormatter.format(number);
     }
 
     function formatLongDate(isoDate) {

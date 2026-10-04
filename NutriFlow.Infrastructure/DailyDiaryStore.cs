@@ -41,19 +41,7 @@ public sealed class DailyDiaryStore
         ArgumentNullException.ThrowIfNull(goal);
 
         NutritionValues nutrition = goal.TargetNutrition;
-        int updatedCount = await _dbContext.DailyGoals
-            .Where(item => item.UserId == _ownerId && item.Date == date)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(item => item.Calories, nutrition.Calories)
-                    .SetProperty(
-                        item => item.ProteinGrams,
-                        nutrition.ProteinGrams)
-                    .SetProperty(item => item.FatGrams, nutrition.FatGrams)
-                    .SetProperty(
-                        item => item.CarbohydratesGrams,
-                        nutrition.CarbohydratesGrams),
-                cancellationToken);
+        int updatedCount = await UpdateGoalAsync(date, nutrition, cancellationToken);
 
         if (updatedCount > 0)
         {
@@ -77,25 +65,18 @@ public sealed class DailyDiaryStore
         }
         catch (DbUpdateException)
         {
-            _dbContext.ChangeTracker.Clear();
-            updatedCount = await _dbContext.DailyGoals
-                .Where(item => item.UserId == _ownerId && item.Date == date)
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(item => item.Calories, nutrition.Calories)
-                        .SetProperty(
-                            item => item.ProteinGrams,
-                            nutrition.ProteinGrams)
-                        .SetProperty(item => item.FatGrams, nutrition.FatGrams)
-                        .SetProperty(
-                            item => item.CarbohydratesGrams,
-                            nutrition.CarbohydratesGrams),
-                    cancellationToken);
+            _dbContext.Entry(record).State = EntityState.Detached;
+            updatedCount = await UpdateGoalAsync(date, nutrition, cancellationToken);
 
             if (updatedCount == 0)
             {
                 throw;
             }
+        }
+        catch
+        {
+            _dbContext.Entry(record).State = EntityState.Detached;
+            throw;
         }
     }
 
@@ -243,6 +224,22 @@ public sealed class DailyDiaryStore
         await transaction.CommitAsync(cancellationToken);
 
         return MealSessionConfirmationResult.Confirmed;
+    }
+
+    private Task<int> UpdateGoalAsync(
+        DateOnly date,
+        NutritionValues nutrition,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.DailyGoals
+            .Where(item => item.UserId == _ownerId && item.Date == date)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.Calories, nutrition.Calories)
+                    .SetProperty(item => item.ProteinGrams, nutrition.ProteinGrams)
+                    .SetProperty(item => item.FatGrams, nutrition.FatGrams)
+                    .SetProperty(item => item.CarbohydratesGrams, nutrition.CarbohydratesGrams),
+                cancellationToken);
     }
 
     private static MealEntry MapEntry(MealEntryRecord record)

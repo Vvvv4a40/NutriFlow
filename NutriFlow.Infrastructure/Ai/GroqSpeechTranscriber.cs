@@ -44,7 +44,7 @@ public sealed class GroqSpeechTranscriber : ISpeechTranscriber
         ArgumentNullException.ThrowIfNull(audio);
 
         using MultipartFormDataContent form = new();
-        ByteArrayContent fileContent = new(audio.Content.ToArray());
+        ReadOnlyMemoryContent fileContent = new(audio.Content);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue(audio.MediaType);
         form.Add(fileContent, "file", $"capture{audio.FileExtension}");
         form.Add(new StringContent(_model), "model");
