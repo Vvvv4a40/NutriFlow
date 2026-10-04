@@ -42,18 +42,18 @@ public sealed class ProductLookupService
             return null;
         }
 
-        bool wasAdded = await _localCatalog.AddAsync(
+        if (externalProduct.Barcode != normalizedBarcode)
+        {
+            throw new InvalidDataException("The external product barcode does not match the request.");
+        }
+
+        await _localCatalog.AddSharedExternalProductAsync(
             externalProduct,
             cancellationToken);
-
-        if (wasAdded)
-        {
-            return externalProduct;
-        }
 
         return await _localCatalog.FindByBarcodeAsync(
                    normalizedBarcode,
                    cancellationToken) ??
-               externalProduct;
+               throw new InvalidDataException("The imported product is not available in the catalogue.");
     }
 }

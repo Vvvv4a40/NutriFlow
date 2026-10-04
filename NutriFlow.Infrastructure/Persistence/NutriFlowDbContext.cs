@@ -34,6 +34,10 @@ public sealed class NutriFlowDbContext : DbContext
         {
             entity.ToTable("Products");
             entity.HasKey(product => product.Id);
+            entity.HasOne<UserRecord>()
+                .WithMany()
+                .HasForeignKey(product => product.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.Property(product => product.Name)
                 .HasMaxLength(200)
@@ -41,11 +45,15 @@ public sealed class NutriFlowDbContext : DbContext
             entity.Property(product => product.NormalizedName)
                 .HasMaxLength(200)
                 .IsRequired();
-            entity.HasIndex(product => product.NormalizedName);
+            entity.HasIndex(product => new { product.UserId, product.NormalizedName });
             entity.Property(product => product.Barcode)
                 .HasMaxLength(14);
             entity.HasIndex(product => product.Barcode)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("\"UserId\" IS NULL AND \"Barcode\" IS NOT NULL");
+            entity.HasIndex(product => new { product.UserId, product.Barcode })
+                .IsUnique()
+                .HasFilter("\"UserId\" IS NOT NULL AND \"Barcode\" IS NOT NULL");
 
             entity.Property(product => product.Calories)
                 .HasColumnType("TEXT");
@@ -71,15 +79,20 @@ public sealed class NutriFlowDbContext : DbContext
         {
             entity.ToTable("ProductAliases");
             entity.HasKey(alias => alias.Id);
+            entity.HasOne<UserRecord>()
+                .WithMany()
+                .HasForeignKey(alias => alias.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.Property(alias => alias.Name)
                 .HasMaxLength(200)
                 .IsRequired();
             entity.Property(alias => alias.NormalizedName)
                 .HasMaxLength(200)
                 .IsRequired();
-            entity.HasIndex(alias => alias.NormalizedName);
+            entity.HasIndex(alias => new { alias.UserId, alias.NormalizedName });
             entity.HasIndex(alias => new
             {
+                alias.UserId,
                 alias.ProductId,
                 alias.NormalizedName
             }).IsUnique();

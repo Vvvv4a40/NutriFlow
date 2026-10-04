@@ -174,11 +174,16 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Property<int>("ProductId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("NormalizedName");
+                    b.HasIndex("ProductId");
 
-                    b.HasIndex("ProductId", "NormalizedName")
+                    b.HasIndex("UserId", "NormalizedName");
+
+                    b.HasIndex("UserId", "ProductId", "NormalizedName")
                         .IsUnique();
 
                     b.ToTable("ProductAliases", (string)null);
@@ -231,12 +236,20 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("Barcode")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"UserId\" IS NULL AND \"Barcode\" IS NOT NULL");
 
-                    b.HasIndex("NormalizedName");
+                    b.HasIndex("UserId", "Barcode")
+                        .IsUnique()
+                        .HasFilter("\"UserId\" IS NOT NULL AND \"Barcode\" IS NOT NULL");
+
+                    b.HasIndex("UserId", "NormalizedName");
 
                     b.ToTable("Products", (string)null);
                 });
@@ -299,7 +312,21 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.ProductRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealSessionRecord", b =>
