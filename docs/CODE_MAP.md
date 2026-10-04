@@ -5,7 +5,7 @@
 Начальная точка — `NutriFlow.Api/Program.cs`. В нём виден порядок регистрации сервисов, настройки HTTP и подключения маршрутов.
 
 - `Configuration/ServiceRegistration.cs` — зависимости, пути хранения, HTTP-клиенты, выбор AI-провайдера и ограничитель запросов.
-- `Configuration/ApplicationSetup.cs` — обработка ошибок, применение миграций при включённой настройке, демо-наполнение, защитные заголовки, статические файлы, Swagger и health checks.
+- `Configuration/ApplicationSetup.cs` — обработка ошибок, применение миграций и однократный перенос старых фото при включённой настройке, демо-наполнение, защитные заголовки, статические файлы, Swagger и health checks.
 - `Endpoints/MealSessionEndpoints.cs` — создание, чтение, дополнение, подтверждение сессии и отдельный разбор черновика.
 - `Endpoints/DailyDiaryEndpoints.cs` — дневные цели и прогресс.
 - `Endpoints/ProductEndpoints.cs` — продукты, штрихкоды и алиасы.
@@ -41,6 +41,8 @@ Program → Endpoints → MealWorkflowService
 - `MealSessionStore` — сессии, версии и ключи безопасных повторов;
 - `MealDraftSerializer` — формат сохранённого JSON-черновика и восстановление доменных объектов с проверкой их ограничений;
 - `DailyDiaryStore` — цели и атомарная запись порций;
+- `LabelPhotos/LabelPhotoStore` — запись файлов и метаданных, чтение только фотографий владельца;
+- `LabelPhotos/LegacyLabelPhotoImporter` — однократная регистрация прежних снимков за локальным владельцем без изменения ссылок;
 - `Persistence` — EF-модель и история миграций;
 - `Ai`, `Audio`, `LabelPhotos` — транспорт, проверка входных данных и файлов.
 

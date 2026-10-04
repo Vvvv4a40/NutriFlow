@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using NutriFlow.Api.Services;
 using NutriFlow.Infrastructure;
+using NutriFlow.Infrastructure.LabelPhotos;
 using NutriFlow.Infrastructure.Persistence;
 
 namespace NutriFlow.Api.Configuration;
@@ -31,7 +32,7 @@ internal static class ApplicationSetup
                 "Database:ApplyMigrationsOnStartup",
                 true))
         {
-            await ApplyDatabaseMigrationsAsync(app.Services);
+            await ApplyDatabaseMigrationsAsync(app);
         }
 
         if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase) &&
@@ -93,13 +94,17 @@ internal static class ApplicationSetup
             });
     }
 
-    private static async Task ApplyDatabaseMigrationsAsync(IServiceProvider services)
+    private static async Task ApplyDatabaseMigrationsAsync(WebApplication app)
     {
-        await using AsyncServiceScope scope = services.CreateAsyncScope();
+        await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
         NutriFlowDbContext dbContext =
             scope.ServiceProvider.GetRequiredService<NutriFlowDbContext>();
 
         await dbContext.Database.MigrateAsync();
+        string configuredPath = app.Configuration["Storage:LabelPhotosPath"] ?? "data/label-photos";
+        await LegacyLabelPhotoImporter.ImportAsync(
+            dbContext,
+            Path.GetFullPath(configuredPath, app.Environment.ContentRootPath));
     }
 
     private static async Task SeedDemoDataAsync(IServiceProvider services)

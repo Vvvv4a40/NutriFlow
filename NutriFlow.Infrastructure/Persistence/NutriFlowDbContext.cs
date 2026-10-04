@@ -15,6 +15,7 @@ public sealed class NutriFlowDbContext : DbContext
     internal DbSet<MealEntryRecord> MealEntries => Set<MealEntryRecord>();
     internal DbSet<DailyGoalRecord> DailyGoals => Set<DailyGoalRecord>();
     internal DbSet<UserRecord> Users => Set<UserRecord>();
+    internal DbSet<LabelPhotoRecord> LabelPhotos => Set<LabelPhotoRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -25,9 +26,22 @@ public sealed class NutriFlowDbContext : DbContext
             entity.ToTable("Users");
             entity.HasKey(user => user.Id);
             entity.Property(user => user.CreatedAtUtc).HasColumnType("TEXT");
+            entity.Property(user => user.LegacyLabelPhotosImported).HasDefaultValue(false);
             entity.HasIndex(user => user.IsLegacyLocal)
                 .IsUnique()
                 .HasFilter("\"IsLegacyLocal\" = 1");
+        });
+
+        modelBuilder.Entity<LabelPhotoRecord>(entity =>
+        {
+            entity.ToTable("LabelPhotos");
+            entity.HasKey(photo => photo.FileName);
+            entity.Property(photo => photo.FileName).HasMaxLength(37);
+            entity.Property(photo => photo.RegisteredAtUtc).HasColumnType("TEXT");
+            entity.HasOne<UserRecord>()
+                .WithMany()
+                .HasForeignKey(photo => photo.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ProductRecord>(entity =>

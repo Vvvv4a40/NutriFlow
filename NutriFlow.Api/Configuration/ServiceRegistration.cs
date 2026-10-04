@@ -109,7 +109,9 @@ internal static class ServiceRegistration
         string labelPhotoPath = Path.GetFullPath(
             configuredLabelPhotoPath,
             builder.Environment.ContentRootPath);
-        builder.Services.AddSingleton(new LabelPhotoStore(labelPhotoPath));
+        builder.Services.AddScoped(serviceProvider => new LabelPhotoStore(
+            serviceProvider.GetRequiredService<NutriFlowDbContext>(),
+            labelPhotoPath));
     }
 
     private static void ConfigureExternalProducts(WebApplicationBuilder builder)
