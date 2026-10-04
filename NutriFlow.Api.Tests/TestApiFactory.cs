@@ -21,6 +21,7 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
     private readonly ISpeechTranscriber? _transcriber;
     private readonly string? _databasePath;
     private readonly string _environment;
+    private readonly string? _labelPhotoPath;
 
     public TestApiFactory(
         bool applyMigrations = true,
@@ -29,7 +30,8 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
         string aiProvider = "Fake",
         ISpeechTranscriber? transcriber = null,
         string? databasePath = null,
-        string environment = "Development")
+        string environment = "Development",
+        string? labelPhotoPath = null)
     {
         _applyMigrations = applyMigrations;
         _seedDemoData = seedDemoData;
@@ -38,6 +40,7 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
         _transcriber = transcriber;
         _databasePath = databasePath;
         _environment = environment;
+        _labelPhotoPath = labelPhotoPath;
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -53,7 +56,7 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
             _applyMigrations.ToString());
         builder.UseSetting(
             "Storage:LabelPhotosPath",
-            Path.Combine(_directoryPath, "label-photos"));
+            _labelPhotoPath ?? Path.Combine(_directoryPath, "label-photos"));
         builder.UseSetting("Ai:Provider", _aiProvider);
         builder.UseSetting("Ai:OpenAI:ApiKey", "test-key");
         builder.UseSetting("Ai:Groq:ApiKey", "test-key");

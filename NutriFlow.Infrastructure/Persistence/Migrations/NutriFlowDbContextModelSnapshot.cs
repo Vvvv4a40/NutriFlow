@@ -42,6 +42,25 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("DailyGoals", (string)null);
                 });
 
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.LabelPhotoRecord", b =>
+                {
+                    b.Property<string>("FileName")
+                        .HasMaxLength(37)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("RegisteredAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("FileName");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("LabelPhotos", (string)null);
+                });
+
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -266,6 +285,11 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsLegacyLocal")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("LegacyLabelPhotosImported")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.HasKey("Id");
 
                     b.HasIndex("IsLegacyLocal")
@@ -276,6 +300,15 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.DailyGoalRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.LabelPhotoRecord", b =>
                 {
                     b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
                         .WithMany()

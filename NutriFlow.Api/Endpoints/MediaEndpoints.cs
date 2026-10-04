@@ -36,7 +36,7 @@ internal static class MediaEndpoints
             .ProducesProblem(StatusCodes.Status504GatewayTimeout)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
-        app.MapGet("/api/label-photos/{fileName}", GetLabelPhoto)
+        app.MapGet("/api/label-photos/{fileName}", GetLabelPhotoAsync)
             .WithName("GetLabelPhoto")
             .WithSummary("Returns a saved nutrition-label photo by its opaque reference.")
             .WithTags("Labels")
@@ -202,11 +202,15 @@ internal static class MediaEndpoints
         }
     }
 
-    private static IResult GetLabelPhoto(
+    private static async Task<IResult> GetLabelPhotoAsync(
         string fileName,
-        LabelPhotoStore photoStore)
+        LabelPhotoStore photoStore,
+        HttpResponse response,
+        CancellationToken cancellationToken)
     {
-        StoredLabelPhoto? photo = photoStore.Find($"label-photo:{fileName}");
+        response.Headers.CacheControl = "private, no-store";
+        StoredLabelPhoto? photo = await photoStore.FindAsync(
+            $"label-photo:{fileName}", cancellationToken);
 
         return photo is null
             ? Results.Problem(

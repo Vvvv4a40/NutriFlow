@@ -125,7 +125,7 @@ internal static class ProductEndpoints
                 "Basis must be Per100Grams before label values can be saved.");
         }
 
-        if (!photoStore.Contains(request.PhotoReference!))
+        if (!await photoStore.ContainsAsync(request.PhotoReference!, cancellationToken))
         {
             return InvalidProduct(
                 "PhotoReference must identify a label photo saved by NutriFlow.");
