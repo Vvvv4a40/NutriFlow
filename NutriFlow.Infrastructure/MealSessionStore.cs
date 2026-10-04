@@ -128,53 +128,6 @@ public sealed class MealSessionStore
         return record is null ? null : MapSession(record);
     }
 
-    private async Task<StoredMealSession> CreateCoreAsync(
-        IReadOnlyList<string> messages,
-        MealDraft draft,
-        string previewJson,
-        string previewToken,
-        MealSessionStatus status,
-        DateOnly mealDate,
-        Guid? idempotencyKey,
-        string? originalRequestHash,
-        CancellationToken cancellationToken)
-    {
-        ValidateMessages(messages);
-        ArgumentNullException.ThrowIfNull(draft);
-        ValidatePreview(previewJson, previewToken);
-        ValidateEditableStatus(status);
-
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        MealSessionRecord record = new MealSessionRecord
-        {
-            Id = Guid.NewGuid(),
-            UserId = _ownerId,
-            MessagesJson = JsonSerializer.Serialize(messages, SerializerOptions),
-            DraftJson = SerializeDraft(draft),
-            PreviewJson = previewJson,
-            PreviewToken = previewToken,
-            Status = status,
-            MealDate = mealDate,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now,
-            IdempotencyKey = idempotencyKey,
-            OriginalRequestHash = originalRequestHash
-        };
-
-        _dbContext.MealSessions.Add(record);
-        try
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch
-        {
-            _dbContext.Entry(record).State = EntityState.Detached;
-            throw;
-        }
-
-        return MapSession(record);
-    }
-
     public async Task<StoredMealSession?> FindAsync(
         Guid id,
         CancellationToken cancellationToken = default)
@@ -206,7 +159,7 @@ public sealed class MealSessionStore
         ValidateEditableStatus(status);
 
         string messagesJson = JsonSerializer.Serialize(messages, SerializerOptions);
-        string draftJson = SerializeDraft(draft);
+        string draftJson = MealDraftSerializer.Serialize(draft);
         string? messageRequestHashesJson = messageRequestHashes is null
             ? null
             : SerializeMessageRequestHashes(messageRequestHashes);
@@ -285,22 +238,59 @@ public sealed class MealSessionStore
         return MapSession(record);
     }
 
-    private static StoredMealSession MapSession(MealSessionRecord record)
+    private async Task<StoredMealSession> CreateCoreAsync(
+        IReadOnlyList<string> messages,
+        MealDraft draft,
+        string previewJson,
+        string previewToken,
+        MealSessionStatus status,
+        DateOnly mealDate,
+        Guid? idempotencyKey,
+        string? originalRequestHash,
+        CancellationToken cancellationToken)
     {
-        List<string>? messages = JsonSerializer.Deserialize<List<string>>(
-            record.MessagesJson,
-            SerializerOptions);
+        ValidateMessages(messages);
+        ArgumentNullException.ThrowIfNull(draft);
+        ValidatePreview(previewJson, previewToken);
+        ValidateEditableStatus(status);
 
-        if (messages is null || messages.Any(string.IsNullOrWhiteSpace))
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        MealSessionRecord record = new MealSessionRecord
         {
-            throw new InvalidDataException(
-                $"Stored messages for meal session '{record.Id}' are invalid.");
+            Id = Guid.NewGuid(),
+            UserId = _ownerId,
+            MessagesJson = JsonSerializer.Serialize(messages, SerializerOptions),
+            DraftJson = MealDraftSerializer.Serialize(draft),
+            PreviewJson = previewJson,
+            PreviewToken = previewToken,
+            Status = status,
+            MealDate = mealDate,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            IdempotencyKey = idempotencyKey,
+            OriginalRequestHash = originalRequestHash
+        };
+
+        _dbContext.MealSessions.Add(record);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            _dbContext.Entry(record).State = EntityState.Detached;
+            throw;
         }
 
+        return MapSession(record);
+    }
+
+    private static StoredMealSession MapSession(MealSessionRecord record)
+    {
         return new StoredMealSession(
             record.Id,
-            messages.AsReadOnly(),
-            DeserializeDraft(record.DraftJson),
+            DeserializeMessages(record.MessagesJson, record.Id),
+            MealDraftSerializer.Deserialize(record.DraftJson),
             record.PreviewJson,
             record.PreviewToken,
             record.Status,
@@ -311,6 +301,31 @@ public sealed class MealSessionStore
             record.IdempotencyKey,
             record.OriginalRequestHash,
             DeserializeMessageRequestHashes(record.MessageRequestHashesJson));
+    }
+
+    private static IReadOnlyList<string> DeserializeMessages(string json, Guid sessionId)
+    {
+        string errorMessage = $"Stored messages for meal session '{sessionId}' are invalid.";
+
+        try
+        {
+            List<string>? messages = JsonSerializer.Deserialize<List<string>>(
+                json,
+                SerializerOptions);
+
+            if (messages is null)
+            {
+                throw new InvalidDataException(errorMessage);
+            }
+
+            ValidateMessages(messages);
+
+            return messages.AsReadOnly();
+        }
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        {
+            throw new InvalidDataException(errorMessage, exception);
+        }
     }
 
     private static string SerializeMessageRequestHashes(
@@ -368,116 +383,6 @@ public sealed class MealSessionStore
                     "Message request hashes require nonempty keys and uppercase SHA-256 values.",
                     nameof(messageRequestHashes));
             }
-        }
-    }
-
-    private static string SerializeDraft(MealDraft draft)
-    {
-        StoredDraft document = new StoredDraft(
-            draft.Dishes.Select(dish => new StoredDish(
-                dish.Name,
-                dish.Ingredients.Select(ingredient => new StoredIngredient(
-                    ingredient.ProductName,
-                    ingredient.WeightInGrams,
-                    ingredient.WeightQuality,
-                    ingredient.RemovedWeightInGrams,
-                    ingredient.RemovedWeightQuality,
-                    RemovalSpecified: true)).ToArray(),
-                dish.FinalWeightInGrams,
-                dish.FinalWeightQuality,
-                dish.Portions.Select(portion => new StoredPortion(
-                    portion.WeightInGrams,
-                    portion.FractionOfDish,
-                    portion.WeightQuality)).ToArray())).ToArray(),
-            draft.ClarificationQuestions.ToArray());
-
-        return JsonSerializer.Serialize(document, SerializerOptions);
-    }
-
-    private static MealDraft DeserializeDraft(string json)
-    {
-        try
-        {
-            StoredDraft? document = JsonSerializer.Deserialize<StoredDraft>(
-                json,
-                SerializerOptions);
-
-            if (document?.Dishes is null ||
-                document.ClarificationQuestions is null)
-            {
-                throw new InvalidDataException("Stored meal draft is incomplete.");
-            }
-
-            if (document.Dishes.Any(dish =>
-                    dish is null ||
-                    dish.Ingredients is null ||
-                    dish.Portions is null ||
-                    dish.Ingredients.Any(ingredient => ingredient is null) ||
-                    dish.Portions.Any(portion => portion is null)))
-            {
-                throw new InvalidDataException(
-                    "Stored meal draft contains null nested values.");
-            }
-
-            List<DishDraft> dishes = document.Dishes.Select(dish =>
-            {
-                StoredDish validDish = dish!;
-
-                return new DishDraft(
-                    validDish.Name,
-                    validDish.Ingredients.Select(ingredient =>
-                    {
-                        StoredIngredient validIngredient = ingredient!;
-
-                        return new IngredientDraft(
-                            validIngredient.ProductName,
-                            validIngredient.WeightInGrams,
-                            validIngredient.WeightQuality,
-                            validIngredient.RemovalSpecified
-                                ? validIngredient.RemovedWeightInGrams
-                                : 0m,
-                            validIngredient.RemovalSpecified
-                                ? validIngredient.RemovedWeightQuality
-                                : DataQuality.Exact);
-                    }).ToArray(),
-                    validDish.FinalWeightInGrams,
-                    validDish.FinalWeightQuality,
-                    validDish.Portions.Select(portion =>
-                    {
-                        StoredPortion validPortion = portion!;
-
-                        if (validPortion.WeightInGrams is not null)
-                        {
-                            return new PortionDraft(
-                                validPortion.WeightInGrams.Value,
-                                validPortion.WeightQuality);
-                        }
-
-                        if (validPortion.FractionOfDish is not null)
-                        {
-                            return PortionDraft.FromFraction(
-                                validPortion.FractionOfDish.Value,
-                                validPortion.WeightQuality);
-                        }
-
-                        throw new InvalidDataException(
-                            "Stored portion has neither a weight nor a fraction.");
-                    }).ToArray());
-            }).ToList();
-
-            return new MealDraft(dishes, document.ClarificationQuestions);
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidDataException(
-                "Stored meal draft JSON is invalid.",
-                exception);
-        }
-        catch (ArgumentException exception)
-        {
-            throw new InvalidDataException(
-                "Stored meal draft violates domain rules.",
-                exception);
         }
     }
 
@@ -549,28 +454,4 @@ public sealed class MealSessionStore
             throw new ArgumentOutOfRangeException(nameof(status));
         }
     }
-
-    private sealed record StoredDraft(
-        IReadOnlyList<StoredDish> Dishes,
-        IReadOnlyList<string> ClarificationQuestions);
-
-    private sealed record StoredDish(
-        string Name,
-        IReadOnlyList<StoredIngredient> Ingredients,
-        decimal? FinalWeightInGrams,
-        DataQuality FinalWeightQuality,
-        IReadOnlyList<StoredPortion> Portions);
-
-    private sealed record StoredIngredient(
-        string ProductName,
-        decimal? WeightInGrams,
-        DataQuality WeightQuality,
-        decimal? RemovedWeightInGrams,
-        DataQuality RemovedWeightQuality,
-        bool RemovalSpecified);
-
-    private sealed record StoredPortion(
-        decimal? WeightInGrams,
-        decimal? FractionOfDish,
-        DataQuality WeightQuality);
 }

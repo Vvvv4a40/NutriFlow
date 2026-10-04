@@ -37,6 +37,7 @@ Program → Endpoints → MealWorkflowService
 - `LocalProductCatalog` — личные и общие продукты, поиск, алиасы и повышение качества;
 - `ProductLookupService` / `ExternalProducts` — local-first поиск по штрихкоду и внешний импорт;
 - `MealSessionStore` — сессии, версии и ключи безопасных повторов;
+- `MealDraftSerializer` — формат сохранённого JSON-черновика и восстановление доменных объектов с проверкой их ограничений;
 - `DailyDiaryStore` — цели и атомарная запись порций;
 - `Persistence` — EF-модель и история миграций;
 - `Ai`, `Audio`, `LabelPhotos` — транспорт, проверка входных данных и файлов.
