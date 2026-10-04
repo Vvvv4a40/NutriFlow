@@ -273,6 +273,7 @@ public sealed class LocalProductCatalogTests
         string? name)
     {
         await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
         await using NutriFlowDbContext context = database.CreateContext();
         LocalProductCatalog catalog = new LocalProductCatalog(context);
 
@@ -284,6 +285,7 @@ public sealed class LocalProductCatalogTests
     public async Task AddAsync_WithNullProduct_ThrowsArgumentNullException()
     {
         await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
         await using NutriFlowDbContext context = database.CreateContext();
         LocalProductCatalog catalog = new LocalProductCatalog(context);
 

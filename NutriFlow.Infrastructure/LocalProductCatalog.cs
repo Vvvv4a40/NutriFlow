@@ -8,17 +8,63 @@ namespace NutriFlow.Infrastructure;
 public sealed class LocalProductCatalog
 {
     private readonly NutriFlowDbContext _dbContext;
+    private readonly Guid _ownerId;
 
     public LocalProductCatalog(NutriFlowDbContext dbContext)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
 
         _dbContext = dbContext;
+        _ownerId = dbContext.Users
+            .AsNoTracking()
+            .Single(user => user.IsLegacyLocal)
+            .Id;
     }
 
-    public async Task<bool> AddAsync(
+    public LocalProductCatalog(NutriFlowDbContext dbContext, Guid ownerId)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+
+        if (ownerId == Guid.Empty)
+        {
+            throw new ArgumentException("An owner ID cannot be empty.", nameof(ownerId));
+        }
+
+        _dbContext = dbContext;
+        _ownerId = ownerId;
+    }
+
+    public Task<bool> AddAsync(
         Product product,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+
+        return AddCoreAsync(product, _ownerId, cancellationToken);
+    }
+
+    internal Task<bool> AddSharedExternalProductAsync(
+        Product product,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+
+        if (product.Source.Kind != NutritionSourceKind.ExternalService ||
+            !Uri.TryCreate(product.Source.Reference, UriKind.Absolute, out Uri? sourceUri) ||
+            (sourceUri.Scheme != Uri.UriSchemeHttp &&
+             sourceUri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidDataException(
+                "A shared import requires an external product with a public HTTP source.");
+        }
+
+        return AddCoreAsync(product, null, cancellationToken);
+    }
+
+    private async Task<bool> AddCoreAsync(
+        Product product,
+        Guid? userId,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(product);
 
@@ -26,9 +72,10 @@ public sealed class LocalProductCatalog
         ProductRecord? barcodeMatch = product.Barcode is null
             ? null
             : await _dbContext.Products
-                .Include(record => record.Aliases)
+                .AsNoTracking()
+                .Include(record => record.Aliases.Where(alias => alias.UserId == _ownerId))
                 .SingleOrDefaultAsync(
-                    record => record.Barcode == product.Barcode,
+                    record => record.UserId == userId && record.Barcode == product.Barcode,
                     cancellationToken);
 
         if (barcodeMatch is not null)
@@ -43,6 +90,7 @@ public sealed class LocalProductCatalog
             .AsNoTracking()
             .AnyAsync(
                 record =>
+                    record.UserId == userId &&
                     record.NormalizedName == normalizedName &&
                       record.Calories == product.NutritionPer100Grams.Calories &&
                      record.ProteinGrams == product.NutritionPer100Grams.ProteinGrams &&
@@ -61,7 +109,7 @@ public sealed class LocalProductCatalog
             return false;
         }
 
-        _dbContext.Products.Add(MapRecord(product));
+        _dbContext.Products.Add(MapRecord(product, userId));
 
         try
         {
@@ -72,9 +120,10 @@ public sealed class LocalProductCatalog
             _dbContext.ChangeTracker.Clear();
 
             ProductRecord? concurrentlyAdded = await _dbContext.Products
-                .Include(record => record.Aliases)
+                .AsNoTracking()
+                .Include(record => record.Aliases.Where(alias => alias.UserId == _ownerId))
                 .SingleOrDefaultAsync(
-                    record => record.Barcode == product.Barcode,
+                    record => record.UserId == userId && record.Barcode == product.Barcode,
                     cancellationToken);
 
             if (concurrentlyAdded is not null)
@@ -98,22 +147,28 @@ public sealed class LocalProductCatalog
     {
         string normalizedBarcode = ProductBarcode.Normalize(barcode);
         string normalizedAlias = NormalizeName(alias);
-        ProductRecord record = await _dbContext.Products
-            .Include(product => product.Aliases)
-            .SingleOrDefaultAsync(
-                product => product.Barcode == normalizedBarcode,
-                cancellationToken) ??
+        ProductRecord record = await FindVisibleBarcodeRecordAsync(
+            normalizedBarcode, cancellationToken) ??
             throw new KeyNotFoundException(
                 $"Product with barcode '{normalizedBarcode}' was not found.");
 
-        if (record.NormalizedName == normalizedAlias ||
-            record.Aliases.Any(item => item.NormalizedName == normalizedAlias))
+        bool aliasExists = await _dbContext.ProductAliases
+            .AsNoTracking()
+            .AnyAsync(
+                item => item.UserId == _ownerId &&
+                        item.ProductId == record.Id &&
+                        item.NormalizedName == normalizedAlias,
+                cancellationToken);
+
+        if (record.NormalizedName == normalizedAlias || aliasExists)
         {
             return MapProduct(record);
         }
 
-        record.Aliases.Add(new ProductAliasRecord
+        _dbContext.ProductAliases.Add(new ProductAliasRecord
         {
+            UserId = _ownerId,
+            ProductId = record.Id,
             Name = alias.Trim(),
             NormalizedName = normalizedAlias
         });
@@ -129,6 +184,7 @@ public sealed class LocalProductCatalog
                 .AsNoTracking()
                 .AnyAsync(
                     item =>
+                        item.UserId == _ownerId &&
                         item.ProductId == record.Id &&
                         item.NormalizedName == normalizedAlias,
                     cancellationToken);
@@ -140,7 +196,10 @@ public sealed class LocalProductCatalog
 
             record = await _dbContext.Products
                 .AsNoTracking()
-                .SingleAsync(product => product.Id == record.Id, cancellationToken);
+                .SingleAsync(
+                    product => product.Id == record.Id &&
+                               (product.UserId == null || product.UserId == _ownerId),
+                    cancellationToken);
         }
 
         return MapProduct(record);
@@ -154,13 +213,41 @@ public sealed class LocalProductCatalog
 
         List<ProductRecord> records = await _dbContext.Products
             .AsNoTracking()
+            .Where(product => product.UserId == null || product.UserId == _ownerId)
             .Where(product =>
                 product.NormalizedName == normalizedName ||
-                product.Aliases.Any(alias => alias.NormalizedName == normalizedName))
+                product.Aliases.Any(alias =>
+                    alias.UserId == _ownerId && alias.NormalizedName == normalizedName))
             .OrderBy(product => product.Id)
             .ToListAsync(cancellationToken);
 
-        return records.Select(MapProduct).ToArray();
+        string[] sharedBarcodes = records
+            .Where(record => record.UserId is null && record.Barcode is not null)
+            .Select(record => record.Barcode!)
+            .ToArray();
+
+        if (sharedBarcodes.Length == 0)
+        {
+            return records.Select(MapProduct).ToArray();
+        }
+
+        Dictionary<string, ProductRecord> personalOverrides = await _dbContext.Products
+            .AsNoTracking()
+            .Where(product => product.UserId == _ownerId &&
+                              product.Barcode != null &&
+                              sharedBarcodes.Contains(product.Barcode))
+            .ToDictionaryAsync(product => product.Barcode!, cancellationToken);
+
+        // личная версия того же штрихкода сохраняет поиск по имени и алиасам общей записи
+        return records
+            .Select(record => record.UserId is null &&
+                              record.Barcode is not null &&
+                              personalOverrides.TryGetValue(record.Barcode, out ProductRecord? personal)
+                ? personal
+                : record)
+            .DistinctBy(record => record.Id)
+            .Select(MapProduct)
+            .ToArray();
     }
 
     public async Task<Product?> FindByBarcodeAsync(
@@ -169,19 +256,29 @@ public sealed class LocalProductCatalog
     {
         string normalizedBarcode = ProductBarcode.Normalize(barcode);
 
-        ProductRecord? record = await _dbContext.Products
-            .AsNoTracking()
-            .SingleOrDefaultAsync(
-                product => product.Barcode == normalizedBarcode,
-                cancellationToken);
+        ProductRecord? record = await FindVisibleBarcodeRecordAsync(
+            normalizedBarcode, cancellationToken);
 
         return record is null ? null : MapProduct(record);
     }
 
-    private static ProductRecord MapRecord(Product product)
+    private Task<ProductRecord?> FindVisibleBarcodeRecordAsync(
+        string barcode,
+        CancellationToken cancellationToken)
+    {
+        return _dbContext.Products
+            .AsNoTracking()
+            .Where(product => product.Barcode == barcode &&
+                              (product.UserId == _ownerId || product.UserId == null))
+            .OrderBy(product => product.UserId == null)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private static ProductRecord MapRecord(Product product, Guid? userId)
     {
         return new ProductRecord
         {
+            UserId = userId,
             Name = product.Name,
             NormalizedName = NormalizeName(product.Name),
             Barcode = product.Barcode,
@@ -211,6 +308,7 @@ public sealed class LocalProductCatalog
         int updatedCount = await _dbContext.Products
             .Where(record =>
                 record.Id == existing.Id &&
+                record.UserId == existing.UserId &&
                 record.SourceQuality == existing.SourceQuality)
             .ExecuteUpdateAsync(
                 setters => setters
@@ -244,8 +342,11 @@ public sealed class LocalProductCatalog
         {
             _dbContext.ChangeTracker.Clear();
             ProductRecord latest = await _dbContext.Products
-                .Include(record => record.Aliases)
-                .SingleAsync(record => record.Id == existing.Id, cancellationToken);
+                .AsNoTracking()
+                .Include(record => record.Aliases.Where(alias => alias.UserId == _ownerId))
+                .SingleAsync(
+                    record => record.Id == existing.Id && record.UserId == existing.UserId,
+                    cancellationToken);
 
             return await UpgradeBarcodeProductAsync(
                 latest,
@@ -255,10 +356,11 @@ public sealed class LocalProductCatalog
 
         if (existing.NormalizedName != incomingNormalizedName &&
             existing.Aliases.All(alias =>
-                alias.NormalizedName != existing.NormalizedName))
+                alias.UserId != _ownerId || alias.NormalizedName != existing.NormalizedName))
         {
             _dbContext.ProductAliases.Add(new ProductAliasRecord
             {
+                UserId = _ownerId,
                 ProductId = existing.Id,
                 Name = existing.Name,
                 NormalizedName = existing.NormalizedName
@@ -275,6 +377,7 @@ public sealed class LocalProductCatalog
                     .AsNoTracking()
                     .AnyAsync(
                         alias =>
+                            alias.UserId == _ownerId &&
                             alias.ProductId == existing.Id &&
                             alias.NormalizedName == existing.NormalizedName,
                         cancellationToken);
