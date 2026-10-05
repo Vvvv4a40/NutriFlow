@@ -15,7 +15,8 @@ internal static class ProductEndpoints
             .WithTags("Products")
             .Produces<ProductResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         app.MapPost("/api/products/from-label", CreateLabelProductAsync)
             .WithName("CreateLabelProduct")
@@ -23,7 +24,8 @@ internal static class ProductEndpoints
             .WithTags("Products")
             .Produces<ProductResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         app.MapPost("/api/products/aliases", AddProductAliasAsync)
             .WithName("AddProductAlias")
@@ -31,7 +33,8 @@ internal static class ProductEndpoints
             .WithTags("Products")
             .Produces<ProductResponse>(StatusCodes.Status200OK)
             .ProducesValidationProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         app.MapGet("/api/products", FindLocalProductsAsync)
             .WithName("FindLocalProducts")
