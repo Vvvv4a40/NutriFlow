@@ -78,7 +78,7 @@ public sealed class BackupRecoveryApiTests
                 await client.GetStringAsync(ProductUrl("Этикетка из копии")));
         }
         Dictionary<string, string> sourceSnapshot = files.SourceSnapshot();
-        await files.BackupAndCopyAsync();
+        await files.BackupAndRestoreAsync();
         Dictionary<string, string> backupSnapshot = files.BackupSnapshot();
 
         for (int restart = 0; restart < 2; restart++)
@@ -117,7 +117,7 @@ public sealed class BackupRecoveryApiTests
         using RecoveryFixture files = new();
         LegacyState legacy = await CreateLegacySourceAsync(files);
         Dictionary<string, string> sourceSnapshot = files.SourceSnapshot();
-        await files.BackupAndCopyAsync();
+        await files.BackupAndRestoreAsync();
         Dictionary<string, string> backupSnapshot = files.BackupSnapshot();
         string? registeredPhotos = null;
         string latePhotoFileName = $"{Guid.NewGuid():N}.png";
@@ -186,7 +186,7 @@ public sealed class BackupRecoveryApiTests
         using RecoveryFixture files = new();
         await CreateLegacySourceAsync(files);
         Dictionary<string, string> sourceSnapshot = files.SourceSnapshot();
-        await files.BackupAndCopyAsync();
+        await files.BackupAndRestoreAsync();
         Dictionary<string, string> backupSnapshot = files.BackupSnapshot();
         string[] migrationsBefore = await ReadAppliedMigrationsAsync(files.RestoredDatabasePath);
         Assert.Equal(LegacyMigration, migrationsBefore[^1]);
@@ -412,18 +412,12 @@ public sealed class BackupRecoveryApiTests
                 Pooling = false
             }.ToString()).Options);
 
-        public async Task BackupAndCopyAsync()
+        public async Task BackupAndRestoreAsync()
         {
             SqliteConnection.ClearAllPools();
             await DataBackup.CreateAsync(Path.Combine(SourcePath, "nutriflow.db"), SourcePhotosPath, BackupPath);
-            BackupManifest manifest = await DataBackup.VerifyAsync(BackupPath);
             Assert.False(Directory.Exists(RestoredPath));
-            Directory.CreateDirectory(Path.Combine(RestoredPath, "label-photos"));
-            foreach (BackupFile file in manifest.Files)
-            {
-                string relativePath = file.Path.Replace('/', Path.DirectorySeparatorChar);
-                File.Copy(Path.Combine(BackupPath, relativePath), Path.Combine(RestoredPath, relativePath));
-            }
+            await DataBackup.RestoreAsync(BackupPath, RestoredPath);
         }
 
         public Dictionary<string, string> SourceSnapshot() => Snapshot(SourcePath);

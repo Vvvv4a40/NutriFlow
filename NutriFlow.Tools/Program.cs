@@ -37,11 +37,22 @@ static async Task<int> RunAsync(string[] arguments)
             Console.WriteLine($"Резервная копия создана: {Path.GetFullPath(command.Options["--output"])}");
             Console.WriteLine($"Проверено файлов: {manifest.Files.Count}");
         }
-        else
+        else if (command.Name == "verify")
         {
             var manifest = await DataBackup.VerifyAsync(command.Options["--backup"], cancellation.Token);
             Console.WriteLine($"Резервная копия проверена: {Path.GetFullPath(command.Options["--backup"])}");
             Console.WriteLine($"Проверено файлов: {manifest.Files.Count}");
+        }
+        else
+        {
+            var manifest = await DataBackup.RestoreAsync(
+                command.Options["--backup"],
+                command.Options["--output"],
+                cancellation.Token);
+            Console.WriteLine($"Резервная копия восстановлена: {Path.GetFullPath(command.Options["--output"])}");
+            Console.WriteLine($"Восстановлено и проверено файлов: {manifest.Files.Count}");
+            Console.WriteLine("API и миграции не запускались. Исходные данные не изменены.");
+            Console.WriteLine("Для использования восстановленных данных явно укажите пути к базе и фотографиям в настройках API.");
         }
 
         return 0;
@@ -67,16 +78,19 @@ static bool TryParseArguments(string[] arguments, out ParsedCommand command, out
     command = new ParsedCommand(string.Empty, new Dictionary<string, string>(StringComparer.Ordinal));
     error = string.Empty;
 
-    if (arguments.Length == 0 || arguments[0] is not ("backup" or "verify"))
+    if (arguments.Length == 0 || arguments[0] is not ("backup" or "verify" or "restore"))
     {
-        error = "Укажите команду backup или verify.";
+        error = "Укажите команду backup, verify или restore.";
         return false;
     }
 
     var name = arguments[0];
-    string[] requiredOptions = name == "backup"
-        ? ["--database", "--photos", "--output"]
-        : ["--backup"];
+    string[] requiredOptions = name switch
+    {
+        "backup" => ["--database", "--photos", "--output"],
+        "verify" => ["--backup"],
+        _ => ["--backup", "--output"]
+    };
     var options = new Dictionary<string, string>(StringComparer.Ordinal);
     var offline = false;
 
@@ -139,8 +153,10 @@ static void PrintUsage(TextWriter writer)
 {
     writer.WriteLine("backup --database <путь> --photos <путь> --output <новая-папка> --offline");
     writer.WriteLine("verify --backup <папка>");
+    writer.WriteLine("restore --backup <папка> --output <новая-несуществующая-папка>");
     writer.WriteLine("--help");
-    writer.WriteLine("--offline подтверждает, что API и все процессы записи остановлены.");
+    writer.WriteLine("Для backup параметр --offline подтверждает, что API и все процессы записи остановлены.");
+    writer.WriteLine("Restore не запускает API и миграции; пути к восстановленным данным настраиваются явно.");
 }
 
 sealed record ParsedCommand(string Name, Dictionary<string, string> Options);

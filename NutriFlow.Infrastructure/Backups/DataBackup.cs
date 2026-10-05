@@ -182,6 +182,78 @@ public static class DataBackup
         return manifest;
     }
 
+    public static async Task<BackupManifest> RestoreAsync(
+        string backupPath,
+        string destinationPath,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        backupPath = BackupFiles.FullPath(backupPath);
+        destinationPath = BackupFiles.FullPath(destinationPath);
+        EnsureNewRestoreDestination(destinationPath);
+        if (BackupFiles.IsWithin(destinationPath, backupPath) || BackupFiles.IsWithin(backupPath, destinationPath))
+        {
+            throw new ArgumentException("The restore destination must not overlap the backup.");
+        }
+
+        string manifestPath = Path.Combine(backupPath, ManifestName);
+        BackupManifest manifest = await VerifyAsync(backupPath, cancellationToken);
+        BackupFile manifestFile = await BackupFiles.DescribeAsync(manifestPath, ManifestName, cancellationToken);
+        string parentPath = Path.GetDirectoryName(destinationPath) ??
+                            throw new ArgumentException("The restore destination needs a parent directory.");
+        Directory.CreateDirectory(parentPath);
+        string stagingPath = Path.Combine(parentPath, $".nutriflow-restore-{Guid.NewGuid():N}.partial");
+        BackupFiles.EnsureNoLinks(stagingPath);
+        Directory.CreateDirectory(stagingPath);
+        bool published = false;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(stagingPath, PhotoDirectoryName));
+            foreach (BackupFile file in manifest.Files)
+            {
+                string relativePath = file.Path.Replace('/', Path.DirectorySeparatorChar);
+                string targetPath = Path.Combine(stagingPath, relativePath);
+                BackupFile copied = await BackupFiles.CopyAsync(
+                    Path.Combine(backupPath, relativePath), targetPath, file.Path, cancellationToken);
+                if (!FilesMatch(file, copied))
+                {
+                    throw new InvalidDataException("A backup file changed during restoration.");
+                }
+                await EnsureMatchesAsync(targetPath, file, cancellationToken);
+            }
+
+            BackupManifest verified = await VerifyAsync(backupPath, cancellationToken);
+            if (manifest.FormatVersion != verified.FormatVersion || manifest.CreatedAtUtc != verified.CreatedAtUtc ||
+                !manifest.Files.SequenceEqual(verified.Files))
+            {
+                throw new InvalidDataException("The backup manifest changed during restoration.");
+            }
+            await EnsureMatchesAsync(manifestPath, manifestFile, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            BackupFiles.EnsureNoLinks(stagingPath);
+            BackupFiles.EnsureNoLinks(destinationPath);
+            EnsureNewRestoreDestination(destinationPath);
+            Directory.Move(stagingPath, destinationPath);
+            published = true;
+            return manifest;
+        }
+        finally
+        {
+            if (!published && Directory.Exists(stagingPath))
+            {
+                BackupFiles.DeleteOwnedDirectory(stagingPath);
+            }
+        }
+    }
+
+    private static void EnsureNewRestoreDestination(string destinationPath)
+    {
+        if (File.Exists(destinationPath) || Directory.Exists(destinationPath))
+        {
+            throw new IOException("The restore destination already exists; it will not be overwritten.");
+        }
+    }
+
     private static void ValidateManifest(BackupManifest manifest)
     {
         if (manifest.FormatVersion != 1 || manifest.CreatedAtUtc == default ||
