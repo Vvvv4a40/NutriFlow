@@ -3,10 +3,11 @@ using NutriFlow.Api.Contracts;
 using NutriFlow.Api.Endpoints;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+bool seedDemoData = builder.Configuration.GetValue("Demo:SeedData", false);
 string aiProvider = builder.AddNutriFlowServices();
 WebApplication app = builder.Build();
 
-await app.ConfigureNutriFlowAsync(aiProvider);
+await app.ConfigureNutriFlowAsync(aiProvider, seedDemoData);
 
 bool supportsAiInput = !aiProvider.Equals(
     "Fake",

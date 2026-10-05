@@ -19,12 +19,12 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 WORKDIR /app
 
-ENV ASPNETCORE_HTTP_PORTS=8080 \
+ENV ASPNETCORE_ENVIRONMENT=Production \
+    ASPNETCORE_HTTP_PORTS=8080 \
     Database__Path=/data/nutriflow.db \
     Database__ApplyMigrationsOnStartup=true \
     Storage__LabelPhotosPath=/data/label-photos \
-    Ai__Provider=Fake \
-    Demo__SeedData=true
+    Demo__SeedData=false
 
 RUN mkdir -p /data/label-photos && chown -R $APP_UID /data
 

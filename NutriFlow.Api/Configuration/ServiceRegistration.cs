@@ -19,6 +19,7 @@ internal static class ServiceRegistration
 {
     public static string AddNutriFlowServices(this WebApplicationBuilder builder)
     {
+        string aiProvider = ConfigureAiProvider(builder);
         builder.Services.AddOpenApi();
         builder.Services.AddProblemDetails();
         builder.Services.AddHealthChecks()
@@ -29,7 +30,7 @@ internal static class ServiceRegistration
         ConfigureRateLimiting(builder.Services);
         ConfigureStorage(builder);
         ConfigureExternalProducts(builder);
-        return ConfigureAiProvider(builder);
+        return aiProvider;
     }
 
     private static void ConfigureRateLimiting(IServiceCollection services)
@@ -137,7 +138,14 @@ internal static class ServiceRegistration
 
     private static string ConfigureAiProvider(WebApplicationBuilder builder)
     {
-        string configuredAiProvider = builder.Configuration["Ai:Provider"] ?? "Fake";
+        string? configuredAiProvider = builder.Configuration["Ai:Provider"];
+
+        if (string.IsNullOrWhiteSpace(configuredAiProvider))
+        {
+            throw new InvalidOperationException(
+                "Ai:Provider must be configured. Use 'Fake', 'OpenAI', or 'Groq'.");
+        }
+
         string aiProvider;
 
         if (configuredAiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
@@ -267,7 +275,7 @@ internal static class ServiceRegistration
         else
         {
             throw new InvalidOperationException(
-                $"Unsupported AI provider '{configuredAiProvider}'. Use 'Fake', 'OpenAI', or 'Groq'.");
+                "Unsupported AI provider. Use 'Fake', 'OpenAI', or 'Groq'.");
         }
 
         return aiProvider;

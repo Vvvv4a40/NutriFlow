@@ -57,6 +57,10 @@ jobs:
         run: dotnet format NutriFlow.sln --no-restore --verify-no-changes
 
       - name: Check EF Core model
+        env:
+          Ai__Provider: Fake
+          Demo__SeedData: 'false'
+          Database__ApplyMigrationsOnStartup: 'false'
         run: >-
           dotnet tool run dotnet-ef migrations has-pending-model-changes
           --project NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj

@@ -303,7 +303,7 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 | `Storage:LabelPhotosPath` | `data/label-photos` | Каталог сохранённых фотографий этикеток |
 | `OpenFoodFacts:BaseUrl` | `https://world.openfoodfacts.org/` | Базовый URL продуктового сервиса |
 | `OpenFoodFacts:UserAgent` | URL репозитория NutriFlow | Идентификация клиента перед внешним сервисом |
-| `Ai:Provider` | `Fake` | Провайдер разбора: `Fake`, `Groq` или `OpenAI` |
+| `Ai:Provider` | не задан; в Development — `Fake` | Обязательный выбор: `Fake`, `Groq` или `OpenAI` |
 | `Ai:OpenAI:BaseUrl` | `https://api.openai.com/v1/` | Базовый URL OpenAI API |
 | `Ai:OpenAI:Model` | `gpt-5.4-mini` | Модель для структурированного разбора |
 | `Ai:OpenAI:ApiKey` | не задан | Секрет, обязательный для провайдера `OpenAI` |
@@ -313,7 +313,13 @@ dotnet run --project NutriFlow.Api/NutriFlow.Api.csproj
 | `Ai:Groq:SpeechModel` | `whisper-large-v3-turbo` | Модель для расшифровки аудио |
 | `Ai:Groq:SpeechLanguage` | `ru` | Двухбуквенный код языка; пустое значение включает автоматическое определение |
 | `Ai:Groq:ApiKey` | не задан | Секрет, обязательный для провайдера `Groq` |
-| `Demo:SeedData` | `true` | Добавить воспроизводимые продукты для Fake-сценария |
+| `Demo:SeedData` | `false`; в Development — `true` | Явно добавить воспроизводимые продукты для Fake-сценария |
+
+Общий `appsettings.json` не выбирает AI-провайдера и не включает демо-наполнение. `appsettings.Development.json` сохраняет прежний локальный Fake-сценарий. Обычный `dotnet run --project NutriFlow.Api` использует профиль `http` с окружением Development; User Secrets могут переопределить его, например выбрать Groq. Переменные окружения и аргументы командной строки имеют приоритет над JSON-настройками.
+
+В Production / Staging нужно явно задать `Ai:Provider`. Пустое значение, неизвестный провайдер и отсутствие ключа у Groq / OpenAI останавливают запуск до создания хранилища и миграций; ошибочное булево значение `Demo:SeedData` также проверяется в начале `Program`. Явный `Fake` разрешён для пробных запусков из резервной копии. Демо-продукты появляются только при сочетании `Fake` и `Demo:SeedData=true` — включайте это на отдельной демонстрационной базе.
+
+Это проверка выбора провайдера и наличия ключа, а не проверка доступа к внешнему сервису: правильность ключа, доступность модели и ответа проверяются при соответствующем запросе. Изменение настроек не добавляет аутентификацию и не разрешает публичное размещение.
 
 ## Проверка качества
 
@@ -325,13 +331,23 @@ dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
 node --check NutriFlow.Api/wwwroot/js/app.js
 node --test scripts/tests/*.test.mjs
 dotnet format NutriFlow.sln --no-restore --verify-no-changes
+dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
+```
+
+Проверку EF-модели выполняйте в отдельном терминале с явным провайдером без настоящих ключей и без миграций:
+
+```powershell
+$env:Ai__Provider = 'Fake'
+$env:Demo__SeedData = 'false'
+$env:Database__ApplyMigrationsOnStartup = 'false'
 dotnet tool run dotnet-ef migrations has-pending-model-changes `
   --project NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj `
   --startup-project NutriFlow.Api/NutriFlow.Api.csproj `
   --configuration Release `
   --no-build
-dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
 ```
+
+После проверки закройте этот терминал перед обычным запуском: его переменные окружения иначе переопределят локальный выбор AI. В CI эти значения действуют только на шаг проверки модели.
 
 Для JavaScript-проверок используется Node.js 24 без npm-пакетов. Он нужен только
 для этих команд, а не для запуска приложения. Встроенный `node:test` проверяет
@@ -348,12 +364,14 @@ Docker-образ. Тесты внешних адаптеров использу
 ```powershell
 docker build --pull --tag nutriflow .
 docker run --rm --name nutriflow `
-  --publish 8080:8080 `
-  --volume nutriflow-data:/data `
+  --publish 127.0.0.1:8080:8080 `
+  --env Ai__Provider=Fake `
+  --env Demo__SeedData=true `
+  --volume nutriflow-demo-data:/data `
   nutriflow
 ```
 
-Приложение будет доступно по адресу `http://localhost:8080`. Контейнер работает от непривилегированного пользователя, применяет миграции перед запуском HTTP endpoint и хранит SQLite вместе с фотографиями в постоянном volume `/data`.
+Это явно включённый локальный демо-запуск по адресу `http://localhost:8080` с отдельным volume. Образ задаёт Production, не выбирает AI-провайдера и отключает демо по умолчанию; без явного провайдера контейнер остановится. Контейнер работает от непривилегированного пользователя, применяет миграции перед запуском HTTP endpoint и хранит SQLite вместе с фотографиями в постоянном volume `/data`.
 
 Для внешнего развёртывания TLS завершается на reverse proxy или платформе, а
 ключ AI-провайдера передаётся через её хранилище секретов. Для Groq нужно
