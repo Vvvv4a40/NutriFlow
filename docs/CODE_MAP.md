@@ -78,6 +78,10 @@ Program → Endpoints → MealWorkflowService
 
 `StartupConfigurationApiTests` проверяет ранние ошибки настроек и разделение Development / Production. Его отдельная фабрика использует приватный временный content root, публичные JSON-настройки и ранние `UseSetting`; настоящие User Secrets не подключаются, исходящий HTTP заблокирован и подсчитывается. Фактические пути DbContext и фотографий проверяются дополнительно. Поздний `ConfigureAppConfiguration` не подходит для переопределения настроек, которые читает ранний top-level код: [порядок передачи настроек в DeferredHostBuilder](https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.11/src/Mvc/Mvc.Testing/src/DeferredHostBuilder.cs).
 
+`ExternalTransportTimeoutTests` проверяет все шесть HTTP-адаптеров: зависшие заголовки / тело, таймаут, отмену вызывающей стороны, заранее отменённый токен, внешний `429`, один вызов и освобождение ответа. `ResponseContentRead` оставляет чтение тела внутри таймаута `HttpClient`; `CancellationToken` передаёт отмену, не подменяя её ошибкой данных.
+
+`ExternalServiceFailureApiTests` проверяет настоящие Groq- / Open Food Facts-адаптеры через шесть маршрутов API в Production. Только транспорт заменён управляемым HTTP-обработчиком, реальная сеть заблокирована. Фабрика задаёт отдельные ранние пути базы / фотографий и временный content root без User Secrets. При отмене тест ждёт завершения всего pipeline, затем сверяет девять таблиц и файлы фото. Внутренний серверный статус отмены `499`, а не `504`, соответствует [обработчику исключений ASP.NET Core](https://raw.githubusercontent.com/dotnet/aspnetcore/v10.0.11/src/Middleware/Diagnostics/src/ExceptionHandler/ExceptionHandlerMiddlewareImpl.cs); клиенту не обещается получение ответа после разрыва соединения. Новых retry-политик или рабочего кода эти проверки не добавляют.
+
 `NutriFlow.Console` — отдельный исполняемый сценарий доменных расчётов. `wwwroot` — временный клиент API, не самостоятельное доменное ядро и не будущий мобильный клиент.
 
 ## Резервное копирование
