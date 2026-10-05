@@ -328,6 +328,7 @@ dotnet restore NutriFlow.sln --locked-mode --warnaserror
 dotnet tool restore
 dotnet build NutriFlow.sln --configuration Release --no-restore
 dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
+pwsh -NoProfile -File scripts/Test-Publish.ps1
 node --check NutriFlow.Api/wwwroot/js/app.js
 node --test scripts/tests/*.test.mjs
 dotnet format NutriFlow.sln --no-restore --verify-no-changes
@@ -354,10 +355,27 @@ dotnet tool run dotnet-ef migrations has-pending-model-changes `
 аудиомодуль и его связь с полем сообщения на управляемых заменах браузерных API;
 эти проверки не заменяют ручную запись с настоящего микрофона.
 
-GitHub Actions выполняет тот же Release-конвейер, включая JavaScript-тесты, превращает предупреждения
+GitHub Actions выполняет тот же Release-конвейер, включая JavaScript-тесты и проверку состава публикации, превращает предупреждения
 восстановления пакетов, включая NuGet Audit, в ошибки и дополнительно собирает
 Docker-образ. Тесты внешних адаптеров используют управляемые ответы HTTP и не
 требуют настоящих ключей Groq или OpenAI.
+
+## Пакет приложения
+
+`dotnet publish` собирает файлы для запуска на другом компьютере; он не запускает API и не переносит рабочую базу. `.gitignore` управляет Git, `.dockerignore` — контекстом сборки Docker, а `DefaultItemExcludes` в `NutriFlow.Api.csproj` — автоматическим включением файлов SDK. Эти правила независимы.
+
+Из сборки и публикации исключены каталоги `data`, `backups`, `label-photos`, файлы `.env` / `.env.*`, `appsettings.Local.json`, SQLite-файлы с расширениями `.db*` / `.sqlite*` и ключи / сертификаты `.pfx`, `.p12`, `.pem`, `.key`, в том числе во вложенных каталогах. Публичные `appsettings.json`, `appsettings.Development.json` и обычные файлы `wwwroot` остаются в пакете. Development-конфиг не включает демо при запуске в Production.
+
+`scripts/Test-Publish.ps1` требует PowerShell 7.2+, Git и .NET SDK. Он копирует только отслеживаемые публичные исходники в отдельный временный каталог, добавляет 43 искусственных приватных файла, восстанавливает пакеты с lock-файлами и выполняет настоящую публикацию. Проверяются оба выхода — `bin` и publish: отсутствие приватных файлов и их маркера, наличие DLL и неизменность публичных настроек / интерфейса. Рабочее хранилище и User Secrets не копируются; приложение не запускается. При успехе только временная проверочная копия удаляется, при ошибке сохраняется с указанием пути.
+
+Для отдельного пакета используйте новую пустую папку вне дерева исходников:
+
+```powershell
+$publishDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "nutriflow-package-$([guid]::NewGuid().ToString('N'))"
+dotnet publish NutriFlow.Api/NutriFlow.Api.csproj --configuration Release --no-restore --output $publishDirectory /p:UseAppHost=false
+```
+
+Правила исключения не удаляют файлы из ранее собранных пакетов. Не публикуйте поверх старой папки, в которой могли остаться личные файлы. Это также не поиск секретов по содержимому: ключ нельзя записывать в публичные настройки или C#-код. Данные хранятся отдельно от пакета, секреты передаются через User Secrets локально или хранилище секретов платформы при размещении.
 
 ## Docker
 
