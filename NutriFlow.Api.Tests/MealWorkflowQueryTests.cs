@@ -14,7 +14,18 @@ namespace NutriFlow.Api.Tests;
 public sealed class MealWorkflowQueryTests
 {
     [Fact]
-    public async Task Preview_ResolvesRepeatedProductOnceButReloadsItForNextRequest()
+    public Task Preview_ResolvesRepeatedProductOnceButReloadsItForNextRequest()
+    {
+        return VerifyPreviewAsync();
+    }
+
+    [Fact]
+    public async Task Preview_WhenIndependentHostsStartTogether_KeepsQueriesAndDataIsolated()
+    {
+        await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(VerifyPreviewAsync)));
+    }
+
+    private static async Task VerifyPreviewAsync()
     {
         ProductQueryCounter counter = new ProductQueryCounter();
         await using TestApiFactory baseFactory = new TestApiFactory(parser: new RepeatedProductParser());
@@ -27,7 +38,7 @@ public sealed class MealWorkflowQueryTests
         using HttpResponseMessage create = await client.PostAsJsonAsync(
             "/api/meal-sessions",
             new CreateMealSessionRequest(["Готовлю два блюда"], new DateOnly(2026, 10, 5)));
-        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        await ApiTestAssertions.AssertStatusAsync(factory, create, HttpStatusCode.Created);
         MealSessionResponse first = await create.Content.ReadFromJsonAsync<MealSessionResponse>()
             ?? throw new InvalidDataException();
         Assert.Equal(1, counter.Count);
@@ -37,11 +48,13 @@ public sealed class MealWorkflowQueryTests
         using HttpResponseMessage save = await client.PostAsJsonAsync(
             "/api/products/manual",
             new CreateManualProductRequest("Демо-продукт A", 110m, 10m, 4m, 6m, false));
-        Assert.Equal(HttpStatusCode.Created, save.StatusCode);
+        await ApiTestAssertions.AssertStatusAsync(factory, save, HttpStatusCode.Created);
         counter.Reset();
 
-        MealSessionResponse second = await client.GetFromJsonAsync<MealSessionResponse>(
-            $"/api/meal-sessions/{first.Id}") ?? throw new InvalidDataException();
+        using HttpResponseMessage get = await client.GetAsync($"/api/meal-sessions/{first.Id}");
+        await ApiTestAssertions.AssertStatusAsync(factory, get, HttpStatusCode.OK);
+        MealSessionResponse second = await get.Content.ReadFromJsonAsync<MealSessionResponse>()
+            ?? throw new InvalidDataException();
         Assert.Equal(1, counter.Count);
         Assert.NotEqual(first.PreviewToken, second.PreviewToken);
         Assert.All(second.Dishes, dish => Assert.Equal(110m, dish.TotalNutrition?.Calories));
