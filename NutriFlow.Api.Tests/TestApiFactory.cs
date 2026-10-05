@@ -47,7 +47,13 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
     {
         Directory.CreateDirectory(_directoryPath);
         builder.UseEnvironment(_environment);
-        builder.ConfigureLogging(logging => logging.ClearProviders());
+        builder.ConfigureLogging(logging =>
+        {
+            logging.ClearProviders();
+            logging.Services.AddSingleton<TestErrorLogProvider>();
+            logging.Services.AddSingleton<ILoggerProvider>(services =>
+                services.GetRequiredService<TestErrorLogProvider>());
+        });
         builder.UseSetting(
             "Database:Path",
             _databasePath ?? Path.Combine(_directoryPath, "nutriflow.db"));
