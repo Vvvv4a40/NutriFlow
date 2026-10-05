@@ -17,11 +17,14 @@
 **/*.p12
 **/*.pem
 **/*.key
+**/*.keystore
+**/*.jks
 NutriFlow.Console/
 NutriFlow.Tools/
 NutriFlow.Domain.Tests/
 NutriFlow.Infrastructure.Tests/
 NutriFlow.Api.Tests/
+mobile/
 docs/
 AGENTS.md
 README.md

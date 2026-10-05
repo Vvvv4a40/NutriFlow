@@ -103,6 +103,8 @@ flowchart LR
 | `NutriFlow.Infrastructure.Tests` | Тесты хранения и внешних адаптеров |
 | `NutriFlow.Api.Tests` | Сквозные HTTP-тесты workflow |
 
+Начат отдельный нативный клиент на .NET MAUI: `mobile/NutriFlow.Mobile.slnx`, один Android-проект с первым статичным экраном. Он не включён в серверное solution и исключён из Docker-контекста. MAUI workload установлен, но Android SDK/JDK пользователь установит позже: сборка APK пока остановилась на `XA5300`, устройство не проверено. [Структура, установка и команды мобильного клиента](docs/MOBILE_CLIENT.md). Не путайте восстановление NuGet-пакетов с успешной сборкой приложения.
+
 ## Быстрый запуск без внешних ключей
 
 Требуется [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)
