@@ -100,19 +100,33 @@
             </details>
         </section>
 
-        <section class="workspace" aria-label="Работа с приёмом пищи">
+        <section class="capture-mode-panel" aria-labelledby="capture-mode-title">
+            <h2 id="capture-mode-title">Что хотите сделать?</h2>
+            <div class="capture-mode-switch" role="group" aria-labelledby="capture-mode-title">
+                <button id="diary-mode-button" class="capture-mode-button is-active" type="button"
+                        aria-pressed="true">Внести в дневник</button>
+                <button id="create-dish-mode-button" class="capture-mode-button" type="button"
+                        aria-pressed="false">Создать блюдо</button>
+            </div>
+            <p id="capture-mode-description" class="form-hint">
+                Опишите, что съели. Можно указать обычный продукт или своё сохранённое блюдо и порцию.
+            </p>
+            <div id="saved-dishes" class="saved-dishes" aria-live="polite" hidden></div>
+        </section>
+
+        <section class="workspace" aria-label="Создание блюда или запись приёма пищи">
             <article class="panel capture-panel">
                 <div class="panel-heading">
                     <div>
                         <p class="eyebrow">Шаг 1</p>
-                        <h2>Расскажите, что приготовили</h2>
+                        <h2 id="capture-title">Расскажите, что съели</h2>
                     </div>
                     <button id="new-session-button" class="button button-quiet button-small" type="button" hidden>
                         Новая сессия
                     </button>
                 </div>
-                <p class="panel-description">
-                    Добавляйте детали постепенно: продукты, массы, итоговый вес и съеденную порцию.
+                <p id="capture-description" class="panel-description">
+                    Укажите продукт или сохранённое блюдо и сколько съели. Готовку также можно описать несколькими сообщениями.
                 </p>
 
                 <div id="message-list" class="message-list" aria-live="polite"></div>
@@ -122,7 +136,7 @@
                         <span>Новое сообщение</span>
                         <textarea id="message-input" name="message" rows="3"
                                   maxlength="4000"
-                                  placeholder="Например: добавил примерно 600 г говядины"></textarea>
+                                  placeholder="Например: съел 150 г моего рагу и 100 г огурцов"></textarea>
                     </label>
                     <div class="voice-controls" aria-label="Голосовой ввод">
                         <button id="voice-record-button" class="button button-secondary" type="button"
@@ -152,7 +166,7 @@
                     </div>
                     <span id="session-status" class="status-badge" hidden></span>
                 </div>
-                <p class="panel-description">
+                <p id="preview-description" class="panel-description">
                     Источники и качество данных видны до записи в дневник. Все расчёты выполняет сервер.
                 </p>
 

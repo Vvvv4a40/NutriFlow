@@ -1,8 +1,13 @@
+using System.Text.Json.Serialization;
+using NutriFlow.Domain;
+
 namespace NutriFlow.Api.Contracts;
 
 public sealed record CreateMealSessionRequest(
     IReadOnlyList<string?>? Messages,
-    DateOnly? MealDate = null);
+    DateOnly? MealDate = null,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<MealSessionPurpose>))]
+    MealSessionPurpose Purpose = MealSessionPurpose.Diary);
 
 public sealed record AddMealSessionMessageRequest(string? Message);
 
@@ -12,7 +17,8 @@ public sealed record ConfirmMealSessionResponse(
     string Outcome,
     string? Message,
     MealSessionResponse Session,
-    IReadOnlyList<MealEntryResponse> Entries);
+    IReadOnlyList<MealEntryResponse> Entries,
+    SavedDishResponse? SavedDish = null);
 
 public sealed record MealSessionResponse(
     Guid Id,
@@ -23,7 +29,20 @@ public sealed record MealSessionResponse(
     bool CanConfirm,
     IReadOnlyList<string> ClarificationQuestions,
     IReadOnlyList<WorkflowIssueResponse> Issues,
-    IReadOnlyList<DishPreviewResponse> Dishes);
+    IReadOnlyList<DishPreviewResponse> Dishes,
+    string Purpose = "Diary");
+
+public sealed record SavedDishResponse(
+    Guid Id,
+    string Name,
+    Guid SourceSessionId,
+    decimal FinalWeightInGrams,
+    NutritionResponse NutritionPer100Grams,
+    string NutritionQuality);
+
+public sealed record SavedDishDetailResponse(
+    SavedDishResponse SavedDish,
+    DishPreviewResponse Dish);
 
 public sealed record WorkflowIssueResponse(
     string Code,

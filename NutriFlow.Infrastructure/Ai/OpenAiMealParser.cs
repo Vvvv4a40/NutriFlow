@@ -40,7 +40,7 @@ public sealed class OpenAiMealParser : IMealParser
         {
             model = _model,
             store = false,
-            instructions = AiMealDraftContract.Instructions,
+            instructions = AiMealDraftContract.GetInstructions(session),
             input = new[]
             {
                 new
@@ -51,8 +51,7 @@ public sealed class OpenAiMealParser : IMealParser
                         new
                         {
                             type = "input_text",
-                            text = AiMealDraftContract.FormatInput(
-                                session.InputEvents)
+                            text = AiMealDraftContract.FormatInput(session)
                         }
                     }
                 }

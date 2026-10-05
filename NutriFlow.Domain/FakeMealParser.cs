@@ -35,6 +35,38 @@ public sealed class FakeMealParser : IMealParser
                 "A capture session must be ready for review before parsing.");
         }
 
+        if (session.Purpose == MealSessionPurpose.CreateDish)
+        {
+            if (MatchesInput(session.InputEvents, SupportedInputTexts[..3]))
+            {
+                DishDraft dish = CreateSupportedDraft().Dishes[0];
+
+                return new MealDraft(
+                    [new DishDraft(
+                        dish.Name,
+                        dish.Ingredients,
+                        dish.FinalWeightInGrams,
+                        dish.FinalWeightQuality,
+                        Array.Empty<PortionDraft>())],
+                    Array.Empty<string>());
+            }
+
+            throw new NotSupportedException(
+                "FakeMealParser supports only its predefined dish creation sequence.");
+        }
+
+        if (session.SavedDishNames.Contains("Демо-блюдо", StringComparer.Ordinal) &&
+            MatchesInput(session.InputEvents, ["Съел 100 г Демо-блюда."]))
+        {
+            return new MealDraft(
+                [new DishDraft(
+                    "Демо-блюдо",
+                    [new IngredientDraft("Демо-блюдо", 100m)],
+                    100m,
+                    [100m])],
+                Array.Empty<string>());
+        }
+
         if (MatchesInput(session.InputEvents, SupportedInputTexts))
         {
             return CreateSupportedDraft();

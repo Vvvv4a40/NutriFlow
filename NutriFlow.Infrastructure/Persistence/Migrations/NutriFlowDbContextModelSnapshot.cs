@@ -157,6 +157,11 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Purpose")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
 
@@ -273,6 +278,60 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("Products", (string)null);
                 });
 
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.SavedDishRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("Calories")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("CarbohydratesGrams")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("FatGrams")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("FinalWeightInGrams")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("ProteinGrams")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Quality")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceSessionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceSessionId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "NormalizedName")
+                        .IsUnique();
+
+                    b.ToTable("SavedDishes", (string)null);
+                });
+
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.UserRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -360,6 +419,21 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.SavedDishRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.MealSessionRecord", null)
+                        .WithMany()
+                        .HasForeignKey("SourceSessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.UserRecord", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealSessionRecord", b =>

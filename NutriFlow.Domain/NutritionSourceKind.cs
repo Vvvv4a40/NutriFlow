@@ -8,5 +8,6 @@ public enum NutritionSourceKind
     LabelPhoto = 3,
     ExternalService = 4,
     WebPage = 5,
-    DishPhoto = 6
+    DishPhoto = 6,
+    SavedDish = 7
 }

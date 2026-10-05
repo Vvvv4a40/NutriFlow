@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using NutriFlow.Domain;
 
 namespace NutriFlow.Infrastructure.Persistence;
 
@@ -16,6 +17,7 @@ public sealed class NutriFlowDbContext : DbContext
     internal DbSet<DailyGoalRecord> DailyGoals => Set<DailyGoalRecord>();
     internal DbSet<UserRecord> Users => Set<UserRecord>();
     internal DbSet<LabelPhotoRecord> LabelPhotos => Set<LabelPhotoRecord>();
+    internal DbSet<SavedDishRecord> SavedDishes => Set<SavedDishRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -131,6 +133,9 @@ public sealed class NutriFlowDbContext : DbContext
                 .HasMaxLength(64)
                 .IsRequired();
             entity.Property(session => session.Status).HasConversion<int>();
+            entity.Property(session => session.Purpose)
+                .HasConversion<int>()
+                .HasDefaultValue(MealSessionPurpose.Diary);
             entity.Property(session => session.MealDate).HasColumnType("TEXT");
             entity.Property(session => session.CreatedAtUtc).HasColumnType("TEXT");
             entity.Property(session => session.UpdatedAtUtc).HasColumnType("TEXT");
@@ -172,6 +177,35 @@ public sealed class NutriFlowDbContext : DbContext
                 .WithMany(session => session.MealEntries)
                 .HasForeignKey(entry => entry.MealSessionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SavedDishRecord>(entity =>
+        {
+            entity.ToTable("SavedDishes");
+            entity.HasKey(dish => dish.Id);
+            entity.HasOne<UserRecord>()
+                .WithMany()
+                .HasForeignKey(dish => dish.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<MealSessionRecord>()
+                .WithMany()
+                .HasForeignKey(dish => dish.SourceSessionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(dish => dish.SourceSessionId).IsUnique();
+            entity.Property(dish => dish.Name)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.Property(dish => dish.NormalizedName)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.HasIndex(dish => new { dish.UserId, dish.NormalizedName }).IsUnique();
+            entity.Property(dish => dish.FinalWeightInGrams).HasColumnType("TEXT");
+            entity.Property(dish => dish.Calories).HasColumnType("TEXT");
+            entity.Property(dish => dish.ProteinGrams).HasColumnType("TEXT");
+            entity.Property(dish => dish.FatGrams).HasColumnType("TEXT");
+            entity.Property(dish => dish.CarbohydratesGrams).HasColumnType("TEXT");
+            entity.Property(dish => dish.Quality).HasConversion<int>();
+            entity.Property(dish => dish.CreatedAtUtc).HasColumnType("TEXT");
         });
 
         modelBuilder.Entity<DailyGoalRecord>(entity =>

@@ -21,30 +21,40 @@ public sealed class MealWorkflowService
     private readonly LocalProductCatalog _catalog;
     private readonly MealSessionStore _sessionStore;
     private readonly DailyDiaryStore _diaryStore;
+    private readonly SavedDishStore _savedDishStore;
 
     public MealWorkflowService(
         IMealParser parser,
         LocalProductCatalog catalog,
         MealSessionStore sessionStore,
-        DailyDiaryStore diaryStore)
+        DailyDiaryStore diaryStore,
+        SavedDishStore savedDishStore)
     {
         ArgumentNullException.ThrowIfNull(parser);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(sessionStore);
         ArgumentNullException.ThrowIfNull(diaryStore);
+        ArgumentNullException.ThrowIfNull(savedDishStore);
 
         _parser = parser;
         _catalog = catalog;
         _sessionStore = sessionStore;
         _diaryStore = diaryStore;
+        _savedDishStore = savedDishStore;
     }
 
     public async Task<MealSessionCreationResult> CreateAsync(
         IReadOnlyList<string?>? messages,
         DateOnly mealDate,
         CancellationToken cancellationToken = default,
-        Guid? idempotencyKey = null)
+        Guid? idempotencyKey = null,
+        MealSessionPurpose purpose = MealSessionPurpose.Diary)
     {
+        if (!Enum.IsDefined(purpose))
+        {
+            throw new ArgumentOutOfRangeException(nameof(purpose));
+        }
+
         IReadOnlyList<string> validatedMessages = ValidateMessages(messages);
         string? originalRequestHash = null;
 
@@ -59,7 +69,8 @@ public sealed class MealWorkflowService
 
             originalRequestHash = ComputeOriginalRequestHash(
                 validatedMessages,
-                mealDate);
+                mealDate,
+                purpose);
             StoredMealSession? existing =
                 await _sessionStore.FindByIdempotencyKeyAsync(
                     idempotencyKey.Value,
@@ -74,8 +85,8 @@ public sealed class MealWorkflowService
             }
         }
 
-        MealDraft draft = await ParseAsync(validatedMessages, cancellationToken);
-        MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken);
+        MealDraft draft = await ParseAsync(validatedMessages, cancellationToken, purpose);
+        MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken, purpose);
         if (idempotencyKey is not null)
         {
             (StoredMealSession session, bool created) =
@@ -88,7 +99,8 @@ public sealed class MealWorkflowService
                     mealDate,
                     idempotencyKey.Value,
                     originalRequestHash!,
-                    cancellationToken);
+                    cancellationToken,
+                    purpose);
 
             return created
                 ? new MealSessionCreationResult(
@@ -107,7 +119,8 @@ public sealed class MealWorkflowService
             evaluation.PreviewToken,
             evaluation.Status,
             mealDate,
-            cancellationToken);
+            cancellationToken,
+            purpose);
 
         return new MealSessionCreationResult(
             MapSession(newSession, evaluation.Document, evaluation.Status),
@@ -125,7 +138,7 @@ public sealed class MealWorkflowService
                 StringComparison.Ordinal))
         {
             throw new MealSessionConflictException(
-                "The idempotency key was already used for different messages or meal date.");
+                "The idempotency key was already used for different messages, meal date, or purpose.");
         }
 
         MealSessionResponse response = await FindAsync(
@@ -138,10 +151,14 @@ public sealed class MealWorkflowService
 
     private static string ComputeOriginalRequestHash(
         IReadOnlyList<string> messages,
-        DateOnly mealDate)
+        DateOnly mealDate,
+        MealSessionPurpose purpose)
     {
+        object request = purpose == MealSessionPurpose.Diary
+            ? new { Messages = messages, MealDate = mealDate }
+            : (object)new { Messages = messages, MealDate = mealDate, Purpose = purpose };
         byte[] requestBytes = JsonSerializer.SerializeToUtf8Bytes(
-            new { Messages = messages, MealDate = mealDate },
+            request,
             SerializerOptions);
 
         return Convert.ToHexString(SHA256.HashData(requestBytes));
@@ -171,7 +188,8 @@ public sealed class MealWorkflowService
         MealEvaluation evaluation = await EvaluateAsync(
             session.Draft,
             session.Messages,
-            cancellationToken);
+            cancellationToken,
+            session.Purpose);
 
         if (session.Status != evaluation.Status ||
             !string.Equals(
@@ -259,8 +277,8 @@ public sealed class MealWorkflowService
             .Append(message)
             .ToList();
         IReadOnlyList<string> validatedMessages = ValidateMessages(messages);
-        MealDraft draft = await ParseAsync(validatedMessages, cancellationToken);
-        MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken);
+        MealDraft draft = await ParseAsync(validatedMessages, cancellationToken, existing.Purpose);
+        MealEvaluation evaluation = await EvaluateAsync(draft, validatedMessages, cancellationToken, existing.Purpose);
         IReadOnlyDictionary<Guid, string>? updatedHashes = null;
 
         if (idempotencyKey is not null)
@@ -333,150 +351,139 @@ public sealed class MealWorkflowService
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(previewToken);
-
-        StoredMealSession? session = await _sessionStore.FindAsync(
-            id,
-            cancellationToken);
+        StoredMealSession? session = await _sessionStore.FindAsync(id, cancellationToken);
 
         if (session is null)
         {
             return null;
         }
 
-        if (!string.Equals(
-                session.PreviewToken,
-                previewToken,
-                StringComparison.Ordinal))
+        if (!string.Equals(session.PreviewToken, previewToken, StringComparison.Ordinal))
         {
             return new MealConfirmationOutcome(
                 MealConfirmationOutcomeKind.StalePreview,
-                MapSession(
-                    session,
-                    DeserializePreview(session.PreviewJson),
-                    session.Status),
+                MapSession(session, DeserializePreview(session.PreviewJson), session.Status),
                 Array.Empty<MealEntry>());
         }
 
         if (session.Status == MealSessionStatus.Confirmed)
         {
-            IReadOnlyList<MealEntry> existingEntries =
-                await _diaryStore.GetSessionEntriesAsync(id, cancellationToken);
-
-            return new MealConfirmationOutcome(
-                MealConfirmationOutcomeKind.AlreadyConfirmed,
-                MapSession(
-                    session,
-                    DeserializePreview(session.PreviewJson),
-                    MealSessionStatus.Confirmed),
-                existingEntries);
+            return await ReadConfirmationAsync(
+                MealConfirmationOutcomeKind.AlreadyConfirmed, session, cancellationToken);
         }
 
-        MealEvaluation currentEvaluation = await EvaluateAsync(
-            session.Draft,
-            session.Messages,
-            cancellationToken);
+        MealEvaluation evaluation = await EvaluateAsync(
+            session.Draft, session.Messages, cancellationToken, session.Purpose);
 
-        if (session.Status != currentEvaluation.Status ||
-            !string.Equals(
-                session.PreviewToken,
-                currentEvaluation.PreviewToken,
-                StringComparison.Ordinal))
+        if (session.Status != evaluation.Status ||
+            !string.Equals(session.PreviewToken, evaluation.PreviewToken, StringComparison.Ordinal))
         {
-            StoredMealSession updatedSession;
-
             try
             {
-                updatedSession = await _sessionStore.UpdatePreviewAsync(
-                    id,
-                    session.PreviewToken,
-                    currentEvaluation.PreviewJson,
-                    currentEvaluation.PreviewToken,
-                    currentEvaluation.Status,
-                    cancellationToken);
+                session = await _sessionStore.UpdatePreviewAsync(
+                    id, session.PreviewToken, evaluation.PreviewJson, evaluation.PreviewToken,
+                    evaluation.Status, cancellationToken);
             }
             catch (MealSessionConflictException)
             {
-                StoredMealSession latest = await _sessionStore.FindAsync(
-                    id,
-                    cancellationToken) ?? session;
-                bool wasConfirmed = latest.Status == MealSessionStatus.Confirmed;
-                IReadOnlyList<MealEntry> concurrentEntries = wasConfirmed
-                    ? await _diaryStore.GetSessionEntriesAsync(id, cancellationToken)
-                    : Array.Empty<MealEntry>();
-
-                return new MealConfirmationOutcome(
-                    wasConfirmed
+                StoredMealSession latest = await _sessionStore.FindAsync(id, cancellationToken) ?? session;
+                return await ReadConfirmationAsync(
+                    latest.Status == MealSessionStatus.Confirmed
                         ? MealConfirmationOutcomeKind.AlreadyConfirmed
                         : MealConfirmationOutcomeKind.StalePreview,
-                    MapSession(
-                        latest,
-                        DeserializePreview(latest.PreviewJson),
-                        latest.Status),
-                    concurrentEntries);
+                    latest, cancellationToken);
             }
 
-            return new MealConfirmationOutcome(
-                MealConfirmationOutcomeKind.StalePreview,
-                MapSession(
-                    updatedSession,
-                    DeserializePreview(updatedSession.PreviewJson),
-                    updatedSession.Status),
-                Array.Empty<MealEntry>());
+            return await ReadConfirmationAsync(
+                MealConfirmationOutcomeKind.StalePreview, session, cancellationToken);
         }
 
-        if (currentEvaluation.Status != MealSessionStatus.ReadyForConfirmation)
+        if (evaluation.Status != MealSessionStatus.ReadyForConfirmation)
         {
             return new MealConfirmationOutcome(
                 MealConfirmationOutcomeKind.NotReady,
-                MapSession(session, currentEvaluation.Document, session.Status),
+                MapSession(session, evaluation.Document, session.Status),
                 Array.Empty<MealEntry>());
         }
 
-        MealSessionConfirmationResult storeResult =
-            await _diaryStore.ConfirmSessionAsync(
-                id,
-                previewToken,
-                currentEvaluation.Entries,
-                cancellationToken);
+        MealSessionConfirmationResult result;
 
-        if (storeResult == MealSessionConfirmationResult.Confirmed)
+        if (session.Purpose == MealSessionPurpose.CreateDish)
         {
-            StoredMealSession confirmedSession = session with
-            {
-                Status = MealSessionStatus.Confirmed,
-                UpdatedAtUtc = DateTimeOffset.UtcNow,
-                ConfirmedAtUtc = DateTimeOffset.UtcNow
-            };
-
-            return new MealConfirmationOutcome(
-                MealConfirmationOutcomeKind.Confirmed,
-                MapSession(
-                    confirmedSession,
-                    currentEvaluation.Document,
-                    MealSessionStatus.Confirmed),
-                currentEvaluation.Entries);
+            DishPreviewResponse dish = evaluation.Document.Dishes.Single();
+            NutritionResponse nutrition = dish.NutritionPer100Grams!;
+            result = await _savedDishStore.ConfirmSessionAsync(
+                id, previewToken, dish.Name, dish.FinalWeightInGrams!.Value,
+                new NutritionValues(nutrition.Calories, nutrition.ProteinGrams,
+                    nutrition.FatGrams, nutrition.CarbohydratesGrams),
+                Enum.Parse<DataQuality>(dish.NutritionPer100GramsQuality!), cancellationToken);
+        }
+        else
+        {
+            result = await _diaryStore.ConfirmSessionAsync(
+                id, previewToken, evaluation.Entries, cancellationToken);
         }
 
-        StoredMealSession latestSession =
-            await _sessionStore.FindAsync(id, cancellationToken) ?? session;
-        MealPreviewDocument latestDocument = DeserializePreview(
-            latestSession.PreviewJson);
-        IReadOnlyList<MealEntry> latestEntries =
-            storeResult == MealSessionConfirmationResult.AlreadyConfirmed
-                ? await _diaryStore.GetSessionEntriesAsync(id, cancellationToken)
-                : Array.Empty<MealEntry>();
+        StoredMealSession latestSession = await _sessionStore.FindAsync(id, cancellationToken)
+            ?? throw new InvalidDataException("The confirmed meal session could not be loaded.");
+        MealConfirmationOutcomeKind kind = result switch
+        {
+            MealSessionConfirmationResult.Confirmed => MealConfirmationOutcomeKind.Confirmed,
+            MealSessionConfirmationResult.AlreadyConfirmed => MealConfirmationOutcomeKind.AlreadyConfirmed,
+            MealSessionConfirmationResult.StalePreview => MealConfirmationOutcomeKind.StalePreview,
+            _ => MealConfirmationOutcomeKind.NotReady
+        };
+
+        return await ReadConfirmationAsync(kind, latestSession, cancellationToken);
+    }
+
+    private async Task<MealConfirmationOutcome> ReadConfirmationAsync(
+        MealConfirmationOutcomeKind kind,
+        StoredMealSession session,
+        CancellationToken cancellationToken)
+    {
+        bool hasResult = kind is MealConfirmationOutcomeKind.Confirmed or MealConfirmationOutcomeKind.AlreadyConfirmed;
+        IReadOnlyList<MealEntry> entries = hasResult && session.Purpose == MealSessionPurpose.Diary
+            ? await _diaryStore.GetSessionEntriesAsync(session.Id, cancellationToken)
+            : Array.Empty<MealEntry>();
+        StoredSavedDish? savedDish = hasResult && session.Purpose == MealSessionPurpose.CreateDish
+            ? await _savedDishStore.FindBySessionIdAsync(session.Id, cancellationToken)
+                ?? throw new InvalidDataException("The saved dish for this session is missing.")
+            : null;
 
         return new MealConfirmationOutcome(
-            storeResult switch
-            {
-                MealSessionConfirmationResult.AlreadyConfirmed =>
-                    MealConfirmationOutcomeKind.AlreadyConfirmed,
-                MealSessionConfirmationResult.StalePreview =>
-                    MealConfirmationOutcomeKind.StalePreview,
-                _ => MealConfirmationOutcomeKind.NotReady
-            },
-            MapSession(latestSession, latestDocument, latestSession.Status),
-            latestEntries);
+            kind, MapSession(session, DeserializePreview(session.PreviewJson), session.Status),
+            entries, savedDish);
+    }
+
+    public async Task<IReadOnlyList<SavedDishResponse>> GetSavedDishesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return (await _savedDishStore.ListAsync(cancellationToken))
+            .Select(ResponseMapper.ToSavedDishResponse).ToArray();
+    }
+
+    public async Task<SavedDishDetailResponse?> FindSavedDishAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        StoredSavedDish? dish = await _savedDishStore.FindAsync(id, cancellationToken);
+
+        if (dish is null)
+        {
+            return null;
+        }
+
+        StoredMealSession session = await _sessionStore.FindAsync(dish.SourceSessionId, cancellationToken)
+            ?? throw new InvalidDataException("The saved dish's source session is missing.");
+
+        if (session.Purpose != MealSessionPurpose.CreateDish || session.Status != MealSessionStatus.Confirmed)
+        {
+            throw new InvalidDataException("The saved dish's source session is invalid.");
+        }
+
+        return new SavedDishDetailResponse(
+            ResponseMapper.ToSavedDishResponse(dish), DeserializePreview(session.PreviewJson).Dishes.Single());
     }
 
     public async Task SetDailyGoalAsync(
@@ -527,9 +534,11 @@ public sealed class MealWorkflowService
 
     private async Task<MealDraft> ParseAsync(
         IReadOnlyList<string> messages,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MealSessionPurpose purpose)
     {
-        CaptureSession captureSession = new CaptureSession();
+        IReadOnlyList<string> savedNames = await _savedDishStore.GetNamesAsync(cancellationToken);
+        CaptureSession captureSession = new(purpose, savedNames);
 
         foreach (string message in messages)
         {
@@ -551,7 +560,8 @@ public sealed class MealWorkflowService
     private async Task<MealEvaluation> EvaluateAsync(
         MealDraft draft,
         IReadOnlyList<string> messages,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MealSessionPurpose purpose)
     {
         List<WorkflowIssueResponse> issues = new List<WorkflowIssueResponse>();
         List<DishPreviewResponse> dishPreviews = new List<DishPreviewResponse>();
@@ -559,6 +569,16 @@ public sealed class MealWorkflowService
         Dictionary<string, ProductSelection> productSelections = new(StringComparer.Ordinal);
         bool hasMissingFacts = draft.RequiresClarification;
         bool hasProductIssue = false;
+
+        if (purpose == MealSessionPurpose.CreateDish && draft.Dishes.Count != 1)
+        {
+            hasMissingFacts = true;
+            issues.Add(new WorkflowIssueResponse(
+                "single_dish_required",
+                draft.Dishes[0].Name,
+                null,
+                "Describe one named dish to save its composition."));
+        }
 
         foreach (DishDraft dish in draft.Dishes)
         {
@@ -661,7 +681,7 @@ public sealed class MealWorkflowService
                     "The final dish weight is required for portion calculation."));
             }
 
-            if (dish.Portions.Count == 0)
+            if (purpose == MealSessionPurpose.Diary && dish.Portions.Count == 0)
             {
                 hasMissingFacts = true;
                 issues.Add(new WorkflowIssueResponse(
@@ -696,11 +716,34 @@ public sealed class MealWorkflowService
                     nutritionPer100GramsQuality = WorstQuality(
                         totalNutritionQuality.Value,
                         dish.FinalWeightQuality);
+
+                    if (purpose == MealSessionPurpose.CreateDish)
+                    {
+                        try
+                        {
+                            string normalizedDishName = dish.Name.Trim().Normalize();
+
+                            if (normalizedDishName.ToUpperInvariant().Length > 200)
+                            {
+                                throw new ArgumentException("The normalized dish name is too long.");
+                            }
+
+                            _ = new Product(normalizedDishName, nutritionPer100Grams,
+                                new NutritionSource(NutritionSourceKind.SavedDish,
+                                    nutritionPer100GramsQuality.Value, "Saved NutriFlow dish", "saved-dish:preview"));
+                        }
+                        catch (ArgumentException)
+                        {
+                            hasMissingFacts = true;
+                            issues.Add(new WorkflowIssueResponse("saved_dish_invalid", dish.Name, null,
+                                "Check the dish name and final weight: the calculated nutrition exceeds product limits."));
+                        }
+                    }
                 }
             }
 
             for (int portionIndex = 0;
-                 portionIndex < dish.Portions.Count;
+                 purpose == MealSessionPurpose.Diary && portionIndex < dish.Portions.Count;
                  portionIndex++)
             {
                 PortionDraft portion = dish.Portions[portionIndex];
@@ -773,9 +816,12 @@ public sealed class MealWorkflowService
             document,
             SerializerOptions);
         // новые сообщения меняют версию, даже если расчёт остался прежним
+        object preview = purpose == MealSessionPurpose.Diary
+            ? new { Messages = messages, Preview = document }
+            : (object)new { Messages = messages, Preview = document, Purpose = purpose };
         string previewToken = Convert.ToHexString(
             SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
-                new { Messages = messages, Preview = document },
+                preview,
                 SerializerOptions)));
 
         return new MealEvaluation(
@@ -793,6 +839,21 @@ public sealed class MealWorkflowService
         IReadOnlyList<Product> matches = await _catalog.FindByNameAsync(
             productName,
             cancellationToken);
+        StoredSavedDish? savedDish = await _savedDishStore.FindByNameAsync(productName, cancellationToken);
+
+        if (savedDish is not null)
+        {
+            NutritionValues savedNutrition = savedDish.Product.NutritionPer100Grams;
+            bool conflictingProduct = matches.Any(product =>
+                product.NutritionPer100Grams.Calories != savedNutrition.Calories ||
+                product.NutritionPer100Grams.ProteinGrams != savedNutrition.ProteinGrams ||
+                product.NutritionPer100Grams.FatGrams != savedNutrition.FatGrams ||
+                product.NutritionPer100Grams.CarbohydratesGrams != savedNutrition.CarbohydratesGrams);
+
+            return conflictingProduct
+                ? new ProductSelection(null, IsAmbiguous: true)
+                : new ProductSelection(savedDish.Product, IsAmbiguous: false);
+        }
 
         if (matches.Count == 0)
         {
@@ -893,7 +954,8 @@ public sealed class MealWorkflowService
             status == MealSessionStatus.ReadyForConfirmation,
             document.ClarificationQuestions,
             document.Issues,
-            document.Dishes);
+            document.Dishes,
+            session.Purpose.ToString());
     }
 
     private static MealPreviewDocument DeserializePreview(string json)
@@ -999,7 +1061,8 @@ public sealed record MealSessionCreationResult(
 public sealed record MealConfirmationOutcome(
     MealConfirmationOutcomeKind Kind,
     MealSessionResponse Session,
-    IReadOnlyList<MealEntry> Entries);
+    IReadOnlyList<MealEntry> Entries,
+    StoredSavedDish? SavedDish = null);
 
 public enum MealConfirmationOutcomeKind
 {

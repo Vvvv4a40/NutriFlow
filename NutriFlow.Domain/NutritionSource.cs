@@ -62,7 +62,8 @@ public sealed class NutritionSource
 
         if ((kind is NutritionSourceKind.LabelPhoto or
                      NutritionSourceKind.DishPhoto or
-                     NutritionSourceKind.ExternalService) &&
+                     NutritionSourceKind.ExternalService or
+                     NutritionSourceKind.SavedDish) &&
             reference is null)
         {
             throw new ArgumentException(

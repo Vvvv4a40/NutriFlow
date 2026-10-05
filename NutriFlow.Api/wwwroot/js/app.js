@@ -45,6 +45,13 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         editGoalButton: document.querySelector("#edit-goal-button"),
         cancelGoalButton: document.querySelector("#cancel-goal-button"),
         goalForm: document.querySelector("#goal-form"),
+        diaryModeButton: document.querySelector("#diary-mode-button"),
+        createDishModeButton: document.querySelector("#create-dish-mode-button"),
+        captureModeDescription: document.querySelector("#capture-mode-description"),
+        captureTitle: document.querySelector("#capture-title"),
+        captureDescription: document.querySelector("#capture-description"),
+        previewDescription: document.querySelector("#preview-description"),
+        savedDishes: document.querySelector("#saved-dishes"),
         messageList: document.querySelector("#message-list"),
         messageForm: document.querySelector("#message-form"),
         messageInput: document.querySelector("#message-input"),
@@ -90,6 +97,9 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         dailyRequestSequence: 0,
         dailyAbortController: null,
         localMessages: [],
+        purpose: "Diary",
+        savedDishes: [],
+        savedDish: null,
         session: null,
         sessionBusy: false,
         sessionRequestSequence: 0,
@@ -138,6 +148,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         renderDaily();
         renderCapabilities();
         void loadCapabilities();
+        void loadSavedDishes();
         void restoreSessionAndDailyProgress();
     }
 
@@ -165,6 +176,12 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
 
     function renderCapabilities() {
         renderVoiceControls();
+        renderSavedDishes();
+
+        if (state.session && !state.sessionBusy) {
+            renderPreview();
+        }
+
         const capabilities = state.capabilities;
         const supportsLabelPhotos = capabilities?.supportsLabelPhotos === true;
         const labelSubmitButton = elements.labelForm.querySelector("button[type='submit']");
@@ -212,13 +229,13 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             return;
         }
 
-        const isDemoProvider = capabilities.aiProvider.toLowerCase() === "fake";
-        elements.capabilitiesTitle.textContent = isDemoProvider
+        const demoProvider = isDemoProvider();
+        elements.capabilitiesTitle.textContent = demoProvider
             ? "Демонстрационный режим"
             : "Ограниченные возможности";
         elements.capabilitiesText.textContent = `${limitations.join("; ")}. Штрихкод и ручной ввод продуктов остаются доступны.`;
         elements.capabilitiesBanner.hidden = false;
-        elements.labelUnavailableText.textContent = isDemoProvider
+        elements.labelUnavailableText.textContent = demoProvider
             ? "В демонстрационном режиме фотографии не отправляются на распознавание."
             : "Текущая конфигурация сервера не поддерживает распознавание фотографий.";
     }
@@ -246,10 +263,13 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             }
 
             state.session = session;
+            state.purpose = getSessionPurpose(session);
             state.localMessages = [];
 
             if (!isSessionConfirmed(session)) {
-                state.date = session.mealDate ?? state.date;
+                if (!isCreatingDish()) {
+                    state.date = session.mealDate ?? state.date;
+                }
                 rememberActiveSession(session.id);
                 clearPendingDraft();
             }
@@ -314,6 +334,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         }
 
         state.localMessages = [...storedDraft.messages];
+        state.purpose = storedDraft.purpose ?? "Diary";
         state.date = storedDraft.date;
     }
 
@@ -328,6 +349,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                 PENDING_DRAFT_STORAGE_KEY,
                 JSON.stringify({
                     date: state.date,
+                    purpose: state.purpose,
                     messages: state.localMessages
                 })
             );
@@ -347,6 +369,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
     function isValidPendingDraft(value) {
         if (!value ||
             typeof value.date !== "string" ||
+            (value.purpose != null && value.purpose !== "Diary" && value.purpose !== "CreateDish") ||
             !isValidIsoDate(value.date) ||
             !Array.isArray(value.messages) ||
             value.messages.length === 0 ||
@@ -370,13 +393,15 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
     }
 
     function bindEvents() {
+        elements.diaryModeButton.addEventListener("click", () => changeCapturePurpose("Diary"));
+        elements.createDishModeButton.addEventListener("click", () => changeCapturePurpose("CreateDish"));
         elements.mealDate.addEventListener("change", () => {
             if (isVoiceBusy() || state.sessionBusy) {
                 elements.mealDate.value = state.date;
                 return;
             }
 
-            if (state.session && !isSessionConfirmed(state.session)) {
+            if (state.session && !isSessionConfirmed(state.session) && !isCreatingDish()) {
                 state.date = state.session.mealDate ?? state.date;
                 elements.mealDate.value = state.date;
                 showToast("Дата закреплена за текущей неподтверждённой сессией.");
@@ -866,6 +891,94 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         });
     }
 
+    function getSessionPurpose(session) {
+        return String(session?.purpose ?? "Diary").toLowerCase() === "createdish"
+            ? "CreateDish"
+            : "Diary";
+    }
+
+    function isCreatingDish() {
+        return state.purpose === "CreateDish";
+    }
+
+    function changeCapturePurpose(purpose) {
+        if (purpose === state.purpose || isVoiceBusy() || state.sessionBusy) {
+            return;
+        }
+
+        const hasUnsavedDraft = (state.session && !isSessionConfirmed(state.session)) ||
+            (!state.session && state.localMessages.length > 0) || elements.messageInput.value.trim();
+
+        if (hasUnsavedDraft && !window.confirm(
+            "Переключить режим и начать новый черновик? Текущие сообщения исчезнут с рабочего экрана."
+        )) {
+            return;
+        }
+
+        state.purpose = purpose;
+        resetCurrentSession();
+    }
+
+    function renderCapturePurpose() {
+        const creatingDish = isCreatingDish();
+        const disabled = state.sessionBusy || isVoiceBusy();
+        elements.diaryModeButton.disabled = disabled;
+        elements.createDishModeButton.disabled = disabled;
+        elements.diaryModeButton.classList.toggle("is-active", !creatingDish);
+        elements.createDishModeButton.classList.toggle("is-active", creatingDish);
+        elements.diaryModeButton.setAttribute("aria-pressed", String(!creatingDish));
+        elements.createDishModeButton.setAttribute("aria-pressed", String(creatingDish));
+        elements.captureModeDescription.textContent = creatingDish
+            ? "Опишите название, состав и итоговый вес блюда. Сохранение не добавляет его в дневной рацион."
+            : "Опишите, что съели. Можно указать обычный продукт или своё сохранённое блюдо и порцию.";
+        elements.captureTitle.textContent = creatingDish
+            ? "Расскажите о своём блюде"
+            : "Расскажите, что съели";
+        elements.captureDescription.textContent = creatingDish
+            ? "Добавляйте ингредиенты и массы естественными сообщениями. Укажите название и итоговый вес готового блюда."
+            : "Укажите продукт или сохранённое блюдо и сколько съели. Готовку также можно описать несколькими сообщениями.";
+        elements.previewDescription.textContent = creatingDish
+            ? "Проверьте состав и КБЖУ перед сохранением блюда. Все расчёты выполняет сервер."
+            : "Источники и качество данных видны до записи в дневник. Все расчёты выполняет сервер.";
+        elements.messageInput.placeholder = creatingDish
+            ? "Например: моё рагу — 600 г говядины и 20 г масла; готовое блюдо весит 500 г"
+            : "Например: съел 150 г моего рагу и 100 г огурцов";
+        elements.confirmButton.textContent = creatingDish ? "Сохранить блюдо" : "Записать в дневник";
+    }
+
+    async function loadSavedDishes() {
+        try {
+            const dishes = await apiRequest("/api/saved-dishes");
+            state.savedDishes = Array.isArray(dishes) ? dishes : [];
+            renderSavedDishes();
+        } catch {
+            renderSavedDishes();
+        }
+    }
+
+    function renderSavedDishes() {
+        const dishes = state.savedDishes;
+        const exampleDish = isDemoProvider()
+            ? dishes.find(dish => dish.name === "Демо-блюдо") ?? dishes[0]
+            : dishes[0];
+        elements.savedDishes.hidden = dishes.length === 0;
+        elements.savedDishes.innerHTML = dishes.length === 0 ? "" : `
+            <strong>Ваши сохранённые блюда</strong>
+            <ul>${dishes.map(dish => `<li>${escapeHtml(dish.name)}</li>`).join("")}</ul>
+            <span>В режиме дневника напишите, например: «${escapeHtml(getSavedDishReuseExample(exampleDish.name))}».</span>
+        `;
+    }
+
+    function isDemoProvider() {
+        return String(state.capabilities?.aiProvider ?? "").toLowerCase() === "fake";
+    }
+
+    function getSavedDishReuseExample(name) {
+        return isDemoProvider() && name === "Демо-блюдо"
+            ? "Съел 100 г Демо-блюда."
+            : `Съел 150 г ${name}`;
+    }
+
     function fillExample() {
         if (isVoiceBusy() || state.sessionBusy) {
             return;
@@ -886,7 +999,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             }
         }
 
-        state.localMessages = [...DEMO_MESSAGES];
+        state.localMessages = isCreatingDish() ? DEMO_MESSAGES.slice(0, 3) : [...DEMO_MESSAGES];
         savePendingDraft();
         renderMessages();
         renderPreview();
@@ -948,6 +1061,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                 body: { message }
             });
             state.session = response?.id ? response : await fetchCurrentSession(state.session.id);
+            state.purpose = getSessionPurpose(state.session);
             elements.messageInput.value = "";
             state.voiceNotice = "";
             state.voiceError = false;
@@ -976,9 +1090,11 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                 method: "POST",
                 body: {
                     messages: state.localMessages,
-                    mealDate: state.date
+                    mealDate: state.date,
+                    purpose: state.purpose
                 }
             });
+            state.purpose = getSessionPurpose(state.session);
             rememberActiveSession(state.session?.id);
             clearPendingDraft();
             hideGlobalError();
@@ -1006,6 +1122,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         }
 
         state.session = response;
+        state.purpose = getSessionPurpose(response);
         renderMessages();
         renderPreview();
         return state.session;
@@ -1034,12 +1151,18 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             }
         }
 
+        resetCurrentSession();
+    }
+
+    function resetCurrentSession() {
         state.sessionRequestSequence++;
         state.session = null;
         state.localMessages = [];
+        state.savedDish = null;
         state.sessionBusy = false;
         state.voiceNotice = "";
         state.voiceError = false;
+        elements.messageInput.value = "";
         forgetActiveSession();
         clearPendingDraft();
         hideGlobalError();
@@ -1076,16 +1199,25 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                 state.session = await fetchCurrentSession(sessionId);
             }
 
+            state.purpose = getSessionPurpose(state.session);
+            state.savedDish = response?.savedDish ?? null;
             forgetActiveSession();
             hideGlobalError();
-            await loadDailyProgress();
-            showToast("Порции записаны в дневник.");
+
+            if (isCreatingDish()) {
+                await loadSavedDishes();
+                showToast("Блюдо сохранено. Добавляйте его в дневник по названию и массе порции.");
+            } else {
+                await loadDailyProgress();
+                showToast("Порции записаны в дневник.");
+            }
         } catch (error) {
             showGlobalError(error);
 
             if (error.status === 409 || error.status === 422) {
                 if (error.problem?.session?.id) {
                     state.session = error.problem.session;
+                    state.purpose = getSessionPurpose(state.session);
                 } else {
                     try {
                         await refreshCurrentSession();
@@ -1112,13 +1244,17 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
     }
 
     function renderMessages() {
+        renderCapturePurpose();
         const messages = getVisibleMessages();
         const confirmed = isSessionConfirmed(state.session);
         const voiceBusy = isVoiceBusy();
-        const dateLocked = state.sessionBusy || (Boolean(state.session) && !confirmed) || voiceBusy;
+        const dateLocked = state.sessionBusy ||
+            (Boolean(state.session) && !confirmed && !isCreatingDish()) || voiceBusy;
 
         elements.messageList.innerHTML = messages.length === 0
-            ? `<div class="message-empty">Можно описать готовку несколькими короткими сообщениями — порядок сохранится.</div>`
+            ? `<div class="message-empty">${isCreatingDish()
+                ? "Опишите название, ингредиенты и итоговый вес — порядок сообщений сохранится."
+                : "Расскажите, что съели, и укажите порцию. Сохранённое блюдо можно назвать одним сообщением."}</div>`
             : messages.map((message, index) => `
                 <div class="message-row">
                     <span class="message-index">${index + 1}</span>
@@ -1148,7 +1284,9 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         if (state.sessionBusy) {
             elements.captureHint.textContent = "NutriFlow обрабатывает сессию…";
         } else if (confirmed) {
-            elements.captureHint.textContent = "Сессия подтверждена. Для следующего приёма пищи начните новую.";
+            elements.captureHint.textContent = isCreatingDish()
+                ? "Блюдо сохранено. Переключитесь на дневник, чтобы внести съеденную порцию."
+                : "Сессия подтверждена. Для следующего приёма пищи начните новую.";
         } else if (state.session) {
             elements.captureHint.textContent = "Добавьте ответ на уточняющий вопрос — черновик пересоберётся автоматически.";
         } else if (state.localMessages.length === 0) {
@@ -1166,7 +1304,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         elements.previewContent.innerHTML = `
             <div class="loading-state">
                 <span class="spinner" aria-hidden="true"></span>
-                <h3>Собираем картину приёма пищи</h3>
+                <h3>${isCreatingDish() ? "Собираем ваше блюдо" : "Собираем картину приёма пищи"}</h3>
                 <p>${escapeHtml(message)}</p>
             </div>
         `;
@@ -1185,7 +1323,9 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                 <div class="empty-state">
                     <span class="empty-state-icon" aria-hidden="true">⌁</span>
                     <h3>Черновик пока не собран</h3>
-                    <p>Сообщения превратятся в блюда, ингредиенты и рассчитанные порции.</p>
+                    <p>${isCreatingDish()
+                        ? "Сообщения превратятся в состав и КБЖУ вашего блюда. Порция для сохранения не нужна."
+                        : "Сообщения превратятся в блюда, ингредиенты и рассчитанные порции."}</p>
                 </div>
             `;
             return;
@@ -1194,6 +1334,10 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         const session = state.session;
         const confirmed = isSessionConfirmed(session);
         const status = getStatusPresentation(session.status, session.canConfirm);
+
+        if (confirmed && isCreatingDish()) {
+            status.label = "Сохранено";
+        }
         const questions = Array.isArray(session.clarificationQuestions) ? session.clarificationQuestions : [];
         const issues = Array.isArray(session.issues) ? session.issues : [];
         const dishes = Array.isArray(session.dishes) ? session.dishes : [];
@@ -1204,7 +1348,13 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
         elements.sessionStatus.className = `status-badge ${status.className}`.trim();
 
         if (confirmed) {
-            sections.push(`
+            sections.push(isCreatingDish() ? `
+                <div class="notice notice-info">
+                    <strong>Блюдо сохранено</strong>
+                    В дневном рационе пока ничего не изменилось. Переключитесь на «Внести в дневник»
+                    и напишите: «${escapeHtml(getSavedDishReuseExample(state.savedDish?.name ?? dishes[0]?.name ?? "моего блюда"))}».
+                </div>
+            ` : `
                 <div class="notice notice-info">
                     <strong>Приём пищи записан</strong>
                     Порции уже учтены в дневном балансе за ${escapeHtml(formatLongDate(session.mealDate ?? state.date))}
@@ -1262,8 +1412,10 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             state.sessionBusy || isVoiceBusy();
 
         if (session.canConfirm) {
-            elements.confirmTitle.textContent = "Черновик готов к записи";
-            elements.confirmHint.textContent = "После подтверждения порции попадут в дневной рацион.";
+            elements.confirmTitle.textContent = isCreatingDish() ? "Блюдо готово к сохранению" : "Черновик готов к записи";
+            elements.confirmHint.textContent = isCreatingDish()
+                ? "Сохраним состав и КБЖУ. Позже можно внести порцию по названию блюда."
+                : "После подтверждения порции попадут в дневной рацион.";
         } else {
             elements.confirmTitle.textContent = "Подтверждение пока недоступно";
             elements.confirmHint.textContent = questions.length > 0
@@ -1309,7 +1461,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                         ${renderNutritionQuality(dish.nutritionPer100GramsQuality)}
                     </div>
                 </div>
-                <section class="portion-section">
+                ${isCreatingDish() ? "" : `<section class="portion-section">
                     <h4>Съеденные порции</h4>
                     <div class="portion-list">
                         ${portions.length === 0
@@ -1324,7 +1476,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
                                 </div>
                             `).join("")}
                     </div>
-                </section>
+                </section>`}
             </article>
         `;
     }
@@ -1403,6 +1555,7 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
             nutriflowcatalog: "каталог NutriFlow",
             webpage: "веб-источник",
             dishphoto: "оценка по фото",
+            saveddish: "своё блюдо",
             unknown: "источник неизвестен"
         };
 
@@ -1431,6 +1584,12 @@ import { createSpeechCapture, getRecordingMimeType } from "./speech-capture.mjs"
 
         if (labelPhotoMatch) {
             return `/api/label-photos/${encodeURIComponent(labelPhotoMatch[1])}`;
+        }
+
+        const savedDishMatch = /^saved-dish:([a-f0-9]{32})$/i.exec(rawReference);
+
+        if (savedDishMatch) {
+            return `/api/saved-dishes/${encodeURIComponent(savedDishMatch[1])}`;
         }
 
         try {

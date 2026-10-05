@@ -4,15 +4,41 @@ public sealed class CaptureSession
 {
     private readonly List<InputEvent> _inputEvents;
 
-    public CaptureSession()
+    public CaptureSession(
+        MealSessionPurpose purpose = MealSessionPurpose.Diary,
+        IReadOnlyList<string>? savedDishNames = null)
     {
+        if (!Enum.IsDefined(purpose))
+        {
+            throw new ArgumentOutOfRangeException(nameof(purpose));
+        }
+
+        string[] names = savedDishNames?.Select(name =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            string normalizedName = name.Trim();
+
+            if (normalizedName.Length > 200)
+            {
+                throw new ArgumentException(
+                    "A saved dish name cannot exceed 200 characters.",
+                    nameof(savedDishNames));
+            }
+
+            return normalizedName;
+        }).ToArray() ?? Array.Empty<string>();
+
         _inputEvents = new List<InputEvent>();
         InputEvents = _inputEvents.AsReadOnly();
         State = CaptureSessionState.Collecting;
+        Purpose = purpose;
+        SavedDishNames = Array.AsReadOnly(names);
     }
 
     public CaptureSessionState State { get; private set; }
     public IReadOnlyList<InputEvent> InputEvents { get; }
+    public MealSessionPurpose Purpose { get; }
+    public IReadOnlyList<string> SavedDishNames { get; }
 
     public void AddEvent(InputEvent inputEvent)
     {
