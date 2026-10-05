@@ -40,10 +40,15 @@ internal static class MediaEndpoints
             .WithName("GetLabelPhoto")
             .WithSummary("Returns a saved nutrition-label photo by its opaque reference.")
             .WithTags("Labels")
-            .Produces(
+            .Produces<Stream>(
                 StatusCodes.Status200OK,
                 contentType: "image/jpeg",
                 additionalContentTypes: ["image/png", "image/webp"])
+            .Produces<Stream>(
+                StatusCodes.Status206PartialContent,
+                contentType: "image/jpeg",
+                additionalContentTypes: ["image/png", "image/webp"])
+            .Produces(StatusCodes.Status416RangeNotSatisfiable)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
 

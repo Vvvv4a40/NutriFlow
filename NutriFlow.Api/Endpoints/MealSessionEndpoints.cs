@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Api.Services;
 using NutriFlow.Domain;
@@ -55,7 +56,16 @@ internal static class MealSessionEndpoints
             .Produces<ConfirmMealSessionResponse>(StatusCodes.Status409Conflict)
             .ProducesValidationProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .AddOpenApiOperationTransformer(async (operation, context, cancellationToken) =>
+            {
+                IOpenApiSchema problem = await context.GetOrCreateSchemaAsync(
+                    typeof(ProblemDetails), cancellationToken: cancellationToken);
+                operation.Responses!["409"].Content!["application/problem+json"] = new OpenApiMediaType
+                {
+                    Schema = problem
+                };
+            });
 
         app.MapPost("/api/meal-drafts/parse", ParseMealDraftAsync)
             .WithName("ParseMealDraft")
@@ -64,6 +74,7 @@ internal static class MealSessionEndpoints
             .WithTags("Meal drafts")
             .Produces<MealDraftResponse>(StatusCodes.Status200OK)
             .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status502BadGateway)
             .ProducesProblem(StatusCodes.Status504GatewayTimeout)

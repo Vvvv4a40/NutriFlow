@@ -20,7 +20,7 @@ internal static class ServiceRegistration
     public static string AddNutriFlowServices(this WebApplicationBuilder builder)
     {
         string aiProvider = ConfigureAiProvider(builder);
-        builder.Services.AddOpenApi();
+        builder.Services.AddOpenApi(OpenApiConfiguration.Configure);
         builder.Services.AddProblemDetails();
         builder.Services.AddHealthChecks()
             .AddCheck<DatabaseHealthCheck>(
