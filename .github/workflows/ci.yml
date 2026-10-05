@@ -53,6 +53,10 @@ jobs:
       - name: Run tests
         run: dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
 
+      - name: Verify standalone meal workflow
+        shell: pwsh
+        run: ./scripts/Test-MealWorkflow.ps1
+
       - name: Verify publish contents
         shell: pwsh
         run: ./scripts/Test-Publish.ps1

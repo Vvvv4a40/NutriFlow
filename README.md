@@ -328,12 +328,17 @@ dotnet restore NutriFlow.sln --locked-mode --warnaserror
 dotnet tool restore
 dotnet build NutriFlow.sln --configuration Release --no-restore
 dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
+pwsh -NoProfile -File scripts/Test-MealWorkflow.ps1
 pwsh -NoProfile -File scripts/Test-Publish.ps1
 node --check NutriFlow.Api/wwwroot/js/app.js
 node --test scripts/tests/*.test.mjs
 dotnet format NutriFlow.sln --no-restore --verify-no-changes
 dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
 ```
+
+`scripts/Test-MealWorkflow.ps1` требует PowerShell 7.2+ и заранее собранный Release-проект API. Он запускает отдельный сервер в Production с Fake, искусственной SQLite и демо-продуктами в новом временном каталоге. Проверяет создание блюда без дневниковой записи, внесение его порции, дробные КБЖУ, повторы и сохранность после перезапуска. HTTP идёт через настоящий Kestrel на случайном порту `127.0.0.1`, а не через встроенный тестовый сервер.
+
+Скрипт не использует рабочую базу, архивы, локальные настройки и ключи: окружение очищается только у дочернего процесса, пути хранилища задаются явно. Внешний продуктовый адрес заменён loopback-адресом. Останавливается только собственный API; искусственное хранилище остаётся по напечатанному пути для просмотра. Каждый запуск создаёт новый каталог. Для Debug используйте `-Configuration Debug` после соответствующей сборки. Это проверка серверного сценария, не настоящего Groq, старых данных, телефона или защищённого публичного сервиса.
 
 Проверку EF-модели выполняйте в отдельном терминале с явным провайдером без настоящих ключей и без миграций:
 
@@ -355,7 +360,7 @@ dotnet tool run dotnet-ef migrations has-pending-model-changes `
 аудиомодуль и его связь с полем сообщения на управляемых заменах браузерных API;
 эти проверки не заменяют ручную запись с настоящего микрофона.
 
-GitHub Actions выполняет тот же Release-конвейер, включая JavaScript-тесты и проверку состава публикации, превращает предупреждения
+GitHub Actions выполняет тот же Release-конвейер, включая JavaScript-тесты, отдельный серверный сценарий и проверку состава публикации, превращает предупреждения
 восстановления пакетов, включая NuGet Audit, в ошибки и дополнительно собирает
 Docker-образ. Тесты внешних адаптеров используют управляемые ответы HTTP и не
 требуют настоящих ключей Groq или OpenAI.
