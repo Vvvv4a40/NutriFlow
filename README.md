@@ -98,6 +98,7 @@ flowchart LR
 | `NutriFlow.Infrastructure` | SQLite, EF Core, Open Food Facts, AI-провайдеры и хранение фотографий |
 | `NutriFlow.Api` | Minimal API, сквозной workflow и веб-интерфейс |
 | `NutriFlow.Console` | Изолированный сценарий расчёта через доменную модель |
+| `NutriFlow.Tools` | Offline-копирование и проверка SQLite вместе с фотографиями |
 | `NutriFlow.Domain.Tests` | Тесты доменных правил и арифметики |
 | `NutriFlow.Infrastructure.Tests` | Тесты хранения и внешних адаптеров |
 | `NutriFlow.Api.Tests` | Сквозные HTTP-тесты workflow |
@@ -369,6 +370,15 @@ docker run --rm --name nutriflow `
 и [руководство Open Food Facts по лицензированию](https://openfoodfacts.github.io/openfoodfacts-server/api/tutorials/license-be-on-the-legal-side/).
 
 ## Ограничения эксплуатации
+
+Перед обновлением схемы остановите API и создайте копию обеих частей хранилища:
+
+```powershell
+dotnet run --project NutriFlow.Tools -- backup --database NutriFlow.Api/data/nutriflow.db --photos NutriFlow.Api/data/label-photos --output NutriFlow.Api/data/backups/manual-20261005 --offline
+dotnet run --project NutriFlow.Tools -- verify --backup NutriFlow.Api/data/backups/manual-20261005
+```
+
+Укажите фактические пути своей установки и новое имя назначения. `--offline` — подтверждение остановки всех процессов записи, не автоматическая проверка. Утилита не меняет исходную базу, не применяет миграции и не перезаписывает существующие копии. [Формат, проверки и ограничения резервных копий](docs/BACKUPS.md).
 
 - SQLite рассчитан на один экземпляр NutriFlow с локальным постоянным диском. Горизонтальное масштабирование потребует серверной СУБД.
 - Миграции при старте допустимы только при единственном экземпляре приложения. Перед обновлением с изменением схемы требуется резервная копия volume.
