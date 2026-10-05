@@ -16,6 +16,7 @@ NutriFlow.Api/data/
 **/*.pem
 **/*.key
 NutriFlow.Console/
+NutriFlow.Tools/
 NutriFlow.Domain.Tests/
 NutriFlow.Infrastructure.Tests/
 NutriFlow.Api.Tests/
