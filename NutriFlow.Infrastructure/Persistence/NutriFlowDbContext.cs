@@ -14,6 +14,7 @@ public sealed class NutriFlowDbContext : DbContext
     internal DbSet<ProductAliasRecord> ProductAliases => Set<ProductAliasRecord>();
     internal DbSet<MealSessionRecord> MealSessions => Set<MealSessionRecord>();
     internal DbSet<MealEntryRecord> MealEntries => Set<MealEntryRecord>();
+    internal DbSet<MealEntryAdjustmentRecord> MealEntryAdjustments => Set<MealEntryAdjustmentRecord>();
     internal DbSet<DailyGoalRecord> DailyGoals => Set<DailyGoalRecord>();
     internal DbSet<UserRecord> Users => Set<UserRecord>();
     internal DbSet<LabelPhotoRecord> LabelPhotos => Set<LabelPhotoRecord>();
@@ -177,6 +178,19 @@ public sealed class NutriFlowDbContext : DbContext
                 .WithMany(session => session.MealEntries)
                 .HasForeignKey(entry => entry.MealSessionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MealEntryAdjustmentRecord>(entity =>
+        {
+            entity.ToTable("MealEntryAdjustments");
+            entity.HasKey(adjustment => adjustment.MealEntryId);
+            entity.HasOne(adjustment => adjustment.MealEntry)
+                .WithOne(entry => entry.Adjustment)
+                .HasForeignKey<MealEntryAdjustmentRecord>(adjustment => adjustment.MealEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Property(adjustment => adjustment.WeightInGrams).HasColumnType("TEXT");
+            entity.Property(adjustment => adjustment.WeightQuality).HasConversion<int>();
+            entity.Property(adjustment => adjustment.UpdatedAtUtc).HasColumnType("TEXT");
         });
 
         modelBuilder.Entity<SavedDishRecord>(entity =>

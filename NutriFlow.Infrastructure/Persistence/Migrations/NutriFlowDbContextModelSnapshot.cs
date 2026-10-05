@@ -61,6 +61,31 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("LabelPhotos", (string)null);
                 });
 
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryAdjustmentRecord", b =>
+                {
+                    b.Property<int>("MealEntryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal>("WeightInGrams")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("WeightQuality")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("MealEntryId");
+
+                    b.ToTable("MealEntryAdjustments", (string)null);
+                });
+
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -376,6 +401,17 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryAdjustmentRecord", b =>
+                {
+                    b.HasOne("NutriFlow.Infrastructure.Persistence.MealEntryRecord", "MealEntry")
+                        .WithOne("Adjustment")
+                        .HasForeignKey("NutriFlow.Infrastructure.Persistence.MealEntryAdjustmentRecord", "MealEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("MealEntry");
+                });
+
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryRecord", b =>
                 {
                     b.HasOne("NutriFlow.Infrastructure.Persistence.MealSessionRecord", "MealSession")
@@ -434,6 +470,11 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealEntryRecord", b =>
+                {
+                    b.Navigation("Adjustment");
                 });
 
             modelBuilder.Entity("NutriFlow.Infrastructure.Persistence.MealSessionRecord", b =>

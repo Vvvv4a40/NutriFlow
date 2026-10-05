@@ -31,13 +31,17 @@ internal static class ResponseMapper
             product.Barcode);
     }
 
-    public static MealEntryResponse ToMealEntryResponse(MealEntry entry)
+    public static MealEntryResponse ToMealEntryResponse(StoredMealEntry storedEntry)
     {
+        MealEntry entry = storedEntry.Entry;
+
         return new MealEntryResponse(
             entry.Name,
             entry.WeightInGrams,
             ToNutritionResponse(entry.Nutrition),
-            entry.Quality.ToString());
+            entry.Quality.ToString(),
+            storedEntry.Id,
+            storedEntry.Revision);
     }
 
     public static NutritionResponse ToNutritionResponse(NutritionValues nutrition)

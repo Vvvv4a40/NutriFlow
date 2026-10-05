@@ -363,7 +363,7 @@ public sealed class MealWorkflowService
             return new MealConfirmationOutcome(
                 MealConfirmationOutcomeKind.StalePreview,
                 MapSession(session, DeserializePreview(session.PreviewJson), session.Status),
-                Array.Empty<MealEntry>());
+                Array.Empty<StoredMealEntry>());
         }
 
         if (session.Status == MealSessionStatus.Confirmed)
@@ -403,7 +403,7 @@ public sealed class MealWorkflowService
             return new MealConfirmationOutcome(
                 MealConfirmationOutcomeKind.NotReady,
                 MapSession(session, evaluation.Document, session.Status),
-                Array.Empty<MealEntry>());
+                Array.Empty<StoredMealEntry>());
         }
 
         MealSessionConfirmationResult result;
@@ -443,9 +443,9 @@ public sealed class MealWorkflowService
         CancellationToken cancellationToken)
     {
         bool hasResult = kind is MealConfirmationOutcomeKind.Confirmed or MealConfirmationOutcomeKind.AlreadyConfirmed;
-        IReadOnlyList<MealEntry> entries = hasResult && session.Purpose == MealSessionPurpose.Diary
-            ? await _diaryStore.GetSessionEntriesAsync(session.Id, cancellationToken)
-            : Array.Empty<MealEntry>();
+        IReadOnlyList<StoredMealEntry> entries = hasResult && session.Purpose == MealSessionPurpose.Diary
+            ? await _diaryStore.GetStoredSessionEntriesAsync(session.Id, cancellationToken)
+            : Array.Empty<StoredMealEntry>();
         StoredSavedDish? savedDish = hasResult && session.Purpose == MealSessionPurpose.CreateDish
             ? await _savedDishStore.FindBySessionIdAsync(session.Id, cancellationToken)
                 ?? throw new InvalidDataException("The saved dish for this session is missing.")
@@ -509,9 +509,10 @@ public sealed class MealWorkflowService
         DailyGoal? goal = await _diaryStore.FindGoalAsync(
             date,
             cancellationToken);
-        IReadOnlyList<MealEntry> entries = await _diaryStore.GetEntriesAsync(
+        IReadOnlyList<StoredMealEntry> storedEntries = await _diaryStore.GetStoredEntriesAsync(
             date,
             cancellationToken);
+        MealEntry[] entries = storedEntries.Select(entry => entry.Entry).ToArray();
         DailyProgress? progress = goal is null ? null : new DailyProgress(goal, entries);
         NutritionValues consumed = progress?.CalculateConsumedNutrition() ?? SumNutrition(entries);
         NutritionValues? remaining = null;
@@ -529,7 +530,7 @@ public sealed class MealWorkflowService
             ResponseMapper.ToNutritionResponse(consumed),
             remaining is null ? null : ResponseMapper.ToNutritionResponse(remaining),
             exceeded is null ? null : ResponseMapper.ToNutritionResponse(exceeded),
-            entries.Select(ResponseMapper.ToMealEntryResponse).ToArray());
+            storedEntries.Select(ResponseMapper.ToMealEntryResponse).ToArray());
     }
 
     private async Task<MealDraft> ParseAsync(
@@ -1061,7 +1062,7 @@ public sealed record MealSessionCreationResult(
 public sealed record MealConfirmationOutcome(
     MealConfirmationOutcomeKind Kind,
     MealSessionResponse Session,
-    IReadOnlyList<MealEntry> Entries,
+    IReadOnlyList<StoredMealEntry> Entries,
     StoredSavedDish? SavedDish = null);
 
 public enum MealConfirmationOutcomeKind

@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using NutriFlow.Domain;
+
 namespace NutriFlow.Api.Contracts;
 
 public sealed record SetDailyGoalRequest(
@@ -18,4 +21,11 @@ public sealed record MealEntryResponse(
     string Name,
     decimal WeightInGrams,
     NutritionResponse Nutrition,
-    string Quality);
+    string Quality,
+    int Id = 0,
+    int Revision = 0);
+
+public sealed record UpdateMealEntryRequest(
+    decimal? WeightInGrams,
+    [property: JsonConverter(typeof(JsonStringEnumConverter<DataQuality>))]
+    DataQuality WeightQuality = DataQuality.Exact);
