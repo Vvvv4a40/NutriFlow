@@ -9,7 +9,10 @@ namespace NutriFlow.Api.Configuration;
 
 internal static class ApplicationSetup
 {
-    public static async Task ConfigureNutriFlowAsync(this WebApplication app, string aiProvider)
+    public static async Task ConfigureNutriFlowAsync(
+        this WebApplication app,
+        string aiProvider,
+        bool seedDemoData)
     {
         app.Use(async (context, next) =>
         {
@@ -49,8 +52,7 @@ internal static class ApplicationSetup
             await ApplyDatabaseMigrationsAsync(app);
         }
 
-        if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase) &&
-            app.Configuration.GetValue("Demo:SeedData", true))
+        if (aiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase) && seedDemoData)
         {
             await SeedDemoDataAsync(app.Services);
         }
