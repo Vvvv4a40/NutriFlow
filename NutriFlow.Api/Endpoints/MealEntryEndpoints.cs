@@ -140,7 +140,6 @@ internal static class MealEntryEndpoints
     private static IResult EntryResponse(StoredMealEntry entry, HttpResponse response)
     {
         response.Headers.ETag = FormatRevision(entry.Revision);
-        response.Headers.CacheControl = "private, no-store";
         return Results.Ok(ResponseMapper.ToMealEntryResponse(entry));
     }
 

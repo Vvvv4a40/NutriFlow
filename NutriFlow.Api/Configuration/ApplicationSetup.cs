@@ -11,6 +11,20 @@ internal static class ApplicationSetup
 {
     public static async Task ConfigureNutriFlowAsync(this WebApplication app, string aiProvider)
     {
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.OnStarting(() =>
+                {
+                    context.Response.Headers.CacheControl = "private, no-store";
+                    return Task.CompletedTask;
+                });
+            }
+
+            await next(context);
+        });
+
         app.UseExceptionHandler(new ExceptionHandlerOptions
         {
             StatusCodeSelector = exception => exception is BadHttpRequestException badRequest
