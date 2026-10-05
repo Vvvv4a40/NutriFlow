@@ -44,7 +44,7 @@ async function flushPromises() {
 async function createPage(options = {}) {
     const elements = new Map();
     const requests = [];
-    const storage = new Map();
+    const storage = new Map(Object.entries(options.storage ?? {}));
     const windowListeners = new Map();
     const documentListeners = new Map();
     let callbacks;
@@ -249,6 +249,23 @@ function sessionResponse(date, messages) {
     };
 }
 
+function readySessionResponse(date, messages, purpose = "Diary") {
+    return {
+        ...sessionResponse(date, messages),
+        purpose,
+        status: "ReadyForConfirmation",
+        canConfirm: true,
+        previewToken: "preview-1",
+        dishes: [{ name: "Моё рагу", ingredients: [], portions: [] }]
+    };
+}
+
+async function buildSession(page, message = "Original message") {
+    page.element("#message-input").value = message;
+    await page.element("#message-form").emit("submit");
+    await page.element("#build-draft-button").emit("click");
+}
+
 function prepareManualProductForm(page) {
     page.element("#manual-product-form").elements = {
         name: { value: "Product" },
@@ -331,3 +348,302 @@ for (const action of ["reset", "append"]) {
         }
     });
 }
+
+test("create dish mode submits its purpose and an example without eaten portions", async () => {
+    const page = await createPage({
+        fetch: (url, settings) => {
+            if (url === "/api/meal-sessions" && settings.method === "POST") {
+                const body = JSON.parse(settings.body);
+                return jsonResponse(readySessionResponse(body.mealDate, body.messages, body.purpose));
+            }
+        }
+    });
+    await page.element("#create-dish-mode-button").emit("click");
+    await page.element("#example-button").emit("click");
+    const pendingDraft = JSON.parse(page.storage.get("nutriflow.pendingMealDraft"));
+    assert.equal(pendingDraft.purpose, "CreateDish");
+    assert.equal(pendingDraft.messages.length, 3);
+    assert.equal(pendingDraft.messages.some(message => message.includes("Съел")), false);
+    await page.element("#build-draft-button").emit("click");
+
+    const creation = page.requests.find(request => request.url === "/api/meal-sessions");
+    assert.equal(JSON.parse(creation.settings.body).purpose, "CreateDish");
+    assert.equal(page.element("#confirm-button").textContent, "Сохранить блюдо");
+    assert.equal(page.element("#create-dish-mode-button").attributes.get("aria-pressed"), "true");
+    assert.doesNotMatch(page.element("#preview-content").innerHTML, /Съеденные порции/);
+    assert.match(page.element("#confirm-hint").textContent, /по названию/);
+});
+
+for (const purpose of ["Diary", "CreateDish", undefined]) {
+    test(`pending draft restores ${purpose ?? "legacy Diary"} purpose`, async () => {
+        const page = await createPage({
+            storage: {
+                "nutriflow.pendingMealDraft": JSON.stringify({
+                    date: "2026-10-05",
+                    messages: ["Saved message"],
+                    ...(purpose ? { purpose } : {})
+                })
+            },
+            fetch: (url, settings) => {
+                if (url === "/api/meal-sessions" && settings.method === "POST") {
+                    const body = JSON.parse(settings.body);
+                    return jsonResponse(readySessionResponse(body.mealDate, body.messages, body.purpose));
+                }
+            }
+        });
+        assert.match(page.element("#message-list").innerHTML, /Saved message/);
+        await page.element("#build-draft-button").emit("click");
+        const creation = page.requests.find(request => request.url === "/api/meal-sessions");
+        assert.equal(JSON.parse(creation.settings.body).purpose, purpose ?? "Diary");
+    });
+}
+
+test("active server session restores its purpose instead of a local pending mode", async () => {
+    const page = await createPage({
+        storage: {
+            "nutriflow.activeMealSessionId": "session-1",
+            "nutriflow.pendingMealDraft": JSON.stringify({
+                date: "2026-10-05", messages: ["Local message"], purpose: "Diary"
+            })
+        },
+        fetch: url => url === "/api/meal-sessions/session-1"
+            ? jsonResponse(readySessionResponse("2026-10-05", ["Server recipe"], "CreateDish"))
+            : undefined
+    });
+    assert.equal(page.element("#create-dish-mode-button").attributes.get("aria-pressed"), "true");
+    assert.match(page.element("#message-list").innerHTML, /Server recipe/);
+    assert.doesNotMatch(page.element("#message-list").innerHTML, /Local message/);
+    assert.equal(page.storage.has("nutriflow.pendingMealDraft"), false);
+});
+
+for (const draftKind of ["typed", "queued", "server"]) {
+    test(`declining mode switch preserves the ${draftKind} draft`, async () => {
+        let confirmations = 0;
+        const page = await createPage({
+            confirm: () => { confirmations++; return false; },
+            fetch: (url, settings) => {
+                if (url === "/api/meal-sessions" && settings.method === "POST") {
+                    const body = JSON.parse(settings.body);
+                    return jsonResponse(readySessionResponse(body.mealDate, body.messages, body.purpose));
+                }
+            }
+        });
+        page.element("#message-input").value = "Do not lose this";
+
+        if (draftKind !== "typed") {
+            await page.element("#message-form").emit("submit");
+        }
+        if (draftKind === "server") {
+            await page.element("#build-draft-button").emit("click");
+        }
+
+        const messageHistory = page.element("#message-list").innerHTML;
+        const storageBefore = [...page.storage];
+        await page.element("#create-dish-mode-button").emit("click");
+        assert.equal(confirmations, 1);
+        assert.equal(page.element("#diary-mode-button").attributes.get("aria-pressed"), "true");
+        assert.equal(page.element("#message-list").innerHTML, messageHistory);
+        assert.deepEqual([...page.storage], storageBefore);
+        if (draftKind === "typed") {
+            assert.equal(page.element("#message-input").value, "Do not lose this");
+        }
+    });
+}
+
+test("accepted mode switch starts a fresh session instead of changing the existing server session", async () => {
+    const page = await createPage({
+        confirm: () => true,
+        fetch: (url, settings) => {
+            if (url === "/api/meal-sessions" && settings.method === "POST") {
+                const body = JSON.parse(settings.body);
+                return jsonResponse(readySessionResponse(body.mealDate, body.messages, body.purpose));
+            }
+        }
+    });
+    await buildSession(page);
+    page.element("#message-input").value = "Unsubmitted clarification";
+    await page.element("#create-dish-mode-button").emit("click");
+    assert.equal(page.element("#message-input").value, "");
+    assert.doesNotMatch(page.element("#message-list").innerHTML, /Original message/);
+    assert.equal(page.storage.has("nutriflow.activeMealSessionId"), false);
+    await buildSession(page, "New recipe");
+    const creations = page.requests.filter(request => request.url === "/api/meal-sessions");
+    assert.equal(creations.length, 2);
+    assert.equal(JSON.parse(creations[0].settings.body).purpose, "Diary");
+    assert.equal(JSON.parse(creations[1].settings.body).purpose, "CreateDish");
+    assert.equal(page.requests.some(request => request.url.includes("/messages")), false);
+});
+
+test("mode switches are disabled during voice capture and cannot discard its transcript", async () => {
+    const page = await createPage();
+    await page.element("#voice-record-button").emit("click");
+    assert.equal(page.element("#create-dish-mode-button").disabled, true);
+    assert.equal(page.element("#diary-mode-button").disabled, true);
+    await page.element("#create-dish-mode-button").emit("click");
+    assert.equal(page.element("#diary-mode-button").attributes.get("aria-pressed"), "true");
+    await page.element("#voice-record-button").emit("click");
+    await flushPromises();
+    assert.equal(page.element("#message-input").value, "Добавил 600 г говядины.");
+    assert.equal(page.element("#create-dish-mode-button").disabled, false);
+});
+
+test("mode stays locked while session creation is in flight", async () => {
+    const creation = deferred();
+    const page = await createPage({
+        fetch: (url, settings) => url === "/api/meal-sessions" && settings.method === "POST"
+            ? creation.promise : undefined
+    });
+    page.element("#message-input").value = "Original message";
+    await page.element("#message-form").emit("submit");
+    const building = page.element("#build-draft-button").emit("click");
+    assert.equal(page.element("#create-dish-mode-button").disabled, true);
+    await page.element("#create-dish-mode-button").emit("click");
+    assert.equal(page.element("#diary-mode-button").attributes.get("aria-pressed"), "true");
+    creation.resolve(jsonResponse(readySessionResponse("2026-10-05", ["Original message"])));
+    await building;
+});
+
+test("confirming a saved dish refreshes its list but never records diary entries", async () => {
+    let savedListRequests = 0;
+    const page = await createPage({
+        fetch: (url, settings) => {
+            if (url === "/api/saved-dishes") {
+                savedListRequests++;
+                return jsonResponse(savedListRequests === 1 ? [] : [{ id: "dish-1", name: "Моё рагу" }]);
+            }
+            if (url === "/api/meal-sessions" && settings.method === "POST") {
+                const body = JSON.parse(settings.body);
+                return jsonResponse(readySessionResponse(body.mealDate, body.messages, body.purpose));
+            }
+            if (url === "/api/meal-sessions/session-1/confirm") {
+                return jsonResponse({
+                    session: { ...readySessionResponse("2026-10-05", ["Recipe"], "CreateDish"), status: "Confirmed" },
+                    entries: [],
+                    savedDish: { id: "dish-1", name: "Моё рагу" }
+                });
+            }
+        }
+    });
+    const dailyRequestCount = page.requests.filter(request => request.url.startsWith("/api/daily-progress/")).length;
+    await page.element("#create-dish-mode-button").emit("click");
+    await buildSession(page, "Recipe");
+    await page.element("#confirm-button").emit("click");
+    assert.equal(savedListRequests, 2);
+    assert.equal(page.requests.filter(request => request.url.startsWith("/api/daily-progress/")).length, dailyRequestCount);
+    assert.match(page.element("#preview-content").innerHTML, /Блюдо сохранено/);
+    assert.doesNotMatch(page.element("#preview-content").innerHTML, /Приём пищи записан|учтены в дневном балансе/);
+    assert.equal(page.element("#session-status").textContent, "Сохранено");
+    assert.match(page.element("#saved-dishes").innerHTML, /Моё рагу/);
+    assert.match(page.element("#toast").textContent, /Блюдо сохранено/);
+    await page.element("#diary-mode-button").emit("click");
+    assert.equal(page.element("#message-input").disabled, false);
+    assert.equal(page.element("#confirm-button").textContent, "Записать в дневник");
+});
+
+test("saved dish names are escaped and list failures do not block capturing", async () => {
+    const page = await createPage({
+        fetch: url => url === "/api/saved-dishes"
+            ? jsonResponse([{ id: "dish-1", name: "<script>bad</script>" }])
+            : undefined
+    });
+    assert.match(page.element("#saved-dishes").innerHTML, /&lt;script&gt;/);
+    assert.doesNotMatch(page.element("#saved-dishes").innerHTML, /<script>/);
+
+    const failedPage = await createPage({
+        fetch: url => url === "/api/saved-dishes" ? jsonResponse({}, 500) : undefined
+    });
+    failedPage.element("#message-input").value = "Съел яблоко";
+    await failedPage.element("#message-form").emit("submit");
+    assert.match(failedPage.element("#message-list").innerHTML, /Съел яблоко/);
+    assert.equal(failedPage.element("#build-draft-button").disabled, false);
+});
+
+test("saved dish ingredients link to their own snapshot rather than a web source", async () => {
+    const dishId = "0123456789abcdef0123456789abcdef";
+    const page = await createPage({
+        storage: { "nutriflow.activeMealSessionId": "session-1" },
+        fetch: url => url === "/api/meal-sessions/session-1" ? jsonResponse({
+            ...readySessionResponse("2026-10-05", ["Съел 100 г моего рагу"]),
+            dishes: [{
+                name: "Моё рагу",
+                ingredients: [{
+                    productName: "Моё рагу",
+                    resolvedProduct: {
+                        name: "Моё рагу",
+                        sourceKind: "SavedDish",
+                        sourceName: "NutriFlow",
+                        sourceReference: `saved-dish:${dishId}`,
+                        dataQuality: "Exact"
+                    }
+                }],
+                portions: []
+            }]
+        }) : undefined
+    });
+    const preview = page.element("#preview-content").innerHTML;
+    assert.match(preview, /своё блюдо/);
+    assert.ok(preview.includes(`href="/api/saved-dishes/${dishId}"`));
+    assert.doesNotMatch(preview, /href="saved-dish:/);
+});
+
+for (const [provider, expectedPhrase] of [
+    ["Fake", "Съел 100 г Демо-блюда."],
+    ["Groq", "Съел 150 г Демо-блюдо"]
+]) {
+    test(`${provider} shows a compatible demo dish reuse phrase in both hints`, async () => {
+        const page = await createPage({
+            capabilities: { aiProvider: provider, supportsFreeText: provider !== "Fake" },
+            fetch: (url, settings) => {
+                if (url === "/api/saved-dishes") {
+                    return jsonResponse([{ id: "dish-1", name: "Демо-блюдо" }]);
+                }
+                if (url === "/api/meal-sessions" && settings.method === "POST") {
+                    const body = JSON.parse(settings.body);
+                    return jsonResponse(readySessionResponse(body.mealDate, body.messages, body.purpose));
+                }
+                if (url === "/api/meal-sessions/session-1/confirm") {
+                    return jsonResponse({
+                        session: { ...readySessionResponse("2026-10-05", ["Recipe"], "CreateDish"), status: "Confirmed" },
+                        entries: [],
+                        savedDish: { id: "dish-1", name: "Демо-блюдо" }
+                    });
+                }
+            }
+        });
+        assert.ok(page.element("#saved-dishes").innerHTML.includes(expectedPhrase));
+        await page.element("#create-dish-mode-button").emit("click");
+        await buildSession(page, "Recipe");
+        await page.element("#confirm-button").emit("click");
+        assert.ok(page.element("#preview-content").innerHTML.includes(expectedPhrase));
+    });
+}
+
+test("late Fake capabilities replace a generic reuse hint with its supported phrase", async () => {
+    const capabilities = deferred();
+    const page = await createPage({
+        storage: { "nutriflow.activeMealSessionId": "session-1" },
+        fetch: url => {
+            if (url === "/api/capabilities") {
+                return capabilities.promise;
+            }
+            if (url === "/api/saved-dishes") {
+                return jsonResponse([
+                    { id: "dish-2", name: "Другое блюдо" },
+                    { id: "dish-1", name: "Демо-блюдо" }
+                ]);
+            }
+            if (url === "/api/meal-sessions/session-1") {
+                return jsonResponse({
+                    ...readySessionResponse("2026-10-05", ["Recipe"], "CreateDish"),
+                    status: "Confirmed",
+                    dishes: [{ name: "Демо-блюдо", ingredients: [], portions: [] }]
+                });
+            }
+        }
+    });
+    assert.ok(page.element("#preview-content").innerHTML.includes("Съел 150 г Демо-блюдо"));
+    capabilities.resolve(jsonResponse({ aiProvider: "Fake", supportsFreeText: false }));
+    await flushPromises();
+    assert.ok(page.element("#preview-content").innerHTML.includes("Съел 100 г Демо-блюда."));
+    assert.ok(page.element("#saved-dishes").innerHTML.includes("Съел 100 г Демо-блюда."));
+});

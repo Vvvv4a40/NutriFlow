@@ -44,13 +44,12 @@ public sealed class GroqMealParser : IMealParser
                 new
                 {
                     role = "system",
-                    content = AiMealDraftContract.Instructions
+                    content = AiMealDraftContract.GetInstructions(session)
                 },
                 new
                 {
                     role = "user",
-                    content = AiMealDraftContract.FormatInput(
-                        session.InputEvents)
+                    content = AiMealDraftContract.FormatInput(session)
                 }
             },
             response_format = new

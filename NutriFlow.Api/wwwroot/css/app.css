@@ -572,6 +572,66 @@ h3 {
     text-align: right;
 }
 
+.capture-mode-panel {
+    margin-bottom: 22px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: var(--radius-medium);
+}
+
+.capture-mode-panel h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+}
+
+.capture-mode-switch {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: fit-content;
+    padding: 5px;
+    border: 1px solid var(--line);
+    background: var(--surface-muted);
+    border-radius: var(--radius-medium);
+}
+
+.capture-mode-button {
+    min-height: 42px;
+    padding: 9px 15px;
+    border: 0;
+    background: transparent;
+    border-radius: var(--radius-small);
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.capture-mode-button.is-active {
+    color: #fff;
+    background: var(--primary);
+}
+
+.capture-mode-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.saved-dishes {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.saved-dishes ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
 .workspace {
     display: grid;
     grid-template-columns: minmax(340px, 0.78fr) minmax(500px, 1.22fr);

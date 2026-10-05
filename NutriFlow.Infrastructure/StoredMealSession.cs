@@ -15,4 +15,5 @@ public sealed record StoredMealSession(
     DateTimeOffset? ConfirmedAtUtc,
     Guid? IdempotencyKey,
     string? OriginalRequestHash,
-    IReadOnlyDictionary<Guid, string> MessageRequestHashes);
+    IReadOnlyDictionary<Guid, string> MessageRequestHashes,
+    MealSessionPurpose Purpose = MealSessionPurpose.Diary);

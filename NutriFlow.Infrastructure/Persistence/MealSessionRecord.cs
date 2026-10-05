@@ -11,6 +11,7 @@ internal sealed class MealSessionRecord
     public string PreviewJson { get; set; } = string.Empty;
     public string PreviewToken { get; set; } = string.Empty;
     public MealSessionStatus Status { get; set; }
+    public MealSessionPurpose Purpose { get; set; }
     public DateOnly MealDate { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }

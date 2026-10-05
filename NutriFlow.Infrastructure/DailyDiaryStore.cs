@@ -156,6 +156,7 @@ public sealed class DailyDiaryStore
             .Where(session =>
                 session.Id == sessionId &&
                 session.UserId == _ownerId &&
+                session.Purpose == MealSessionPurpose.Diary &&
                 session.Status == MealSessionStatus.ReadyForConfirmation &&
                 session.PreviewToken == expectedPreviewToken)
             .ExecuteUpdateAsync(
@@ -181,6 +182,11 @@ public sealed class DailyDiaryStore
             {
                 throw new KeyNotFoundException(
                     $"Meal session '{sessionId}' was not found.");
+            }
+
+            if (current.Purpose != MealSessionPurpose.Diary)
+            {
+                return MealSessionConfirmationResult.NotReady;
             }
 
             if (current.Status == MealSessionStatus.Confirmed)

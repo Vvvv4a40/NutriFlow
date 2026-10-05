@@ -94,6 +94,7 @@ internal static class ServiceRegistration
         builder.Services.AddScoped<ProductLookupService>();
         builder.Services.AddScoped<MealSessionStore>();
         builder.Services.AddScoped<DailyDiaryStore>();
+        builder.Services.AddScoped<SavedDishStore>();
         builder.Services.AddScoped<MealWorkflowService>();
         builder.Services.Configure<FormOptions>(options =>
         {

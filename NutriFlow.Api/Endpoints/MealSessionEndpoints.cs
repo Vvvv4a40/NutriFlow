@@ -49,7 +49,7 @@ internal static class MealSessionEndpoints
 
         app.MapPost("/api/meal-sessions/{id:guid}/confirm", ConfirmMealSessionAsync)
             .WithName("ConfirmMealSession")
-            .WithSummary("Atomically records the portions from the reviewed preview.")
+            .WithSummary("Confirms the reviewed preview as diary entries or a saved dish.")
             .WithTags("Meal sessions")
             .Produces<ConfirmMealSessionResponse>(StatusCodes.Status200OK)
             .Produces<ConfirmMealSessionResponse>(StatusCodes.Status409Conflict)
@@ -117,7 +117,8 @@ internal static class MealSessionEndpoints
                 request.Messages,
                 request.MealDate ?? DateOnly.FromDateTime(DateTime.Today),
                 cancellationToken,
-                idempotencyKey);
+                idempotencyKey,
+                request.Purpose);
             string sessionPath = $"/api/meal-sessions/{creation.Session.Id}";
 
             if (creation.Created)
@@ -268,10 +269,19 @@ internal static class MealSessionEndpoints
                 });
         }
 
-        MealConfirmationOutcome? outcome = await workflow.ConfirmAsync(
-            id,
-            request.PreviewToken,
-            cancellationToken);
+        MealConfirmationOutcome? outcome;
+
+        try
+        {
+            outcome = await workflow.ConfirmAsync(id, request.PreviewToken, cancellationToken);
+        }
+        catch (MealSessionConflictException exception)
+        {
+            return Results.Problem(
+                detail: exception.Message,
+                statusCode: StatusCodes.Status409Conflict,
+                title: "The saved dish conflicts with an existing name.");
+        }
 
         if (outcome is null)
         {
@@ -290,7 +300,8 @@ internal static class MealSessionEndpoints
             outcome.Kind.ToString(),
             message,
             outcome.Session,
-            outcome.Entries.Select(ResponseMapper.ToMealEntryResponse).ToArray());
+            outcome.Entries.Select(ResponseMapper.ToMealEntryResponse).ToArray(),
+            outcome.SavedDish is null ? null : ResponseMapper.ToSavedDishResponse(outcome.SavedDish));
 
         return outcome.Kind is MealConfirmationOutcomeKind.Confirmed or
             MealConfirmationOutcomeKind.AlreadyConfirmed

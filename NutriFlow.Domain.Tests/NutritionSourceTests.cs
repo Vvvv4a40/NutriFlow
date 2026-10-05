@@ -136,6 +136,7 @@ public sealed class NutritionSourceTests
     [InlineData(NutritionSourceKind.LabelPhoto)]
     [InlineData(NutritionSourceKind.DishPhoto)]
     [InlineData(NutritionSourceKind.ExternalService)]
+    [InlineData(NutritionSourceKind.SavedDish)]
     public void Constructor_WithReferencedSourceWithoutReference_ThrowsArgumentException(
         NutritionSourceKind kind)
     {
@@ -144,6 +145,21 @@ public sealed class NutritionSourceTests
                 kind,
                 DataQuality.Estimated,
                 "Photo"));
+    }
+
+    [Fact]
+    public void Constructor_WithSavedDishReference_PreservesLineageAndQuality()
+    {
+        string reference = $"saved-dish:{Guid.NewGuid():N}";
+        NutritionSource source = new NutritionSource(
+            NutritionSourceKind.SavedDish,
+            DataQuality.Estimated,
+            "Сохранённое блюдо",
+            reference);
+
+        Assert.Equal(NutritionSourceKind.SavedDish, source.Kind);
+        Assert.Equal(DataQuality.Estimated, source.Quality);
+        Assert.Equal(reference, source.Reference);
     }
 
     [Theory]

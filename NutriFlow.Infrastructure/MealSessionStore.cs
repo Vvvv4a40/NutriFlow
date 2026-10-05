@@ -51,7 +51,8 @@ public sealed class MealSessionStore
         string previewToken,
         MealSessionStatus status,
         DateOnly mealDate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        MealSessionPurpose purpose = MealSessionPurpose.Diary)
     {
         return CreateCoreAsync(
             messages,
@@ -62,7 +63,8 @@ public sealed class MealSessionStore
             mealDate,
             null,
             null,
-            cancellationToken);
+            cancellationToken,
+            purpose);
     }
 
     public async Task<(StoredMealSession Session, bool Created)> CreateWithIdempotencyKeyAsync(
@@ -74,7 +76,8 @@ public sealed class MealSessionStore
         DateOnly mealDate,
         Guid idempotencyKey,
         string originalRequestHash,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        MealSessionPurpose purpose = MealSessionPurpose.Diary)
     {
         if (idempotencyKey == Guid.Empty)
         {
@@ -94,7 +97,8 @@ public sealed class MealSessionStore
                 mealDate,
                 idempotencyKey,
                 originalRequestHash,
-                cancellationToken);
+                cancellationToken,
+                purpose);
 
             return (created, true);
         }
@@ -247,12 +251,18 @@ public sealed class MealSessionStore
         DateOnly mealDate,
         Guid? idempotencyKey,
         string? originalRequestHash,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MealSessionPurpose purpose)
     {
         ValidateMessages(messages);
         ArgumentNullException.ThrowIfNull(draft);
         ValidatePreview(previewJson, previewToken);
         ValidateEditableStatus(status);
+
+        if (!Enum.IsDefined(purpose))
+        {
+            throw new ArgumentOutOfRangeException(nameof(purpose));
+        }
 
         DateTimeOffset now = DateTimeOffset.UtcNow;
         MealSessionRecord record = new MealSessionRecord
@@ -264,6 +274,7 @@ public sealed class MealSessionStore
             PreviewJson = previewJson,
             PreviewToken = previewToken,
             Status = status,
+            Purpose = purpose,
             MealDate = mealDate,
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -300,7 +311,10 @@ public sealed class MealSessionStore
             record.ConfirmedAtUtc,
             record.IdempotencyKey,
             record.OriginalRequestHash,
-            DeserializeMessageRequestHashes(record.MessageRequestHashesJson));
+            DeserializeMessageRequestHashes(record.MessageRequestHashesJson),
+            Enum.IsDefined(record.Purpose)
+                ? record.Purpose
+                : throw new InvalidDataException("Stored meal session purpose is invalid."));
     }
 
     private static IReadOnlyList<string> DeserializeMessages(string json, Guid sessionId)
