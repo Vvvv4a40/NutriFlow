@@ -53,6 +53,10 @@ jobs:
       - name: Run tests
         run: dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
 
+      - name: Verify publish contents
+        shell: pwsh
+        run: ./scripts/Test-Publish.ps1
+
       - name: Verify formatting
         run: dotnet format NutriFlow.sln --no-restore --verify-no-changes
 
