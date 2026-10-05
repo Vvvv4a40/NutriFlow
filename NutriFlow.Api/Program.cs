@@ -25,6 +25,7 @@ app.MapGet(
 
 app.MapMealSessionEndpoints();
 app.MapDailyDiaryEndpoints();
+app.MapMealEntryEndpoints();
 app.MapProductEndpoints();
 app.MapMediaEndpoints();
 app.MapSavedDishEndpoints();

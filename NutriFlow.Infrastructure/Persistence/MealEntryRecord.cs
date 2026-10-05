@@ -7,6 +7,7 @@ internal sealed class MealEntryRecord
     public int Id { get; set; }
     public Guid MealSessionId { get; set; }
     public MealSessionRecord MealSession { get; set; } = null!;
+    public MealEntryAdjustmentRecord? Adjustment { get; set; }
     public int Sequence { get; set; }
     public DateOnly MealDate { get; set; }
     public string Name { get; set; } = string.Empty;

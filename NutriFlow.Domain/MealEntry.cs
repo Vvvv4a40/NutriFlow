@@ -27,4 +27,23 @@ public sealed class MealEntry
     public decimal WeightInGrams { get; }
     public NutritionValues Nutrition { get; }
     public DataQuality Quality { get; }
+
+    public MealEntry WithWeight(decimal weightInGrams, DataQuality weightQuality = DataQuality.Exact)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(weightInGrams);
+
+        if (weightQuality is not (DataQuality.Exact or DataQuality.Estimated))
+        {
+            throw new ArgumentOutOfRangeException(nameof(weightQuality));
+        }
+
+        DataQuality quality = Quality == DataQuality.Unknown
+            ? DataQuality.Unknown
+            : Quality == DataQuality.Estimated || weightQuality == DataQuality.Estimated
+                ? DataQuality.Estimated
+                : Quality;
+
+        return new MealEntry(Name, weightInGrams,
+            Nutrition.ScaleBy(weightInGrams / WeightInGrams), quality);
+    }
 }
