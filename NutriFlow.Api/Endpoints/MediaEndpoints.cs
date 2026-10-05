@@ -205,10 +205,8 @@ internal static class MediaEndpoints
     private static async Task<IResult> GetLabelPhotoAsync(
         string fileName,
         LabelPhotoStore photoStore,
-        HttpResponse response,
         CancellationToken cancellationToken)
     {
-        response.Headers.CacheControl = "private, no-store";
         StoredLabelPhoto? photo = await photoStore.FindAsync(
             $"label-photo:{fileName}", cancellationToken);
 
