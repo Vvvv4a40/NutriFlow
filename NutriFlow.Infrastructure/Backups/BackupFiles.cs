@@ -151,10 +151,19 @@ internal static class BackupFiles
 
     private static bool IsStagingName(string? name)
     {
-        const string prefix = ".nutriflow-backup-";
         const string suffix = ".partial";
-        return name is not null && name.StartsWith(prefix, StringComparison.Ordinal) &&
-               name.EndsWith(suffix, StringComparison.Ordinal) && name.Length > prefix.Length + suffix.Length &&
-               Guid.TryParseExact(name[prefix.Length..^suffix.Length], "N", out _);
+        if (name is null || !name.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        foreach (string prefix in new[] { ".nutriflow-backup-", ".nutriflow-restore-" })
+        {
+            if (name.StartsWith(prefix, StringComparison.Ordinal) && name.Length > prefix.Length + suffix.Length &&
+                Guid.TryParseExact(name[prefix.Length..^suffix.Length], "N", out _))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
