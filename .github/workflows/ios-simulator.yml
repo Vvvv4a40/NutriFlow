@@ -54,9 +54,15 @@ jobs:
           xcrun --sdk iphonesimulator --show-sdk-version
           dotnet --info
 
+      - name: Configure NuGet HTTP cache
+        run: |
+          mkdir -p "$RUNNER_TEMP/nuget-http-cache"
+          printf 'NUGET_HTTP_CACHE_PATH=%s\n' "$RUNNER_TEMP/nuget-http-cache" >> "$GITHUB_ENV"
+
       - name: Install pinned iOS workload
         run: |
-          sudo "$(command -v dotnet)" workload install maui-ios \
+          sudo env NUGET_HTTP_CACHE_PATH="$RUNNER_TEMP/nuget-http-cache-workload" \
+            "$(command -v dotnet)" workload install maui-ios \
             --version "$WORKLOAD_VERSION" --source https://api.nuget.org/v3/index.json
           dotnet workload list
           if [[ "$(dotnet workload --version)" != "$WORKLOAD_VERSION" ]]; then
