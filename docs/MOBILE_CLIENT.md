@@ -95,11 +95,12 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 dotnet --info
 xcodebuild -version
 xcode-select -p
-dotnet workload install maui-ios --skip-manifest-update --source https://api.nuget.org/v3/index.json
+dotnet workload install maui-ios --version 10.0.100 --source https://api.nuget.org/v3/index.json
 dotnet workload list
+dotnet workload --version
 ```
 
-Сопоставьте фактическую версию iOS workload с требованиями к Xcode, прежде чем собирать. `--skip-manifest-update` сохраняет базовые манифесты SDK, а не обновляет платформу до произвольного последнего выпуска.
+Сопоставьте фактическую версию iOS workload с требованиями к Xcode, прежде чем собирать. `--version 10.0.100` закрепляет согласованный workload set: MAUI 10.0.0 / iOS 26.0.11017. Версия этого набора не обязана совпадать с выбранным SDK 10.0.400. `--skip-manifest-update` без явной версии сохранял бы уже имеющиеся манифесты машины, которые в облаке могут быть другими. Для защищённого каталога SDK на Mac команда установки требует `sudo`. [Workload sets](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-workload-sets).
 
 Для Apple Silicon первый restore создаёт настоящий iOS lock-файл. Повтор проверяет его. Во всех командах указан один и тот же runtime identifier:
 
@@ -118,6 +119,29 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj \
 На Intel Mac замените `iossimulator-arm64` на `iossimulator-x64`. Это сборка **для симулятора**, не IPA для iPhone; отключение подписи нельзя переносить в инструкцию установки на телефон. После успешного restore проверьте и сохраните `packages.ios.lock.json` в Git. Запуск общего экрана и настройка подписи на настоящем iPhone остаются следующими проверками; они здесь не выполнялись.
 
 Чтобы на Mac выбрать Android явно, передавайте `-p:TargetFramework=net10.0-android` в restore и `-f net10.0-android` в build. Android SDK/JDK в таком случае нужны и на Mac.
+
+## Облачная проверка iOS без собственного Mac
+
+`.github/workflows/ios-simulator.yml` добавляет отдельный ручной workflow **iOS simulator**. Windows-компьютеру для него не нужны Xcode, iOS workload или Android SDK. GitHub предоставляет облачную машину, которая получает отслеживаемый код репозитория; локальные данные, User Secrets и приватные файлы с ноутбука туда не отправляются. Основной серверный CI не менялся.
+
+- `workflow_dispatch` означает запуск кнопкой, не при каждом push / pull request. `runner` — временная машина GitHub, исполняющая команды.
+- Выбран стандартный ARM64 runner `macos-15`, явно задан Xcode 26.0.1 вместо его устаревшего Xcode по умолчанию. SDK берётся из `global.json`, workload set закреплён на `10.0.100`. Наличие Xcode и архитектура проверяются до сборки. Если GitHub удалит эту версию из образа, workflow завершится с понятной ошибкой; автоматически переходить на несовместимый Xcode он не будет. [Состав ARM64-образа](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md).
+- Первое восстановление создаёт отсутствующий `packages.ios.lock.json`, затем выполняется locked restore для того же `iossimulator-arm64`. Если lock-файл уже сохранён в Git, разрешён только locked restore — CI не должен молча переписывать зависимости. Проверяется и неизменность Android lock-файла.
+- Выполняется Debug-сборка для симулятора с отключённой подписью, затем `plutil` проверяет уже упакованные `Info.plist` и `PrivacyInfo.xcprivacy`, наличие исполняемого файла проверяется отдельно. Симулятор не запускается: это проверка компиляции / упаковки, не экрана, API или устройства.
+- `artifact` — сохранённый результат job, доступный для скачивания после успеха. В нём только `NutriFlow-ios-simulator-arm64.tar.gz` и `packages.ios.lock.json`; `.app` помещён в tar, чтобы сохранить права исполняемых файлов. Срок хранения — семь дней. Ни IPA, ни сертификаты, ни полный рабочий каталог не публикуются.
+- Права workflow ограничены `contents: read`, Git-учётные данные не сохраняются после checkout. Apple-аккаунты / секреты и изменение настроек репозитория не нужны. Job ограничен 30 минутами, новый ручной запуск той же ветки отменяет предыдущий.
+
+Репозиторий `Vvvv4a40/NutriFlow` на момент подготовки публичный; стандартные GitHub-hosted runners бесплатны для публичных репозиториев. Это не обещание бесплатной подписи Apple и не относится к larger runners. Для приватных репозиториев нужно учитывать квоты / расходы; видимость репозитория этим шагом не менялась. [Правила GitHub](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job).
+
+### Как запустить и прочитать результат
+
+1. Откройте [iOS simulator в GitHub Actions](https://github.com/Vvvv4a40/NutriFlow/actions/workflows/ios-simulator.yml) под своим аккаунтом.
+2. Нажмите **Run workflow**, выберите `main`, подтвердите запуск. Файл должен уже находиться в default branch; кнопка требует права записи в репозиторий. [Ручной запуск Actions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+3. Дождитесь завершения job. При ошибке откройте первый красный step и сохраните текст ошибки; успешный upload не подменяет успешную сборку.
+4. После успеха скачайте artifact `nutriflow-ios-simulator-<run id>-<attempt>`. Сохраните ссылку на run и SHA коммита: результат относится именно к нему.
+5. Полученный iOS lock-файл нужно отдельно проверить и закоммитить после первой реальной успешной сборки. Workflow не создаёт коммиты сам. После этого будущие запуски смогут проверять заранее зафиксированный граф.
+
+**Архив симулятора нельзя установить на iPhone и нельзя считать IPA для AltStore.** Получение пакета для настоящего `ios-arm64`, проверка AOT / подписи, установка и обновление через выбранный способ — отдельный следующий шаг. Не передавайте Apple-пароль агенту и не сохраняйте сертификаты / пароли в YAML или Git.
 
 ## Границы клиента
 

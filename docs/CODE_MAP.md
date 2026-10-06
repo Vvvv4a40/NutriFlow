@@ -115,6 +115,8 @@ Program → Endpoints → MealWorkflowService
 
 Разметка находится в XAML, C#-часть страницы пока только вызывает `InitializeComponent`. iOS `Info.plist` задаёт платформенные свойства, `PrivacyInfo.xcprivacy` включается ресурсом только в iOS-сборку. Нет HTTP, AI, расчётов, локальной БД или MVVM-пакета. APK заблокирован отсутствующим Android SDK/JDK; iOS не собран без workload / Mac / Xcode. XML и Android restore проверены, но это не компиляция и не запуск клиента. Требования, список загрузок и команды — в [MOBILE_CLIENT.md](MOBILE_CLIENT.md).
 
+`.github/workflows/ios-simulator.yml` отдельно запускает компиляцию и упаковку клиента на облачном Mac по `workflow_dispatch`. Он выбирает Xcode / workload set, выполняет restore / locked restore одного RID и собирает только неподписанный Debug для ARM64-симулятора. Артефакт содержит tar с `.app` и настоящий iOS lock-файл; сервер, Apple-аккаунты, IPA для телефона и запуск экрана не входят в этот workflow.
+
 ## Сборка и публикация
 
 - `NutriFlow.Api.csproj` — `DefaultItemExcludes` исключает личное хранилище, резервные копии, локальные настройки, SQLite-файлы и ключи из автоматических SDK-списков исходников / ресурсов / содержимого. Обычные публичные настройки и интерфейс сохраняются.

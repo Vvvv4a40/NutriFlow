@@ -105,6 +105,8 @@ flowchart LR
 
 Начат отдельный нативный клиент на .NET MAUI: `mobile/NutriFlow.Mobile.slnx`, один общий проект с точками входа Android / iOS и первым статичным экраном. Windows по умолчанию выбирает Android, macOS — iOS; серверное solution и Docker-контекст независимы от клиента. `maui-android` установлен, Android SDK/JDK пользователь установит позже: сборка APK остановилась на `XA5300`. iOS требует Mac с совместимым Xcode; здесь workload отсутствует (`NETSDK1147`), IPA и запуск не проверены. [Структура, список загрузок и команды мобильного клиента](docs/MOBILE_CLIENT.md). Восстановление NuGet-пакетов не означает успешную сборку приложения.
 
+Для проверки iOS без собственного Mac добавлен ручной [workflow iOS simulator](https://github.com/Vvvv4a40/NutriFlow/actions/workflows/ios-simulator.yml). Он собирает только приложение для ARM64-симулятора на облачном macOS runner и сохраняет архив / iOS lock-файл. Apple-аккаунт не нужен; это не IPA для iPhone и не проверка запуска. Порядок ручного запуска и границы результата описаны в мобильном руководстве.
+
 ## Быстрый запуск без внешних ключей
 
 Требуется [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)
