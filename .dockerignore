@@ -19,6 +19,8 @@
 **/*.key
 **/*.keystore
 **/*.jks
+**/*.mobileprovision
+**/*.provisionprofile
 NutriFlow.Console/
 NutriFlow.Tools/
 NutriFlow.Domain.Tests/

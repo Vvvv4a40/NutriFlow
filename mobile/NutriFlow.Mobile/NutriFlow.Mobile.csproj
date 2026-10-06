@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-android</TargetFramework>
+    <TargetFramework Condition="'$(TargetFramework)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net10.0-ios</TargetFramework>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0-android</TargetFramework>
     <OutputType>Exe</OutputType>
     <RootNamespace>NutriFlow.Mobile</RootNamespace>
     <UseMaui>true</UseMaui>
@@ -13,13 +14,19 @@
     <ApplicationId>com.nutriflow.app</ApplicationId>
     <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
-    <SupportedOSPlatformVersion>21.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+    <NuGetLockFilePath>packages.$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')).lock.json</NuGetLockFilePath>
   </PropertyGroup>
 
   <ItemGroup>
     <MauiIcon Include="Resources/AppIcon/appicon.svg" Color="#185B45" />
     <MauiSplashScreen Include="Resources/Splash/splash.svg" Color="#185B45" BaseSize="128,128" />
     <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <BundleResource Include="Platforms/iOS/PrivacyInfo.xcprivacy" LogicalName="PrivacyInfo.xcprivacy" />
   </ItemGroup>
 
 </Project>
