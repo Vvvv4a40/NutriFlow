@@ -1,0 +1,100 @@
+name: iOS simulator
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned iOS simulator app
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true'
+      MOBILE_PROJECT: mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj
+      IOS_RUNTIME: iossimulator-arm64
+      WORKLOAD_VERSION: '10.0.100'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Verify Apple build tools
+        run: |
+          if [[ "$(uname -m)" != "arm64" ]]; then
+            printf '%s\n' 'This workflow requires an ARM64 macOS runner.' >&2
+            exit 1
+          fi
+          if [[ ! -d "$DEVELOPER_DIR" ]]; then
+            printf '%s\n' 'Xcode 26.0.1 is missing from this runner image. Review the pinned toolchain.' >&2
+            exit 1
+          fi
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          dotnet --info
+
+      - name: Install pinned iOS workload
+        run: |
+          sudo "$(command -v dotnet)" workload install maui-ios \
+            --version "$WORKLOAD_VERSION" --source https://api.nuget.org/v3/index.json
+          dotnet workload list
+          if [[ "$(dotnet workload --version)" != "$WORKLOAD_VERSION" ]]; then
+            printf '%s\n' 'The installed workload set does not match the pinned version.' >&2
+            exit 1
+          fi
+
+      - name: Restore simulator dependencies
+        run: |
+          if [[ ! -f mobile/NutriFlow.Mobile/packages.ios.lock.json ]]; then
+            dotnet restore "$MOBILE_PROJECT" -p:TargetFramework=net10.0-ios \
+              --runtime "$IOS_RUNTIME" --warnaserror
+          fi
+          dotnet restore "$MOBILE_PROJECT" -p:TargetFramework=net10.0-ios \
+            --runtime "$IOS_RUNTIME" --locked-mode --warnaserror
+          git diff --exit-code -- mobile/NutriFlow.Mobile/packages.android.lock.json
+
+      - name: Build simulator app
+        run: |
+          dotnet build "$MOBILE_PROJECT" -f net10.0-ios --runtime "$IOS_RUNTIME" \
+            --configuration Debug --no-restore --warnaserror -p:EnableCodeSigning=false
+
+      - name: Verify and archive simulator bundle
+        run: |
+          bundle_directory="mobile/NutriFlow.Mobile/bin/Debug/net10.0-ios/$IOS_RUNTIME"
+          bundle="$bundle_directory/NutriFlow.Mobile.app"
+          plutil -lint "$bundle/Info.plist" "$bundle/PrivacyInfo.xcprivacy"
+          executable="$(plutil -extract CFBundleExecutable raw -o - "$bundle/Info.plist")"
+          test -s "$bundle/$executable"
+          mkdir -p ios-ci-artifacts
+          tar -czf ios-ci-artifacts/NutriFlow-ios-simulator-arm64.tar.gz \
+            -C "$bundle_directory" NutriFlow.Mobile.app
+          cp mobile/NutriFlow.Mobile/packages.ios.lock.json ios-ci-artifacts/packages.ios.lock.json
+
+      - name: Upload simulator build and dependency lock
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-ios-simulator-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ios-ci-artifacts/
+          if-no-files-found: error
+          retention-days: 7
