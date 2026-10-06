@@ -4,12 +4,12 @@
 
 Выбран нативный .NET MAUI с C# и XAML. Исходники минимального клиента находятся в `mobile/NutriFlow.Mobile`, отдельное решение — `mobile/NutriFlow.Mobile.slnx`. Оно не включено в серверное `NutriFlow.sln`: сборка бэкенда и его CI не должны требовать мобильных SDK.
 
-Подготовлены один общий статичный экран, точки входа Android / iOS, иконка и заставка. Сетевого клиента, дневника, входа, камеры и микрофона здесь пока нет. На 6 октября 2026 года Android-зависимости восстановлены и lock-файл проверен, но сборка остановилась на `XA5300`: отсутствует Android SDK, найденная Java 8 является JRE без инструмента `jar`. Проверка iOS на Windows остановилась на `NETSDK1147`: iOS workload не установлен; Mac с Xcode недоступен. APK / IPA не получены, C# / XAML клиента и запуск на устройствах не проверены. Подготовленные исходники не объявляются работающим мобильным приложением.
+Подготовлены один общий статичный экран, точки входа Android / iOS, иконка и заставка. Сетевого клиента, дневника, входа, камеры и микрофона здесь пока нет. На 6 октября 2026 года Android-зависимости восстановлены и lock-файл проверен, но сборка остановилась на `XA5300`: отсутствует Android SDK, найденная Java 8 является JRE без инструмента `jar`. iOS-клиент успешно скомпилирован и упакован для ARM64-симулятора на облачном Mac: [run 37472323523](https://github.com/Vvvv4a40/NutriFlow/actions/runs/37472323523), коммит `5100821`, 0 предупреждений / ошибок. Из его артефакта сохранён настоящий `packages.ios.lock.json`. Симулятор не запускался; экран, устройство и подпись не проверены. APK / IPA для телефонов не получены. Windows по-прежнему не имеет iOS workload / Xcode; облачная компиляция не означает работоспособность приложения на телефоне.
 
 ## Что находится в проекте
 
 - `NutriFlow.Mobile.csproj` — одна цель сборки за запуск: по умолчанию `net10.0-android` на Windows и `net10.0-ios` на macOS. Переданный `TargetFramework` имеет приоритет. Поэтому Android-сборке не нужна установленная iOS-нагрузка. `UseMaui` подключает инструменты MAUI, `SingleProject` исключает код чужой платформы при сборке. Минимальные версии ОС — Android 21 и iOS 15.0; это не версии SDK для компиляции.
-- В том же `.csproj` заданы идентификатор приложения, версия, ресурсы и единственный явный NuGet-пакет `Microsoft.Maui.Controls`. `MauiVersion=10.0.0` фиксирует версии MAUI-зависимостей. Android-граф без изменения зависимостей перенесён в `packages.android.lock.json`; путь lock-файла выбирается по платформе. `packages.ios.lock.json` должен появиться после настоящего restore на Mac, вручную он не составляется. При изменении runtime identifier проверяйте, требуется ли обновление соответствующего lock-файла.
+- В том же `.csproj` заданы идентификатор приложения, версия, ресурсы и единственный явный NuGet-пакет `Microsoft.Maui.Controls`. `MauiVersion=10.0.0` задаёт версию MAUI. В Git сохранены отдельные `packages.android.lock.json` и `packages.ios.lock.json`; путь выбирается по платформе. iOS-файл получен из настоящего restore и успешной сборки, а не составлен вручную. Он фиксирует 20 пакетов: 2 прямых и 18 транзитивных, в том числе все 8 MAUI-пакетов версии `10.0.0`. Вторую прямую зависимость `Microsoft.NET.ILLink.Tasks` добавляет SDK, не пользовательский `PackageReference`. Поля `requested`, `resolved` и `contentHash` описывают запрошенный диапазон, выбранную версию и контрольную сумму пакета. `--locked-mode` проверяет граф вместо его молчаливого обновления. [Lock-файлы NuGet](https://learn.microsoft.com/en-us/nuget/consume-packages/package-references-in-project-files#locking-dependencies).
 - `MauiProgram.cs` — создаёт `MauiAppBuilder`, подключает `App` и собирает приложение. Здесь пока нет HTTP-клиента и дополнительных сервисов.
 - `App.xaml` / `App.xaml.cs` — общие стили и создание окна с `MainPage`. Используется `CreateWindow`, а не устаревшее присваивание `Application.MainPage`.
 - `MainPage.xaml` / `MainPage.xaml.cs` — разметка экрана и связанный C#-класс. Оба файла описывают один `partial`-класс; `InitializeComponent` подключает сгенерированную из XAML часть. На этом шаге в странице нет расчётов и обработчиков ввода.
@@ -81,7 +81,7 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 1. **Доступ к Mac** — своему или удалённому. Xcode и iOS SDK не устанавливаются как обычные Windows-инструменты; наличие iPhone этого требования не отменяет.
 2. **Совместимые macOS и Xcode**. Базовый iOS-манифест этой установки — `26.0.11017`, его проверяемая исходная связка — Xcode 26.0 на macOS Sequoia 15.6 или новее. Xcode доступен в [каталоге загрузок Apple](https://developer.apple.com/download/all/). Не выбирайте самую новую версию вслепую: сверяйте её с установленным .NET iOS workload. [Требования выпуска .NET 10 для Apple](https://github.com/dotnet/macios/wiki/.NET-10-release-notes), [таблица совместимости Xcode](https://developer.apple.com/xcode/system-requirements/).
-3. **.NET SDK 10.0.400 для macOS** из [официальных загрузок .NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0): Arm64 для Apple Silicon, x64 для Intel. Версию выбирает `global.json` репозитория.
+3. **.NET SDK 10.0.401 для macOS**, использованный успешной облачной сборкой, из [официальных загрузок .NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0): Arm64 для Apple Silicon, x64 для Intel. `global.json` задаёт `10.0.400` с `latestPatch`, поэтому допускает `10.0.401`; это не строгая фиксация всех инструментов. iOS lock содержит `Microsoft.NET.ILLink.Tasks` `10.0.12`, Android lock — `10.0.11` от локального SDK `10.0.400`. Другой SDK может потребовать пересмотра неявных зависимостей: проверяйте `dotnet --version` и не исправляйте lock вручную ради прохождения restore. [Выбор SDK](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json#rollforward).
 4. **Нагрузка `maui-ios`** командой ниже. После первого запуска Xcode установите предлагаемые компоненты iOS / симулятора и ознакомьтесь с лицензиями. Нужные компоненты Apple и .NET workload — разные установки.
 5. Необязательно — VS Code с расширением `.NET MAUI` по ссылке выше. Для CLI-сборки расширение не требуется.
 
@@ -89,7 +89,7 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 ## Первая проверка iOS на Mac
 
-Откройте Xcode хотя бы один раз и завершите его первичную настройку самостоятельно. Следующие команды выполняются в терминале **Mac**, из корня репозитория. Установка `maui-ios` и настройка Xcode здесь не выполнялись.
+Откройте Xcode хотя бы один раз и завершите его первичную настройку самостоятельно. Следующие команды выполняются в терминале **Mac**, из корня репозитория. Успешная облачная связка — Xcode 26.0.1, .NET SDK 10.0.401 и workload set 10.0.100. На Windows-ноутбуке эти Apple-инструменты не устанавливались.
 
 ```bash
 dotnet --info
@@ -102,12 +102,9 @@ dotnet workload --version
 
 Сопоставьте фактическую версию iOS workload с требованиями к Xcode, прежде чем собирать. `--version 10.0.100` закрепляет согласованный workload set: MAUI 10.0.0 / iOS 26.0.11017. Версия этого набора не обязана совпадать с выбранным SDK 10.0.400. `--skip-manifest-update` без явной версии сохранял бы уже имеющиеся манифесты машины, которые в облаке могут быть другими. Для защищённого каталога SDK на Mac команда установки требует `sudo`. [Workload sets](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-workload-sets).
 
-Для Apple Silicon первый restore создаёт настоящий iOS lock-файл. Повтор проверяет его. Во всех командах указан один и тот же runtime identifier:
+Для Apple Silicon используйте уже сохранённый iOS lock-файл. Обычная проверка начинается сразу с locked restore; во всех командах указан один и тот же runtime identifier:
 
 ```bash
-dotnet restore mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj \
-  -p:TargetFramework=net10.0-ios --runtime iossimulator-arm64 --warnaserror
-
 dotnet restore mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj \
   -p:TargetFramework=net10.0-ios --runtime iossimulator-arm64 --locked-mode --warnaserror
 
@@ -116,7 +113,7 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj \
   -p:EnableCodeSigning=false
 ```
 
-На Intel Mac замените `iossimulator-arm64` на `iossimulator-x64`. Это сборка **для симулятора**, не IPA для iPhone; отключение подписи нельзя переносить в инструкцию установки на телефон. После успешного restore проверьте и сохраните `packages.ios.lock.json` в Git. Запуск общего экрана и настройка подписи на настоящем iPhone остаются следующими проверками; они здесь не выполнялись.
+Lock-файл содержит `net10.0-ios26.0` и секцию `net10.0-ios26.0/iossimulator-arm64`; пустая RID-секция означает отсутствие дополнительных пакетов поверх основного графа, не отсутствие зависимостей. Для Intel Mac нужен `iossimulator-x64`, для iPhone — `ios-arm64`: их графы и сборки этим файлом / запуском не проверены. Смена RID, SDK или зависимостей — отдельное осознанное обновление: выполните настоящий restore для выбранной конфигурации без `--locked-mode`, проверьте diff и повторите locked restore. Не заменяйте версии и хэши вручную и не отключайте locked mode в CI ради ошибки. Это сборка **для симулятора**, не IPA; отключение подписи нельзя переносить в инструкцию установки на телефон. Запуск общего экрана и настройка подписи остаются следующими проверками.
 
 Чтобы на Mac выбрать Android явно, передавайте `-p:TargetFramework=net10.0-android` в restore и `-f net10.0-android` в build. Android SDK/JDK в таком случае нужны и на Mac.
 
@@ -126,7 +123,7 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj \
 
 - `workflow_dispatch` означает запуск кнопкой, не при каждом push / pull request. `runner` — временная машина GitHub, исполняющая команды.
 - Выбран стандартный ARM64 runner `macos-15`, явно задан Xcode 26.0.1 вместо его устаревшего Xcode по умолчанию. SDK берётся из `global.json`, workload set закреплён на `10.0.100`. Наличие Xcode и архитектура проверяются до сборки. Если GitHub удалит эту версию из образа, workflow завершится с понятной ошибкой; автоматически переходить на несовместимый Xcode он не будет. [Состав ARM64-образа](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md).
-- Первое восстановление создаёт отсутствующий `packages.ios.lock.json`, затем выполняется locked restore для того же `iossimulator-arm64`. Если lock-файл уже сохранён в Git, разрешён только locked restore — CI не должен молча переписывать зависимости. Проверяется и неизменность Android lock-файла.
+- `packages.ios.lock.json` уже сохранён в Git, поэтому workflow выполняет только locked restore для того же `iossimulator-arm64`: CI не должен молча переписывать зависимости. Резервная ветка первого restore используется только при отсутствии файла. Проверяется и неизменность Android lock-файла. Установка через `sudo` и обычный restore используют разные HTTP-кэши NuGet; это исправило наблюдавшийся отказ доступа в первом запуске.
 - Выполняется Debug-сборка для симулятора с отключённой подписью, затем `plutil` проверяет уже упакованные `Info.plist` и `PrivacyInfo.xcprivacy`, наличие исполняемого файла проверяется отдельно. Симулятор не запускается: это проверка компиляции / упаковки, не экрана, API или устройства.
 - `artifact` — сохранённый результат job, доступный для скачивания после успеха. В нём только `NutriFlow-ios-simulator-arm64.tar.gz` и `packages.ios.lock.json`; `.app` помещён в tar, чтобы сохранить права исполняемых файлов. Срок хранения — семь дней. Ни IPA, ни сертификаты, ни полный рабочий каталог не публикуются.
 - Права workflow ограничены `contents: read`, Git-учётные данные не сохраняются после checkout. Apple-аккаунты / секреты и изменение настроек репозитория не нужны. Job ограничен 30 минутами, новый ручной запуск той же ветки отменяет предыдущий.
@@ -139,7 +136,7 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj \
 2. Нажмите **Run workflow**, выберите `main`, подтвердите запуск. Файл должен уже находиться в default branch; кнопка требует права записи в репозиторий. [Ручной запуск Actions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 3. Дождитесь завершения job. При ошибке откройте первый красный step и сохраните текст ошибки; успешный upload не подменяет успешную сборку.
 4. После успеха скачайте artifact `nutriflow-ios-simulator-<run id>-<attempt>`. Сохраните ссылку на run и SHA коммита: результат относится именно к нему.
-5. Полученный iOS lock-файл нужно отдельно проверить и закоммитить после первой реальной успешной сборки. Workflow не создаёт коммиты сам. После этого будущие запуски смогут проверять заранее зафиксированный граф.
+5. Lock-файл из первого успешного запуска уже проверен и сохранён в репозитории. Следующий run на актуальном `main` должен проверить именно его: новый `Run workflow`, не `Re-run jobs` старого коммита. Если обновляете зависимости, отдельно сравните новый artifact с отслеживаемым lock-файлом. Workflow не создаёт коммиты сам.
 
 **Архив симулятора нельзя установить на iPhone и нельзя считать IPA для AltStore.** Получение пакета для настоящего `ios-arm64`, проверка AOT / подписи, установка и обновление через выбранный способ — отдельный следующий шаг. Не передавайте Apple-пароль агенту и не сохраняйте сертификаты / пароли в YAML или Git.
 
