@@ -111,7 +111,9 @@ Program → Endpoints → MealWorkflowService
 
 ## Мобильный клиент
 
-`mobile/NutriFlow.Mobile.slnx` содержит только Android-проект .NET MAUI и не связан ProjectReference с сервером. Запуск: Android `MainApplication` вызывает `MauiProgram.CreateMauiApp`, приложение `App.CreateWindow` создаёт окно с `MainPage`. Разметка находится в XAML, C#-часть страницы пока только вызывает `InitializeComponent`. Нет HTTP, AI, расчётов, локальной БД или MVVM-пакета. Сборка APK заблокирована отсутствующим Android SDK/JDK; XML / restore проверены, запуск на устройстве нет. Требования и команды — в [MOBILE_CLIENT.md](MOBILE_CLIENT.md).
+`mobile/NutriFlow.Mobile.slnx` содержит один общий проект .NET MAUI и не связан ProjectReference с сервером. По умолчанию Windows собирает Android, macOS — iOS; платформенные lock-файлы не перезаписывают граф друг друга. Android `MainApplication` вызывает `MauiProgram.CreateMauiApp`. В iOS `Program.Main` запускает `UIApplication.Main` с `AppDelegate`, тот создаёт то же MAUI-приложение. Затем общий `App.CreateWindow` создаёт окно с `MainPage`.
+
+Разметка находится в XAML, C#-часть страницы пока только вызывает `InitializeComponent`. iOS `Info.plist` задаёт платформенные свойства, `PrivacyInfo.xcprivacy` включается ресурсом только в iOS-сборку. Нет HTTP, AI, расчётов, локальной БД или MVVM-пакета. APK заблокирован отсутствующим Android SDK/JDK; iOS не собран без workload / Mac / Xcode. XML и Android restore проверены, но это не компиляция и не запуск клиента. Требования, список загрузок и команды — в [MOBILE_CLIENT.md](MOBILE_CLIENT.md).
 
 ## Сборка и публикация
 

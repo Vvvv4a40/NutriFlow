@@ -16,3 +16,6 @@ appsettings.Local.json
 *.key
 *.keystore
 *.jks
+*.p12
+*.mobileprovision
+*.provisionprofile
