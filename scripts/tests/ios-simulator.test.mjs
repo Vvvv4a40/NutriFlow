@@ -10,6 +10,8 @@ const deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 const deviceId = "11111111-2222-3333-4444-555555555555";
 const bundleId = "com.nutriflow.app";
 const pid = 1234;
+const readinessBundleId = "com.apple.Preferences";
+const readinessPid = 4321;
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 
 function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
@@ -47,7 +49,9 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
             switch (args[1]) {
                 case "list": stdout = JSON.stringify(data); break;
                 case "create": stdout = deviceId; break;
-                case "launch": stdout = `${bundleId}: ${pid}\n`; break;
+                case "launch":
+                    stdout = args.at(-1) === readinessBundleId ? `${readinessBundleId}: ${readinessPid}\n` : `${bundleId}: ${pid}\n`;
+                    break;
                 case "spawn":
                     if (args[3] === "launchctl") {
                         processChecks++;
@@ -55,7 +59,7 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
                     }
                     break;
                 case "io": writeFileSync(args.at(-1), png); break;
-                default: assert.ok(["bootstatus", "install", "help", "shutdown", "delete"].includes(args[1]));
+                default: assert.ok(["bootstatus", "terminate", "install", "help", "shutdown", "delete"].includes(args[1]));
             }
         }
         return { status: 0, stdout, stderr: "" };
@@ -83,17 +87,24 @@ test("runs an isolated iPhone, checks PID around a PNG and deletes only its own 
     assert.equal(report.deviceTypeIdentifier, deviceType);
     assert.equal(report.pid, pid);
     assert.equal(report.screenshot, "startup.png");
-    assert.deepEqual(sample.pauses, [10_000, 5_000]);
+    assert.deepEqual(report.readiness, { bundleIdentifier: readinessBundleId, status: "passed", pid: readinessPid });
+    assert.deepEqual(sample.pauses, [700, 10_000, 5_000]);
     const commands = sample.calls.filter(call => call.command === "xcrun");
-    assert.deepEqual(commands.slice(0, 9).map(call => call.args[1]), [
-        "list", "create", "bootstatus", "install", "launch", "spawn", "spawn", "io", "spawn"
+    assert.deepEqual(commands.slice(0, 11).map(call => call.args[1]), [
+        "list", "create", "bootstatus", "launch", "terminate", "install", "launch", "spawn", "spawn", "io", "spawn"
     ]);
     assert.deepEqual(commands[1].args.slice(3), [deviceType, runtimeId]);
     assert.deepEqual(commands[2].args, ["simctl", "bootstatus", deviceId, "-b"]);
     assert.equal(commands[2].options.timeout, 240_000);
-    assert.deepEqual(commands[3].args, ["simctl", "install", deviceId, sample.bundlePath]);
-    assert.ok(commands[4].args.includes(`--stdout=${join(sample.outputDirectory, "app-stdout.log")}`));
-    assert.ok(!commands[4].args.some(arg => ["--console", "--console-pty"].includes(arg)));
+    assert.deepEqual(commands[3].args, ["simctl", "launch", deviceId, readinessBundleId]);
+    assert.deepEqual(commands[4].args, ["simctl", "terminate", deviceId, readinessBundleId]);
+    assert.equal(commands[3].options.timeout, 30_000);
+    assert.equal(commands[4].options.timeout, 30_000);
+    assert.deepEqual(commands[5].args, ["simctl", "install", deviceId, sample.bundlePath]);
+    assert.equal(commands[6].options.timeout, 60_000);
+    assert.deepEqual(commands[6].args, ["simctl", "launch", "--terminate-running-process",
+        `--stdout=${join(sample.outputDirectory, "app-stdout.log")}`,
+        `--stderr=${join(sample.outputDirectory, "app-stderr.log")}`, deviceId, bundleId]);
     for (const call of sample.calls) {
         assert.ok(call.options.timeout > 0 && call.options.timeout <= 240_000);
         assert.equal(call.options.shell, false);
@@ -141,11 +152,110 @@ test("does not delete an invalid UUID returned by create", async context => {
 for (const command of ["bootstatus", "install", "launch", "io"]) {
     test(`preserves ${command} failure and cleans up owned simulator`, async context => {
         const sample = fixture(context, { change: (_, args) =>
-            args[1] === command ? { status: 17, stdout: "", stderr: `${command} failed` } : undefined });
+            args[1] === command && (command !== "launch" || args.at(-1) === bundleId) ?
+                { status: 17, stdout: "", stderr: `${command} failed` } : undefined });
         await assert.rejects(sample.run(), new RegExp(`${command}.*failed`));
         assert.equal(sample.report().status, "failed");
         assertOwnedCleanup(sample.calls);
         assert.ok(sample.report().failure.includes("17"));
+    });
+}
+
+for (const command of ["launch", "terminate"]) {
+    test(`stops before install when Settings ${command} fails`, async context => {
+        const sample = fixture(context, { change: (_, args) =>
+            args[1] === command && args.at(-1) === readinessBundleId ? { status: 17, stderr: "Settings failed" } : undefined });
+        await assert.rejects(sample.run(), /Settings failed/);
+        const report = sample.report();
+        assert.equal(report.phase, `readiness-${command}`);
+        assert.equal(report.readiness.status, "failed");
+        assert.equal(report.readiness.failure, report.failure);
+        assert.ok(!sample.calls.some(call => call.args[1] === "install"));
+        assert.ok(!sample.calls.some(call => call.args[1] === "launch" && call.args.at(-1) === bundleId));
+        assertOwnedCleanup(sample.calls);
+        assert.ok(readFileSync(join(sample.outputDirectory, `readiness-${command}.log`), "utf8").includes("Settings failed"));
+    });
+
+    test(`reports Settings ${command} timeout as a readiness failure`, async context => {
+        const sample = fixture(context, { change: (_, args) =>
+            args[1] === command && args.at(-1) === readinessBundleId ? {
+                status: null, error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })
+            } : undefined });
+        await assert.rejects(sample.run(), /ETIMEDOUT/);
+        assert.equal(sample.report().phase, `readiness-${command}`);
+        assert.equal(sample.report().readiness.status, "failed");
+        assert.ok(!sample.calls.some(call => call.args[1] === "install"));
+        assertOwnedCleanup(sample.calls);
+        assert.ok(sample.calls.some(call => call.args.at(-1) === join(sample.outputDirectory, "failure.png")));
+    });
+}
+
+for (const text of [`${readinessBundleId}: 0`, `${readinessBundleId}: -1`, `${bundleId}: ${pid}`, `${readinessBundleId}: 9007199254740993`]) {
+    test(`rejects invalid Settings launch PID before install: ${text}`, async context => {
+        const sample = fixture(context, { change: (_, args) =>
+            args[1] === "launch" && args.at(-1) === readinessBundleId ? { status: 0, stdout: text } : undefined });
+        await assert.rejects(sample.run(), /positive PID/);
+        assert.equal(sample.report().phase, "readiness-launch");
+        assert.equal(sample.report().readiness.status, "failed");
+        assert.ok(!sample.calls.some(call => ["install", "terminate"].includes(call.args[1])));
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+test("keeps successful readiness separate from a NutriFlow launch timeout", async context => {
+    const sample = fixture(context, { change: (_, args) =>
+        args[1] === "launch" && args.at(-1) === bundleId ? {
+            status: null, error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })
+        } : undefined });
+    await assert.rejects(sample.run(), /ETIMEDOUT/);
+    const report = sample.report();
+    assert.equal(report.phase, "launch");
+    assert.equal(report.status, "failed");
+    assert.equal(report.readiness.status, "passed");
+    assert.equal(report.pid, undefined);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("captures bundle and system launch diagnostics even when Settings never opens", async context => {
+    const sample = fixture(context, { change: (_, args) => {
+        if (args[1] === "launch" && args.at(-1) === readinessBundleId) {
+            return { status: 17, stderr: "not ready" };
+        }
+        if (args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("SpringBoard")) {
+            return { status: 0, stdout: "SpringBoard readiness diagnostic" };
+        }
+    } });
+    await assert.rejects(sample.run(), /not ready/);
+    const logs = sample.calls.filter(call => call.args[1] === "spawn" && call.args[3] === "log");
+    assert.equal(logs.length, 2);
+    assert.equal(logs[0].args.at(-1), 'process == "NutriFlow.Mobile"');
+    assert.deepEqual(logs[1].args.slice(0, -1), [
+        "simctl", "spawn", deviceId, "log", "show", "--last", "10m", "--style", "compact", "--predicate"
+    ]);
+    assert.equal(logs[1].args.at(-1),
+        `eventMessage CONTAINS[c] "${bundleId}" OR eventMessage CONTAINS[c] "${readinessBundleId}" OR ` +
+        'process IN {"SpringBoard", "runningboardd", "launchd", "backboardd"}');
+    assert.equal(logs[1].options.maxBuffer, 4 * 1024 * 1024);
+    assert.equal(logs[1].options.timeout, 30_000);
+    assertOwnedCleanup(sample.calls);
+    assert.match(readFileSync(join(sample.outputDirectory, "launch-system.log"), "utf8"), /SpringBoard readiness diagnostic/);
+});
+
+for (const code of ["ETIMEDOUT", "ENOBUFS"]) {
+    test(`launch-log ${code} preserves the app failure and any partial output`, async context => {
+        const sample = fixture(context, { change: (_, args) => {
+            if (args[1] === "launch" && args.at(-1) === bundleId) {
+                return { status: 17, stderr: "original app error" };
+            }
+            if (args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("SpringBoard")) {
+                return { status: null, stdout: "partial launch diagnostics", error: Object.assign(new Error("capture failed"), { code }) };
+            }
+        } });
+        await assert.rejects(sample.run(), /original app error/);
+        assert.match(sample.report().failure, /original app error/);
+        assert.match(readFileSync(join(sample.outputDirectory, "launch-system.log"), "utf8"), /partial launch diagnostics/);
+        assert.match(readFileSync(join(sample.outputDirectory, "diagnostic-errors.log"), "utf8"), new RegExp(code));
+        assertOwnedCleanup(sample.calls);
     });
 }
 
@@ -161,7 +271,8 @@ test("reports a command timeout and still attempts bounded cleanup", async conte
 
 for (const text of [`${bundleId}: 0`, `${bundleId}: -1`, "another.bundle: 1234", `${bundleId}: 9007199254740993`]) {
     test(`rejects invalid launch PID: ${text}`, async context => {
-        const sample = fixture(context, { change: (_, args) => args[1] === "launch" ? { status: 0, stdout: text } : undefined });
+        const sample = fixture(context, { change: (_, args) =>
+            args[1] === "launch" && args.at(-1) === bundleId ? { status: 0, stdout: text } : undefined });
         await assert.rejects(sample.run(), /positive PID/);
         assertOwnedCleanup(sample.calls);
     });

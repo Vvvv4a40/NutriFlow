@@ -63,6 +63,15 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         }
     }
 
+    function readLaunchPid(output, bundleIdentifier) {
+        const prefix = `${bundleIdentifier}: `;
+        const pidText = output.startsWith(prefix) ? output.slice(prefix.length).trim() : "";
+        if (!/^[1-9][0-9]*$/.test(pidText) || !Number.isSafeInteger(Number(pidText))) {
+            throw new Error(`simctl launch did not return the app's positive PID for ${bundleIdentifier}.`);
+        }
+        return Number(pidText);
+    }
+
     function checkProcess(file) {
         const jobs = simctl(["spawn", deviceId, "launchctl", "list"], { file });
         const alive = jobs.split(/\r?\n/).some(line => {
@@ -112,6 +121,14 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
 
         report.phase = "boot";
         simctl(["bootstatus", deviceId, "-b"], { timeout: 240_000, file: "boot.log" });
+        report.phase = "readiness-launch";
+        report.readiness = { bundleIdentifier: "com.apple.Preferences", status: "running" };
+        const readinessLaunch = simctl(["launch", deviceId, report.readiness.bundleIdentifier], { file: "readiness-launch.log" });
+        report.readiness.pid = readLaunchPid(readinessLaunch, report.readiness.bundleIdentifier);
+        await pause(700);
+        report.phase = "readiness-terminate";
+        simctl(["terminate", deviceId, report.readiness.bundleIdentifier], { file: "readiness-terminate.log" });
+        report.readiness.status = "passed";
         report.phase = "install";
         simctl(["install", deviceId, bundlePath], { timeout: 60_000, file: "install.log" });
         report.phase = "launch";
@@ -119,12 +136,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
             `--stdout=${join(outputDirectory, "app-stdout.log")}`,
             `--stderr=${join(outputDirectory, "app-stderr.log")}`,
             deviceId, report.bundleIdentifier], { timeout: 60_000, file: "launch.log" });
-        const prefix = `${report.bundleIdentifier}: `;
-        const pidText = launch.startsWith(prefix) ? launch.slice(prefix.length).trim() : "";
-        if (!/^[1-9][0-9]*$/.test(pidText) || !Number.isSafeInteger(Number(pidText))) {
-            throw new Error("simctl launch did not return the app's positive PID.");
-        }
-        report.pid = Number(pidText);
+        report.pid = readLaunchPid(launch, report.bundleIdentifier);
 
         report.phase = "check-startup";
         checkProcess("process-after-launch.log");
@@ -143,6 +155,10 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         checkProcess("process-after-screenshot.log");
     } catch (error) {
         failure = error;
+        if (report.readiness?.status === "running") {
+            report.readiness.status = "failed";
+            report.readiness.failure = error.message;
+        }
     } finally {
         for (const command of ["bootstatus", "launch", "io"]) {
             diagnostic(() => simctl(["help", command], { timeout: 15_000, file: `help-${command}.log` }));
@@ -152,6 +168,13 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
             diagnostic(() => simctl(["spawn", deviceId, "launchctl", "list"], { file: "process-final.log" }));
             diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "3m", "--style", "compact",
                 "--predicate", `process == ${JSON.stringify(report.executable)}`], { file: "app-system.log" }));
+            const launchPredicate = [
+                `eventMessage CONTAINS[c] ${JSON.stringify(report.bundleIdentifier)}`,
+                'eventMessage CONTAINS[c] "com.apple.Preferences"',
+                'process IN {"SpringBoard", "runningboardd", "launchd", "backboardd"}'
+            ].join(" OR ");
+            diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "10m", "--style", "compact",
+                "--predicate", launchPredicate], { file: "launch-system.log" }));
             if (failure) {
                 diagnostic(() => simctl(["io", deviceId, "screenshot", "--type=png",
                     join(outputDirectory, "failure.png")], { file: "failure-screenshot.log" }));
