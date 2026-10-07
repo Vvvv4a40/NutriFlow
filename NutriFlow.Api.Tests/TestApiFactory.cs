@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -94,7 +93,7 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
-        SqliteConnection.ClearAllPools();
+        TestDatabasePool.Clear(_databasePath ?? Path.Combine(_directoryPath, "nutriflow.db"));
 
         if (Directory.Exists(_directoryPath))
         {
