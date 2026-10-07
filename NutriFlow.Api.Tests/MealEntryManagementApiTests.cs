@@ -189,7 +189,7 @@ public sealed class MealEntryManagementApiTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePool.Clear(databasePath);
             File.Delete(databasePath);
             File.Delete($"{databasePath}-wal");
             File.Delete($"{databasePath}-shm");

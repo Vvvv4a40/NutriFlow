@@ -291,7 +291,7 @@ public sealed class StartupConfigurationApiTests
         public override async ValueTask DisposeAsync()
         {
             await base.DisposeAsync();
-            SqliteConnection.ClearAllPools();
+            TestDatabasePool.Clear(Path.Combine(DirectoryPath, "nutriflow.db"));
 
             if (Directory.Exists(_contentRootPath))
             {

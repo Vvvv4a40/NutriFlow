@@ -12,6 +12,8 @@ const bundleId = "com.nutriflow.app";
 const pid = 1234;
 const readinessBundleId = "com.apple.Preferences";
 const readinessPid = 4321;
+const bootPassed = "[2026-10-07 16:32:21 +0000] Status=4294967295, isTerminal=YES, Elapsed=01:26.\n\tFinished\n";
+const bootMigrationFailed = "[2026-10-07 18:17:38 +0000] Status=3, isTerminal=YES, Elapsed=01:57.\n\tData Migration Failed\n";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 
 function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
@@ -49,6 +51,7 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
             switch (args[1]) {
                 case "list": stdout = JSON.stringify(data); break;
                 case "create": stdout = deviceId; break;
+                case "bootstatus": stdout = bootPassed; break;
                 case "launch":
                     stdout = args.at(-1) === readinessBundleId ? `${readinessBundleId}: ${readinessPid}\n` : `${bundleId}: ${pid}\n`;
                     break;
@@ -59,7 +62,7 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
                     }
                     break;
                 case "io": writeFileSync(args.at(-1), png); break;
-                default: assert.ok(["bootstatus", "terminate", "install", "help", "shutdown", "delete"].includes(args[1]));
+                default: assert.ok(["terminate", "install", "help", "shutdown", "delete"].includes(args[1]));
             }
         }
         return { status: 0, stdout, stderr: "" };
@@ -72,9 +75,10 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
     };
 }
 
-function assertOwnedCleanup(calls) {
+function assertOwnedCleanup(calls, recoveryAttempted = false) {
     const cleanup = calls.filter(call => ["shutdown", "delete"].includes(call.args[1]));
     assert.deepEqual(cleanup.map(call => call.args), [
+        ...(recoveryAttempted ? [["simctl", "shutdown", deviceId]] : []),
         ["simctl", "shutdown", deviceId], ["simctl", "delete", deviceId]
     ]);
 }
@@ -87,6 +91,7 @@ test("runs an isolated iPhone, checks PID around a PNG and deletes only its own 
     assert.equal(report.deviceTypeIdentifier, deviceType);
     assert.equal(report.pid, pid);
     assert.equal(report.screenshot, "startup.png");
+    assert.deepEqual(report.bootAttempts, [{ number: 1, log: "boot.log", status: "passed", terminalStatus: "4294967295", summary: "Finished" }]);
     assert.deepEqual(report.readiness, { bundleIdentifier: readinessBundleId, status: "passed", pid: readinessPid });
     assert.deepEqual(sample.pauses, [700, 10_000, 5_000]);
     const commands = sample.calls.filter(call => call.command === "xcrun");
@@ -147,6 +152,171 @@ test("does not delete an invalid UUID returned by create", async context => {
     const sample = fixture(context, { change: (_, args) => args[1] === "create" ? { status: 0, stdout: "all" } : undefined });
     await assert.rejects(sample.run(), /valid device UUID/);
     assert.ok(!sample.calls.some(call => ["shutdown", "delete"].includes(call.args[1])));
+});
+
+test("restarts only its own device once after a migration failure despite exit zero", async context => {
+    const sample = fixture(context, { change: (_, args, calls) => {
+        if (args[1] === "bootstatus" && calls.filter(call => call.args[1] === "bootstatus").length === 1) {
+            return { status: 0, stdout: bootMigrationFailed };
+        }
+        if (args[1] === "shutdown") {
+            return { status: 0, stdout: "shutdown completed" };
+        }
+    } });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.readiness.status, "passed");
+    assert.deepEqual(report.bootAttempts, [
+        { number: 1, log: "boot.log", status: "migration-failed", terminalStatus: "3", summary: "Data Migration Failed" },
+        { number: 2, log: "boot-retry.log", status: "passed", terminalStatus: "4294967295", summary: "Finished" }
+    ]);
+    const commands = sample.calls.filter(call => call.command === "xcrun");
+    assert.deepEqual(commands.slice(0, 9).map(call => call.args[1]), [
+        "list", "create", "bootstatus", "shutdown", "bootstatus", "launch", "terminate", "install", "launch"
+    ]);
+    for (const index of [2, 4]) {
+        assert.deepEqual(commands[index].args, ["simctl", "bootstatus", deviceId, "-b"]);
+        assert.equal(commands[index].options.timeout, 240_000);
+    }
+    assert.equal(commands[3].options.timeout, 15_000);
+    assert.match(readFileSync(join(sample.outputDirectory, "boot.log"), "utf8"), /Data Migration Failed/);
+    assert.match(readFileSync(join(sample.outputDirectory, "boot-retry.log"), "utf8"), /Finished/);
+    assert.match(readFileSync(join(sample.outputDirectory, "boot-restart.log"), "utf8"), /shutdown completed/);
+    assertOwnedCleanup(sample.calls, true);
+    assert.equal(sample.calls.filter(call => call.args[1] === "create").length, 1);
+    assert.ok(!sample.calls.some(call => call.args.includes("erase")));
+});
+
+for (const ending of ["\n", "\r\n"]) {
+    test(`accepts the final successful boot status with ${JSON.stringify(ending)} line endings`, async context => {
+        const output = ("[2026-10-07 16:32:14 +0000] Status=4, isTerminal=NO, Elapsed=01:19.\n\tWaiting on System App\n\n" + bootPassed).replaceAll("\n", ending);
+        const sample = fixture(context, { change: (_, args) => args[1] === "bootstatus" ? { status: 0, stdout: output } : undefined });
+        await sample.run();
+        assert.equal(sample.report().bootAttempts[0].status, "passed");
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+for (const [name, output] of [
+    ["empty", ""],
+    ["bare Finished", "Finished"],
+    ["bare migration failure", "Data Migration Failed"],
+    ["unknown terminal status", bootPassed.replace("4294967295", "5")],
+    ["failure code with success summary", bootMigrationFailed.replace("Data Migration Failed", "Finished")],
+    ["success code with failure summary", bootPassed.replace("Finished", "Data Migration Failed")],
+    ["nonterminal success code", bootPassed.replace("isTerminal=YES", "isTerminal=NO")],
+    ["missing summary", bootPassed.replace("\tFinished\n", "")],
+    ["trailing nonterminal status", bootPassed + "[2026-10-07 16:32:22 +0000] Status=4, isTerminal=NO, Elapsed=01:27."],
+    ["conflicting failure text", bootPassed + "Data Migration Failed\n"],
+    ["conflicting terminal results", bootMigrationFailed + bootPassed],
+    ["reverse conflicting terminal results", bootPassed + bootMigrationFailed],
+    ["duplicate terminal result", bootPassed + bootPassed],
+    ["unknown terminal result before success", bootPassed.replace("4294967295", "5") + bootPassed],
+    ["unknown terminal result before migration failure", bootPassed.replace("4294967295", "5") + bootMigrationFailed]
+]) {
+    test(`rejects ${name} boot output without recovery or installation`, async context => {
+        const sample = fixture(context, { change: (_, args) => args[1] === "bootstatus" ? { status: 0, stdout: output } : undefined });
+        await assert.rejects(sample.run(), /boot did not finish successfully/);
+        const report = sample.report();
+        assert.equal(report.phase, "boot");
+        assert.equal(report.bootAttempts.length, 1);
+        assert.equal(report.bootAttempts[0].status, "unrecognized");
+        assert.equal(report.readiness, undefined);
+        assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+test("stops after a second migration failure without a third boot", async context => {
+    const sample = fixture(context, { change: (_, args) => args[1] === "bootstatus" ? { status: 0, stdout: bootMigrationFailed } : undefined });
+    await assert.rejects(sample.run(), /Data Migration Failed/);
+    const report = sample.report();
+    assert.equal(report.phase, "boot-retry");
+    assert.deepEqual(report.bootAttempts.map(attempt => attempt.status), ["migration-failed", "migration-failed"]);
+    assert.equal(sample.calls.filter(call => call.args[1] === "bootstatus").length, 2);
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assertOwnedCleanup(sample.calls, true);
+});
+
+for (const [name, result, status, error] of [
+    ["nonzero exit", { status: 17, stderr: "retry failed" }, "command-failed", /retry failed/],
+    ["timeout", { status: null, error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }) }, "command-failed", /ETIMEDOUT/],
+    ["unrecognized output", { status: 0, stdout: "unknown boot output" }, "unrecognized", /boot did not finish successfully/]
+]) {
+    test(`does not retry a failed recovery boot: ${name}`, async context => {
+        const sample = fixture(context, { change: (_, args, calls) => {
+            if (args[1] === "bootstatus") {
+                return calls.filter(call => call.args[1] === "bootstatus").length === 1 ? { status: 0, stdout: bootMigrationFailed } : result;
+            }
+        } });
+        await assert.rejects(sample.run(), error);
+        assert.equal(sample.report().phase, "boot-retry");
+        assert.deepEqual(sample.report().bootAttempts.map(attempt => attempt.status), ["migration-failed", status]);
+        assert.equal(sample.calls.filter(call => call.args[1] === "bootstatus").length, 2);
+        assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+        assertOwnedCleanup(sample.calls, true);
+    });
+}
+
+test("does not recover a nonzero command exit even if stdout reports migration failure", async context => {
+    const sample = fixture(context, { change: (_, args) => args[1] === "bootstatus" ? { status: 17, stdout: bootMigrationFailed } : undefined });
+    await assert.rejects(sample.run(), /failed: 17/);
+    assert.equal(sample.report().bootAttempts[0].status, "command-failed");
+    assert.equal(sample.calls.filter(call => call.args[1] === "bootstatus").length, 1);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("recognizes a migration failure written only to stderr", async context => {
+    const sample = fixture(context, { change: (_, args, calls) =>
+        args[1] === "bootstatus" && calls.filter(call => call.args[1] === "bootstatus").length === 1 ?
+            { status: 0, stdout: "", stderr: bootMigrationFailed } : undefined });
+    await sample.run();
+    assert.deepEqual(sample.report().bootAttempts.map(attempt => attempt.status), ["migration-failed", "passed"]);
+    assert.match(readFileSync(join(sample.outputDirectory, "boot.log"), "utf8"), /Data Migration Failed/);
+    assertOwnedCleanup(sample.calls, true);
+});
+
+test("recognizes successful boot written only to stderr without changing launch PID parsing", async context => {
+    const sample = fixture(context, { change: (_, args) => args[1] === "bootstatus" ? { status: 0, stdout: "", stderr: bootPassed } : undefined });
+    const report = await sample.run();
+    assert.equal(report.bootAttempts[0].status, "passed");
+    assert.equal(report.pid, pid);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a failed recovery shutdown stops before another boot and still cleans up", async context => {
+    const sample = fixture(context, { change: (_, args, calls) => {
+        if (args[1] === "bootstatus") {
+            return { status: 0, stdout: bootMigrationFailed };
+        }
+        if (args[1] === "shutdown" && calls.filter(call => call.args[1] === "shutdown").length === 1) {
+            return { status: 17, stderr: "recovery shutdown failed" };
+        }
+    } });
+    await assert.rejects(sample.run(), /recovery shutdown failed/);
+    assert.equal(sample.report().phase, "restart-after-migration-failure");
+    assert.equal(sample.report().bootAttempts.length, 1);
+    assert.equal(sample.calls.filter(call => call.args[1] === "bootstatus").length, 1);
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assertOwnedCleanup(sample.calls, true);
+});
+
+test("a readiness failure after recovered boot does not trigger another restart", async context => {
+    const sample = fixture(context, { change: (_, args, calls) => {
+        if (args[1] === "bootstatus" && calls.filter(call => call.args[1] === "bootstatus").length === 1) {
+            return { status: 0, stdout: bootMigrationFailed };
+        }
+        if (args[1] === "launch" && args.at(-1) === readinessBundleId) {
+            return { status: 17, stderr: "Settings failed" };
+        }
+    } });
+    await assert.rejects(sample.run(), /Settings failed/);
+    assert.equal(sample.report().phase, "readiness-launch");
+    assert.equal(sample.report().readiness.status, "failed");
+    assert.deepEqual(sample.report().bootAttempts.map(attempt => attempt.status), ["migration-failed", "passed"]);
+    assert.equal(sample.calls.filter(call => call.args[1] === "bootstatus").length, 2);
+    assert.ok(!sample.calls.some(call => call.args[1] === "install"));
+    assertOwnedCleanup(sample.calls, true);
 });
 
 for (const command of ["bootstatus", "install", "launch", "io"]) {
@@ -221,8 +391,8 @@ test("captures bundle and system launch diagnostics even when Settings never ope
         if (args[1] === "launch" && args.at(-1) === readinessBundleId) {
             return { status: 17, stderr: "not ready" };
         }
-        if (args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("SpringBoard")) {
-            return { status: 0, stdout: "SpringBoard readiness diagnostic" };
+        if (args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("com.apple.datamigrator")) {
+            return { status: 0, stdout: "SpringBoard: com.apple.Preferences readiness diagnostic" };
         }
     } });
     await assert.rejects(sample.run(), /not ready/);
@@ -230,15 +400,16 @@ test("captures bundle and system launch diagnostics even when Settings never ope
     assert.equal(logs.length, 2);
     assert.equal(logs[0].args.at(-1), 'process == "NutriFlow.Mobile"');
     assert.deepEqual(logs[1].args.slice(0, -1), [
-        "simctl", "spawn", deviceId, "log", "show", "--last", "10m", "--style", "compact", "--predicate"
+        "simctl", "spawn", deviceId, "log", "show", "--last", "20m", "--style", "compact", "--predicate"
     ]);
     assert.equal(logs[1].args.at(-1),
         `eventMessage CONTAINS[c] "${bundleId}" OR eventMessage CONTAINS[c] "${readinessBundleId}" OR ` +
-        'process IN {"SpringBoard", "runningboardd", "launchd", "backboardd"}');
+        '(process == "com.apple.datamigrator" AND (eventMessage CONTAINS[c] "error" OR eventMessage CONTAINS[c] "failed" OR eventMessage CONTAINS[c] "watchdog"))');
+    assert.ok(!logs[1].args.at(-1).includes("process IN"));
     assert.equal(logs[1].options.maxBuffer, 4 * 1024 * 1024);
     assert.equal(logs[1].options.timeout, 30_000);
     assertOwnedCleanup(sample.calls);
-    assert.match(readFileSync(join(sample.outputDirectory, "launch-system.log"), "utf8"), /SpringBoard readiness diagnostic/);
+    assert.match(readFileSync(join(sample.outputDirectory, "launch-system.log"), "utf8"), /com.apple.Preferences readiness diagnostic/);
 });
 
 for (const code of ["ETIMEDOUT", "ENOBUFS"]) {
@@ -247,7 +418,7 @@ for (const code of ["ETIMEDOUT", "ENOBUFS"]) {
             if (args[1] === "launch" && args.at(-1) === bundleId) {
                 return { status: 17, stderr: "original app error" };
             }
-            if (args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("SpringBoard")) {
+            if (args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("com.apple.datamigrator")) {
                 return { status: null, stdout: "partial launch diagnostics", error: Object.assign(new Error("capture failed"), { code }) };
             }
         } });
@@ -375,9 +546,12 @@ test("a diagnostic write failure cannot make an otherwise successful run green",
     assertOwnedCleanup(sample.calls);
 });
 
-test("workflow time budget includes commands, pauses, failure PNG and cleanup reserve", async context => {
-    const sample = fixture(context);
+test("workflow time budget includes one recovery boot, diagnostics and cleanup reserve", async context => {
+    const sample = fixture(context, { change: (_, args, calls) =>
+        args[1] === "bootstatus" && calls.filter(call => call.args[1] === "bootstatus").length === 1 ?
+            { status: 0, stdout: bootMigrationFailed } : undefined });
     await sample.run();
+    assert.equal(sample.report().bootAttempts.length, 2);
     const workflow = readFileSync(new URL("../../.github/workflows/ios-simulator.yml", import.meta.url), "utf8");
     const limit = Number(/id: ios_smoke\s+timeout-minutes: (\d+)/.exec(workflow)?.[1]) * 60_000;
     const commandBudget = sample.calls.reduce((total, call) => total + call.options.timeout, 0);

@@ -402,7 +402,7 @@ public sealed class LabelPhotoOwnershipApiTests
 
         public ValueTask DisposeAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePool.Clear(DatabasePath);
             Directory.Delete(_directoryPath, recursive: true);
             return ValueTask.CompletedTask;
         }

@@ -34,7 +34,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         }
     }
 
-    function invoke(command, args, { timeout = 30_000, file } = {}) {
+    function invoke(command, args, { timeout = 30_000, file, includeStderr = false } = {}) {
         record(commandLog, `${JSON.stringify([command, ...args])}\n`, true);
         const result = execute(command, args, {
             encoding: "utf8", timeout, killSignal: "SIGKILL", maxBuffer: 4 * 1024 * 1024, shell: false
@@ -48,7 +48,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         if (result.error || result.status !== 0) {
             throw new Error(`${command} ${args.join(" ")} failed: ${result.error?.code ?? result.status}; ${stderr.trim()}`);
         }
-        return stdout.trim();
+        return (includeStderr ? `${stdout}\n${stderr}` : stdout).trim();
     }
 
     function simctl(args, options) {
@@ -70,6 +70,22 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
             throw new Error(`simctl launch did not return the app's positive PID for ${bundleIdentifier}.`);
         }
         return Number(pidText);
+    }
+
+    function readBootStatus(output) {
+        const updates = [...output.matchAll(/^(?:\[[^\]\r\n]+\][ \t]*)?Status=(\d+),[ \t]*isTerminal=(YES|NO),[^\r\n]*$/gm)];
+        const last = updates.at(-1);
+        const terminalStatus = last?.[2] === "YES" ? last[1] : null;
+        const summary = last ? /^\r?\n([^\r\n]*)/.exec(output.slice(last.index + last[0].length))?.[1].trim() ?? null : null;
+        let status = "unrecognized";
+        if (last?.[2] === "YES" && updates.filter(update => update[2] === "YES").length === 1) {
+            if (terminalStatus === "4294967295" && summary === "Finished" && !/^[ \t]*Data Migration Failed[ \t]*\r?$/m.test(output)) {
+                status = "passed";
+            } else if (terminalStatus === "3" && summary === "Data Migration Failed") {
+                status = "migration-failed";
+            }
+        }
+        return { status, terminalStatus, summary };
     }
 
     function checkProcess(file) {
@@ -119,8 +135,29 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         deviceId = createdId;
         report.deviceId = deviceId;
 
-        report.phase = "boot";
-        simctl(["bootstatus", deviceId, "-b"], { timeout: 240_000, file: "boot.log" });
+        report.bootAttempts = [];
+        for (let number = 1; number <= 2; number++) {
+            report.phase = number === 1 ? "boot" : "boot-retry";
+            const attempt = { number, log: number === 1 ? "boot.log" : "boot-retry.log", status: "running" };
+            report.bootAttempts.push(attempt);
+            try {
+                const output = simctl(["bootstatus", deviceId, "-b"], { timeout: 240_000, file: attempt.log, includeStderr: true });
+                Object.assign(attempt, readBootStatus(output));
+            } catch (error) {
+                attempt.status = "command-failed";
+                attempt.failure = error.message;
+                throw error;
+            }
+            if (attempt.status === "passed") {
+                break;
+            }
+            if (number === 1 && attempt.status === "migration-failed") {
+                report.phase = "restart-after-migration-failure";
+                simctl(["shutdown", deviceId], { timeout: 15_000, file: "boot-restart.log" });
+                continue;
+            }
+            throw new Error(`The iOS simulator boot did not finish successfully (terminal status ${attempt.terminalStatus ?? "missing"}; ${attempt.summary ?? "missing summary"}).`);
+        }
         report.phase = "readiness-launch";
         report.readiness = { bundleIdentifier: "com.apple.Preferences", status: "running" };
         const readinessLaunch = simctl(["launch", deviceId, report.readiness.bundleIdentifier], { file: "readiness-launch.log" });
@@ -171,9 +208,9 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
             const launchPredicate = [
                 `eventMessage CONTAINS[c] ${JSON.stringify(report.bundleIdentifier)}`,
                 'eventMessage CONTAINS[c] "com.apple.Preferences"',
-                'process IN {"SpringBoard", "runningboardd", "launchd", "backboardd"}'
+                '(process == "com.apple.datamigrator" AND (eventMessage CONTAINS[c] "error" OR eventMessage CONTAINS[c] "failed" OR eventMessage CONTAINS[c] "watchdog"))'
             ].join(" OR ");
-            diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "10m", "--style", "compact",
+            diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "20m", "--style", "compact",
                 "--predicate", launchPredicate], { file: "launch-system.log" }));
             if (failure) {
                 diagnostic(() => simctl(["io", deviceId, "screenshot", "--type=png",

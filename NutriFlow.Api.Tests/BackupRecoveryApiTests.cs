@@ -414,7 +414,7 @@ public sealed class BackupRecoveryApiTests
 
         public async Task BackupAndRestoreAsync()
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePool.Clear(Path.Combine(SourcePath, "nutriflow.db"));
             await DataBackup.CreateAsync(Path.Combine(SourcePath, "nutriflow.db"), SourcePhotosPath, BackupPath);
             Assert.False(Directory.Exists(RestoredPath));
             await DataBackup.RestoreAsync(BackupPath, RestoredPath);
@@ -430,7 +430,8 @@ public sealed class BackupRecoveryApiTests
 
         public void Dispose()
         {
-            SqliteConnection.ClearAllPools();
+            TestDatabasePool.Clear(Path.Combine(SourcePath, "nutriflow.db"));
+            TestDatabasePool.Clear(RestoredDatabasePath);
             Directory.Delete(_rootPath, recursive: true);
         }
     }
