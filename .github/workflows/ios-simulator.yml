@@ -54,6 +54,13 @@ jobs:
           xcrun --sdk iphonesimulator --show-sdk-version
           dotnet --info
 
+      - name: Test simulator smoke orchestration
+        timeout-minutes: 2
+        run: |
+          node --version
+          node --check scripts/test-ios-simulator.mjs
+          node --test scripts/tests/ios-simulator.test.mjs
+
       - name: Configure NuGet HTTP cache
         run: |
           mkdir -p "$RUNNER_TEMP/nuget-http-cache"
@@ -103,4 +110,21 @@ jobs:
           name: nutriflow-ios-simulator-${{ github.run_id }}-${{ github.run_attempt }}
           path: ios-ci-artifacts/
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Launch app in isolated iOS simulator
+        id: ios_smoke
+        timeout-minutes: 15
+        run: |
+          node scripts/test-ios-simulator.mjs \
+            "mobile/NutriFlow.Mobile/bin/Debug/net10.0-ios/$IOS_RUNTIME/NutriFlow.Mobile.app" \
+            "$RUNNER_TEMP/ios-smoke"
+
+      - name: Upload simulator startup diagnostics
+        if: ${{ !cancelled() && (steps.ios_smoke.outcome == 'success' || steps.ios_smoke.outcome == 'failure') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-ios-startup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-smoke/
+          if-no-files-found: warn
           retention-days: 7
