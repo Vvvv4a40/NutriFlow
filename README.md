@@ -115,7 +115,7 @@ flowchart LR
 
 Ручной [iOS device build](https://github.com/Vvvv4a40/NutriFlow/actions/workflows/ios-device.yml) проверен в [run 37773708893](https://github.com/Vvvv4a40/NutriFlow/actions/runs/37773708893): Release / `ios-arm64`, настоящая Mono AOT-компиляция с LLVM без интерпретатора, 0 предупреждений / ошибок. Проверка MSBuild-свойств, манифестов, платформы `IOS` главного Mach-O и AOT-данных прошла; отдельный device lock сохранён из реального NuGet-артефакта без изменения версий пакетов. В этот run вошёл `.app` в tar без установочной IPA. Теперь workflow отдельно упаковывает unsigned IPA и проверяет её до публикации; фактический результат нового прогона фиксируется в [PROGRESS.md](docs/PROGRESS.md). [Подробности](docs/MOBILE_CLIENT.md#проверка-сборки-для-физического-iphone).
 
-Для личной установки без собственного Mac выбран [бесплатный AltStore Classic через Windows](docs/IOS_INSTALLATION.md) с периодическим обновлением подписи. IPA — отдельный проверяемый артефакт device workflow, не готовая Apple-подпись. Аккаунт / ключи в CI не передаются; настройка AltServer, подпись, настоящая установка и запуск остаются личными действиями пользователя.
+Для личной установки без собственного Mac выбран [бесплатный AltStore Classic через Windows](docs/IOS_INSTALLATION.md) с периодическим обновлением подписи. [Run 37790057827](https://github.com/Vvvv4a40/NutriFlow/actions/runs/37790057827) подтвердил упаковку IPA на Mac; файл скачан и сверён по SHA-256 на Windows. IPA — отдельный проверенный артефакт device workflow, не готовая Apple-подпись. Аккаунт / ключи в CI не передаются; настройка AltServer, подпись, настоящая установка и запуск остаются личными действиями пользователя.
 
 ## Быстрый запуск без внешних ключей
 
