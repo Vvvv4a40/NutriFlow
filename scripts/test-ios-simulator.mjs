@@ -52,7 +52,9 @@ export async function testIosSimulator({
             record(join(outputDirectory, file), `${stdout}\n${stderr}`);
         }
         if (result.error || result.status !== 0) {
-            throw new Error(`${command} ${args.join(" ")} failed: ${result.error?.code ?? result.status}; ${stderr.trim()}`);
+            throw Object.assign(new Error(`${command} ${args.join(" ")} failed: ${result.error?.code ?? result.status}; ${stderr.trim()}`), {
+                exitStatus: result.status, stderr, commandError: result.error ?? null
+            });
         }
         return (includeStderr ? `${stdout}\n${stderr}` : stdout).trim();
     }
@@ -182,6 +184,39 @@ export async function testIosSimulator({
         throw terminationFailure;
     }
 
+    function shutdownSimulator() {
+        const cleanup = report.deviceCleanup.shutdown;
+        try {
+            simctl(["shutdown", deviceId], { timeout: 15_000, file: "cleanup-shutdown.log" });
+            Object.assign(cleanup, { status: "passed", alreadyShutdown: false });
+        } catch (error) {
+            const alreadyShutdownMessage = /^An error was encountered processing the command \(domain=com\.apple\.CoreSimulator\.SimError, code=405\):\r?\nUnable to shutdown device in current state: Shutdown$/;
+            if (error.exitStatus === 149 && error.commandError === null && alreadyShutdownMessage.test(error.stderr.trim())) {
+                try {
+                    const inventory = JSON.parse(simctl(["list", "devices", "--json"], {
+                        timeout: 15_000, file: "cleanup-device-state.json"
+                    }));
+                    const groups = Object.values(inventory.devices);
+                    if (Array.isArray(inventory.devices) || !groups.every(Array.isArray)) {
+                        throw new Error("The simulator inventory must contain device arrays grouped by runtime.");
+                    }
+                    const devices = groups.flat();
+                    const owned = devices.filter(device => device?.udid === deviceId);
+                    if (owned.length !== 1 || owned[0].state !== "Shutdown") {
+                        throw new Error("The owned simulator's Shutdown state could not be verified uniquely.");
+                    }
+                    Object.assign(cleanup, { status: "passed", alreadyShutdown: true,
+                        verifiedState: "Shutdown", commandFailure: error.message });
+                    return;
+                } catch (verificationError) {
+                    cleanup.verificationFailure = verificationError.message;
+                }
+            }
+            Object.assign(cleanup, { status: "failed", failure: error.message });
+            throw error;
+        }
+    }
+
     function readLaunchPid(output, bundleIdentifier) {
         const prefix = `${bundleIdentifier}: `;
         const pidText = output.startsWith(prefix) ? output.slice(prefix.length).trim() : "";
@@ -295,7 +330,7 @@ export async function testIosSimulator({
         await checkSimulatorUi();
         report.phase = "readiness-launch";
         report.readiness = { bundleIdentifier: "com.apple.Preferences", status: "running" };
-        const readinessLaunch = simctl(["launch", deviceId, report.readiness.bundleIdentifier], { file: "readiness-launch.log" });
+        const readinessLaunch = simctl(["launch", deviceId, report.readiness.bundleIdentifier], { timeout: 120_000, file: "readiness-launch.log" });
         report.readiness.pid = readLaunchPid(readinessLaunch, report.readiness.bundleIdentifier);
         await pause(700);
         report.phase = "readiness-terminate";
@@ -371,13 +406,21 @@ export async function testIosSimulator({
             } catch (error) {
                 failure ??= error;
             }
-            for (const command of ["shutdown", "delete"]) {
-                try {
-                    simctl([command, deviceId], { timeout: 15_000 });
-                } catch (error) {
-                    failure ??= error;
-                }
+            report.deviceCleanup = { deviceId, shutdown: { status: "pending" }, delete: { status: "pending" } };
+            try {
+                shutdownSimulator();
+            } catch (error) {
+                failure ??= error;
             }
+            try {
+                simctl(["delete", deviceId], { timeout: 15_000, file: "cleanup-delete.log" });
+                report.deviceCleanup.delete.status = "passed";
+            } catch (error) {
+                Object.assign(report.deviceCleanup.delete, { status: "failed", failure: error.message });
+                failure ??= error;
+            }
+            report.deviceCleanup.status = report.deviceCleanup.shutdown.status === "passed" &&
+                report.deviceCleanup.delete.status === "passed" ? "passed" : "failed";
         }
         failure ??= recordingFailure;
         report.status = failure ? "failed" : "passed";

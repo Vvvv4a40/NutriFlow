@@ -14,6 +14,8 @@ const pid = 1234;
 const readinessBundleId = "com.apple.Preferences";
 const readinessPid = 4321;
 const simulatorUiPid = 9876;
+const alreadyShutdown = { status: 149, stdout: "", stderr: "An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=405):\nUnable to shutdown device in current state: Shutdown\n" };
+const shutdownInventory = { devices: { [runtimeId]: [{ udid: deviceId, state: "Shutdown" }] } };
 const bootPassed = "[2026-10-07 16:32:21 +0000] Status=4294967295, isTerminal=YES, Elapsed=01:26.\n\tFinished\n";
 const bootMigrationFailed = "[2026-10-07 18:17:38 +0000] Status=3, isTerminal=YES, Elapsed=01:57.\n\tData Migration Failed\n";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
@@ -139,6 +141,11 @@ function assertOwnedCleanup(calls, recoveryAttempted = false) {
     ]);
 }
 
+function isCleanupStateQuery(command, args, calls) {
+    return command === "xcrun" && args[1] === "list" && args[2] === "devices" &&
+        calls.some(call => call.args[1] === "shutdown");
+}
+
 async function waitForUiSignal(sample, signal) {
     for (let turn = 0; turn < 10 && !sample.uiProcesses[0]?.signals.includes(signal); turn++) {
         await new Promise(resolve => setImmediate(resolve));
@@ -163,6 +170,9 @@ test("runs an isolated iPhone, checks PID around a PNG and deletes only its own 
         args: ["-CurrentDeviceUDID", deviceId, "-StartLastDeviceOnLaunch", "0", "-ConnectHardwareKeyboard", "0", "-PasteboardAutomaticSync", "0"],
         options: { stdio: "ignore", shell: false, detached: false } }]);
     assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+    assert.deepEqual(report.deviceCleanup, {
+        deviceId, shutdown: { status: "passed", alreadyShutdown: false }, delete: { status: "passed" }, status: "passed"
+    });
     assert.deepEqual(sample.pauses, [700, 10_000, 5_000]);
     const commands = sample.calls.filter(call => call.command === "xcrun");
     assert.deepEqual(commands.slice(0, 11).map(call => call.args[1]), [
@@ -173,9 +183,10 @@ test("runs an isolated iPhone, checks PID around a PNG and deletes only its own 
     assert.equal(commands[2].options.timeout, 240_000);
     assert.deepEqual(commands[3].args, ["simctl", "launch", deviceId, readinessBundleId]);
     assert.deepEqual(commands[4].args, ["simctl", "terminate", deviceId, readinessBundleId]);
-    assert.equal(commands[3].options.timeout, 30_000);
+    assert.equal(commands[3].options.timeout, 120_000);
     assert.equal(commands[4].options.timeout, 30_000);
     assert.deepEqual(commands[5].args, ["simctl", "install", deviceId, sample.bundlePath]);
+    assert.equal(commands[5].options.timeout, 60_000);
     assert.equal(commands[6].options.timeout, 60_000);
     assert.deepEqual(commands[6].args, ["simctl", "launch", "--terminate-running-process",
         `--stdout=${join(sample.outputDirectory, "app-stdout.log")}`,
@@ -908,6 +919,217 @@ test("cleanup failure also fails an otherwise successful smoke", async context =
     assert.equal(sample.report().status, "failed");
 });
 
+test("accepts an already-shutdown response only after uniquely verifying the owned device state", async context => {
+    const sample = fixture(context, { change: (command, args, calls) => {
+        if (args[1] === "shutdown") {
+            assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+            assert.equal(sample.uiProcesses[0].signalCode, "SIGTERM");
+            return alreadyShutdown;
+        }
+        if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify(shutdownInventory) };
+    } });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.deviceCleanup.status, "passed");
+    assert.equal(report.deviceCleanup.deviceId, deviceId);
+    assert.equal(report.deviceCleanup.shutdown.status, "passed");
+    assert.equal(report.deviceCleanup.shutdown.alreadyShutdown, true);
+    assert.equal(report.deviceCleanup.shutdown.verifiedState, "Shutdown");
+    assert.match(report.deviceCleanup.shutdown.commandFailure, /149/);
+    assert.match(report.deviceCleanup.shutdown.commandFailure, /code=405/);
+    assert.deepEqual(report.deviceCleanup.delete, { status: "passed" });
+    const queries = sample.calls.filter(call => isCleanupStateQuery(call.command, call.args, sample.calls.slice(0, sample.calls.indexOf(call))));
+    assert.equal(queries.length, 1);
+    assert.deepEqual(queries[0].args, ["simctl", "list", "devices", "--json"]);
+    assert.equal(queries[0].options.timeout, 15_000);
+    assert.ok(sample.calls.findIndex(call => call.args[1] === "shutdown") < sample.calls.indexOf(queries[0]));
+    assert.ok(sample.calls.indexOf(queries[0]) < sample.calls.findIndex(call => call.args[1] === "delete"));
+    assert.deepEqual(JSON.parse(readFileSync(join(sample.outputDirectory, "cleanup-device-state.json"), "utf8")), shutdownInventory);
+    assert.match(readFileSync(join(sample.outputDirectory, "cleanup-shutdown.log"), "utf8"), /current state: Shutdown/);
+    assert.ok(readFileSync(join(sample.outputDirectory, "cleanup-delete.log"), "utf8").length > 0);
+    assertOwnedCleanup(sample.calls);
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+});
+
+test("accepts CRLF already-shutdown stderr and ignores unrelated device states", async context => {
+    const inventory = { devices: {
+        [runtimeId]: [{ udid: deviceId, state: "Shutdown" }, { udid: "99999999-2222-3333-4444-555555555555", state: "Booted" }],
+        anotherRuntime: [{ udid: "88888888-2222-3333-4444-555555555555", state: "Shutdown" }]
+    } };
+    const sample = fixture(context, { change: (command, args, calls) => {
+        if (args[1] === "shutdown") return { ...alreadyShutdown, stderr: alreadyShutdown.stderr.replaceAll("\n", "\r\n") };
+        if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify(inventory) };
+    } });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.deviceCleanup.shutdown.alreadyShutdown, true);
+    assert.equal(report.deviceCleanup.shutdown.verifiedState, "Shutdown");
+    assertOwnedCleanup(sample.calls);
+});
+
+for (const [name, response] of [
+    ["another exit status", { ...alreadyShutdown, status: 17 }],
+    ["another error domain", { ...alreadyShutdown, stderr: alreadyShutdown.stderr.replace("com.apple.CoreSimulator.SimError", "com.apple.OtherError") }],
+    ["domain suffix", { ...alreadyShutdown, stderr: alreadyShutdown.stderr.replace("SimError", "SimErrorExtra") }],
+    ["missing error domain", { ...alreadyShutdown, stderr: "Unable to shutdown device in current state: Shutdown" }],
+    ["another error code", { ...alreadyShutdown, stderr: alreadyShutdown.stderr.replace("code=405", "code=406") }],
+    ["error code suffix", { ...alreadyShutdown, stderr: alreadyShutdown.stderr.replace("code=405", "code=4050") }],
+    ["another current state", { ...alreadyShutdown, stderr: alreadyShutdown.stderr.replace("state: Shutdown", "state: Booted") }],
+    ["missing state error", { ...alreadyShutdown, stderr: "An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=405):\nAn unrelated shutdown failure" }],
+    ["stdout only", { ...alreadyShutdown, stdout: alreadyShutdown.stderr, stderr: "" }],
+    ["extra stderr prefix", { ...alreadyShutdown, stderr: `unexpected failure\n${alreadyShutdown.stderr}` }],
+    ["extra stderr suffix", { ...alreadyShutdown, stderr: `${alreadyShutdown.stderr}another failure\n` }],
+    ["subprocess error alongside status 149", { ...alreadyShutdown, error: Object.assign(new Error("subprocess timed out"), { code: "ETIMEDOUT" }) }]
+]) {
+    test(`does not reinterpret a shutdown failure with ${name}`, async context => {
+        const sample = fixture(context, { change: (_, args) => args[1] === "shutdown" ? response : undefined });
+        await assert.rejects(sample.run(), error => {
+            assert.match(error.message, /simctl shutdown/);
+            assert.equal(error.exitStatus, response.status);
+            assert.equal(error.stderr, response.stderr);
+            assert.equal(error.commandError, response.error ?? null);
+            return true;
+        });
+        const report = sample.report();
+        assert.equal(report.deviceCleanup.status, "failed");
+        assert.equal(report.deviceCleanup.shutdown.status, "failed");
+        assert.match(report.deviceCleanup.shutdown.failure, /simctl shutdown/);
+        assert.deepEqual(report.deviceCleanup.delete, { status: "passed" });
+        assert.ok(!sample.calls.some((call, index) => isCleanupStateQuery(call.command, call.args, sample.calls.slice(0, index))));
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+test("a successful shutdown does not need state verification despite warning text", async context => {
+    const sample = fixture(context, { change: (_, args) => args[1] === "shutdown" ? { ...alreadyShutdown, status: 0 } : undefined });
+    const report = await sample.run();
+    assert.deepEqual(report.deviceCleanup.shutdown, { status: "passed", alreadyShutdown: false });
+    assert.ok(!sample.calls.some((call, index) => isCleanupStateQuery(call.command, call.args, sample.calls.slice(0, index))));
+    assertOwnedCleanup(sample.calls);
+});
+
+for (const [name, inventory] of [
+    ["owned device still Booted", { devices: { [runtimeId]: [{ udid: deviceId, state: "Booted" }] } }],
+    ["owned device state missing", { devices: { [runtimeId]: [{ udid: deviceId }] } }],
+    ["owned device state lowercased", { devices: { [runtimeId]: [{ udid: deviceId, state: "shutdown" }] } }],
+    ["another shutdown UUID", { devices: { [runtimeId]: [{ udid: "99999999-2222-3333-4444-555555555555", state: "Shutdown" }] } }],
+    ["missing device", { devices: { [runtimeId]: [] } }],
+    ["duplicate owned UUID", { devices: { [runtimeId]: [{ udid: deviceId, state: "Shutdown" }, { udid: deviceId, state: "Shutdown" }] } }],
+    ["duplicate UUID across runtimes", { devices: { [runtimeId]: [{ udid: deviceId, state: "Shutdown" }], other: [{ udid: deviceId, state: "Shutdown" }] } }],
+    ["missing device inventory", {}],
+    ["array device inventory", { devices: [{ udid: deviceId, state: "Shutdown" }] }],
+    ["malformed device inventory", { devices: { [runtimeId]: "not an array" } }]
+]) {
+    test(`refuses already-shutdown acceptance for ${name}`, async context => {
+        const sample = fixture(context, { change: (command, args, calls) => {
+            if (args[1] === "shutdown") return alreadyShutdown;
+            if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify(inventory) };
+        } });
+        await assert.rejects(sample.run(), /simctl shutdown/);
+        const report = sample.report();
+        assert.equal(report.deviceCleanup.shutdown.status, "failed");
+        assert.match(report.deviceCleanup.shutdown.failure, /149/);
+        assert.ok(report.deviceCleanup.shutdown.verificationFailure.length > 0);
+        assert.equal(report.deviceCleanup.status, "failed");
+        assert.deepEqual(report.deviceCleanup.delete, { status: "passed" });
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+for (const [name, response, expected] of [
+    ["invalid JSON", { status: 0, stdout: "not JSON" }, /JSON|Unexpected|token/i],
+    ["failed state query", { status: 17, stderr: "verification unavailable" }, /verification unavailable/],
+    ["timed-out state query", { status: null, error: Object.assign(new Error("verification timed out"), { code: "ETIMEDOUT" }) }, /ETIMEDOUT/]
+]) {
+    test(`keeps shutdown failure and records ${name} without retrying cleanup`, async context => {
+        const sample = fixture(context, { change: (command, args, calls) => {
+            if (args[1] === "shutdown") return alreadyShutdown;
+            if (isCleanupStateQuery(command, args, calls)) return response;
+        } });
+        await assert.rejects(sample.run(), /simctl shutdown/);
+        const report = sample.report();
+        assert.equal(report.deviceCleanup.shutdown.status, "failed");
+        assert.match(report.deviceCleanup.shutdown.verificationFailure, expected);
+        assert.match(report.failure, /simctl shutdown/);
+        assert.deepEqual(report.deviceCleanup.delete, { status: "passed" });
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+test("confirmed shutdown preserves an earlier NutriFlow failure", async context => {
+    const sample = fixture(context, { change: (command, args, calls) => {
+        if (args[1] === "install") return { status: 17, stderr: "original NutriFlow install error" };
+        if (args[1] === "shutdown") return alreadyShutdown;
+        if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify(shutdownInventory) };
+    } });
+    await assert.rejects(sample.run(), /original NutriFlow install error/);
+    const report = sample.report();
+    assert.equal(report.status, "failed");
+    assert.match(report.failure, /original NutriFlow install error/);
+    assert.equal(report.deviceCleanup.status, "passed");
+    assert.equal(report.deviceCleanup.shutdown.alreadyShutdown, true);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("unverified shutdown does not overwrite an earlier readiness failure", async context => {
+    const sample = fixture(context, { change: (command, args, calls) => {
+        if (args[1] === "launch" && args.at(-1) === readinessBundleId) return { status: 17, stderr: "original Settings readiness error" };
+        if (args[1] === "shutdown") return alreadyShutdown;
+        if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify({ devices: {} }) };
+    } });
+    await assert.rejects(sample.run(), /original Settings readiness error/);
+    const report = sample.report();
+    assert.equal(report.deviceCleanup.status, "failed");
+    assert.equal(report.deviceCleanup.shutdown.status, "failed");
+    assert.ok(report.deviceCleanup.shutdown.verificationFailure.length > 0);
+    assert.match(report.failure, /original Settings readiness error/);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a failed delete remains fatal even after confirming the device was already shut down", async context => {
+    const sample = fixture(context, { change: (command, args, calls) => {
+        if (args[1] === "shutdown") return alreadyShutdown;
+        if (args[1] === "delete") return { status: 17, stderr: "owned device delete error" };
+        if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify(shutdownInventory) };
+    } });
+    await assert.rejects(sample.run(), /owned device delete error/);
+    const report = sample.report();
+    assert.equal(report.deviceCleanup.shutdown.status, "passed");
+    assert.equal(report.deviceCleanup.shutdown.alreadyShutdown, true);
+    assert.equal(report.deviceCleanup.delete.status, "failed");
+    assert.match(report.deviceCleanup.delete.failure, /owned device delete error/);
+    assert.equal(report.deviceCleanup.status, "failed");
+    assert.match(readFileSync(join(sample.outputDirectory, "cleanup-delete.log"), "utf8"), /owned device delete error/);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("does not reinterpret the same status149 error from delete as successful cleanup", async context => {
+    const sample = fixture(context, { change: (_, args) => args[1] === "delete" ? alreadyShutdown : undefined });
+    await assert.rejects(sample.run(), /simctl delete.*149/);
+    const report = sample.report();
+    assert.equal(report.status, "failed");
+    assert.equal(report.deviceCleanup.shutdown.alreadyShutdown, false);
+    assert.equal(report.deviceCleanup.delete.status, "failed");
+    assert.match(report.deviceCleanup.delete.failure, /simctl delete.*149/);
+    assert.ok(!sample.calls.some((call, index) => isCleanupStateQuery(call.command, call.args, sample.calls.slice(0, index))));
+    assertOwnedCleanup(sample.calls);
+});
+
+test("already-shutdown verification is not applied to a failed migration-recovery shutdown", async context => {
+    const sample = fixture(context, { change: (_, args, calls) => {
+        if (args[1] === "bootstatus") return { status: 0, stdout: bootMigrationFailed };
+        if (args[1] === "shutdown" && calls.filter(call => call.args[1] === "shutdown").length === 1) return alreadyShutdown;
+    } });
+    await assert.rejects(sample.run(), /simctl shutdown.*149/);
+    const report = sample.report();
+    assert.equal(report.phase, "restart-after-migration-failure");
+    assert.equal(report.bootAttempts.length, 1);
+    assert.equal(report.deviceCleanup.shutdown.alreadyShutdown, false);
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assert.equal(sample.calls.filter(call => call.args[1] === "bootstatus").length, 1);
+    assertOwnedCleanup(sample.calls, true);
+});
+
 test("refuses an existing output directory instead of reusing an old screenshot", async context => {
     const sample = fixture(context);
     mkdirSync(sample.outputDirectory);
@@ -959,12 +1181,17 @@ test("a diagnostic write failure cannot make an otherwise successful run green",
     assertOwnedCleanup(sample.calls);
 });
 
-test("workflow time budget includes one recovery boot, diagnostics and cleanup reserve", async context => {
-    const sample = fixture(context, { change: (_, args, calls) =>
-        args[1] === "bootstatus" && calls.filter(call => call.args[1] === "bootstatus").length === 1 ?
-            { status: 0, stdout: bootMigrationFailed } : undefined });
+test("workflow time budget includes recovery boot, verified already-shutdown cleanup and reserve", async context => {
+    const sample = fixture(context, { change: (command, args, calls) => {
+        if (args[1] === "bootstatus" && calls.filter(call => call.args[1] === "bootstatus").length === 1) {
+            return { status: 0, stdout: bootMigrationFailed };
+        }
+        if (args[1] === "shutdown" && calls.filter(call => call.args[1] === "shutdown").length === 2) return alreadyShutdown;
+        if (isCleanupStateQuery(command, args, calls)) return { status: 0, stdout: JSON.stringify(shutdownInventory) };
+    } });
     await sample.run();
     assert.equal(sample.report().bootAttempts.length, 2);
+    assert.equal(sample.report().deviceCleanup.shutdown.alreadyShutdown, true);
     const workflow = readFileSync(new URL("../../.github/workflows/ios-simulator.yml", import.meta.url), "utf8");
     const limit = Number(/id: ios_smoke\s+timeout-minutes: (\d+)/.exec(workflow)?.[1]) * 60_000;
     const commandBudget = sample.calls.reduce((total, call) => total + call.options.timeout, 0);
