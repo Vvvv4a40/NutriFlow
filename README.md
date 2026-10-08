@@ -115,6 +115,8 @@ flowchart LR
 
 Ручной [iOS device build](https://github.com/Vvvv4a40/NutriFlow/actions/workflows/ios-device.yml) проверен в [run 37773708893](https://github.com/Vvvv4a40/NutriFlow/actions/runs/37773708893): Release / `ios-arm64`, настоящая Mono AOT-компиляция с LLVM без интерпретатора, 0 предупреждений / ошибок. Проверка MSBuild-свойств, манифестов, платформы `IOS` главного Mach-O и AOT-данных прошла; отдельный device lock сохранён из реального NuGet-артефакта без изменения версий пакетов. Apple-подпись / установка не выполнялись, IPA не создаётся; `.app` в tar пока нельзя установить на iPhone. [Подробности](docs/MOBILE_CLIENT.md#проверка-сборки-для-физического-iphone).
 
+Для личной установки без собственного Mac подготовлено [руководство iPhone](docs/IOS_INSTALLATION.md): рекомендован AltStore Classic через Windows с периодическим обновлением подписи. Выбор маршрута, личная настройка Apple Account и настоящая установка остаются отдельными действиями; IPA / секреты в CI пока не добавлены.
+
 ## Быстрый запуск без внешних ключей
 
 Требуется [.NET SDK 10.0.400](https://dotnet.microsoft.com/download/dotnet/10.0)
