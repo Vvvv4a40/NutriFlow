@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { test } from "node:test";
@@ -11,7 +11,7 @@ const machO = Buffer.from("cffaedfe000000000000000000000000", "hex");
 const platformOutput = "NutriFlow.Mobile:\nLoad command 1\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform IOSSIMULATOR\n    minos 15.0\n      sdk 26.0\n   ntools 0\n";
 
 function fixture(context, { change = () => undefined, manifest } = {}) {
-    const directory = mkdtempSync(join(tmpdir(), "nutriflow-ios-signature-"));
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "nutriflow-ios-signature-")));
     context.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }));
     const bundlePath = join(directory, "NutriFlow with spaces.app");
     const outputDirectory = join(directory, "signature output with spaces");
