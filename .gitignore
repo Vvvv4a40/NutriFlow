@@ -19,3 +19,4 @@ appsettings.Local.json
 *.p12
 *.mobileprovision
 *.provisionprofile
+*.ipa

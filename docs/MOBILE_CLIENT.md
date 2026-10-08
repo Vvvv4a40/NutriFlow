@@ -214,13 +214,19 @@ node scripts/test-ios-simulator.mjs \
 
 После успешной сборки `verify-ios-device-bundle.mjs` требует выбранные Release / RID / AOT / unsigned-свойства, проверяет plist / privacy через `plutil`, ARM64 через `lipo` и ровно одну платформу `IOS` через `vtool`. Проверяется непустой `NutriFlow.Mobile.aotdata.arm64`; закреплённый [SDK копирует AOT-данные и включает скомпилированные объекты в исполняемый файл](https://github.com/dotnet/macios/blob/dotnet-10.0.1xx-xcode26.0-11017/dotnet/targets/Xamarin.Shared.Sdk.targets#L1276). Отдельно сохраняется нормальный build log для проверки реального компилятора. Эти данные не заменяют подпись и запуск. Скрипт не меняет `.app`, не вызывает `codesign`, `simctl` или `devicectl`, отклоняет вложенный provisioning profile. Главный файл проверяется на платформу; все вложенные библиотеки / возможные технические подписи этим скриптом не сертифицируются. Наличие linker ad-hoc подписи у какого-либо файла не является Apple-подписью для установки.
 
-Workflow не запрашивает секреты, сохраняет read-only checkout и прежние Xcode / SDK / workload. Job — до 25 минут, сборка — до 18. Отдельный артефакт `nutriflow-ios-device-<run id>-<attempt>` содержит `.app` внутри `NutriFlow-ios-arm64-without-apple-signing.tar.gz` и настоящий device lock. Только успешная проверка допускает упаковку. `nutriflow-ios-device-diagnostics-<run id>-<attempt>` содержит доступные build log, выбранные свойства, логи инструментов и `result.json`; он сохраняется также при обычном сбое после начала сборки. Срок хранения обоих — семь дней. В отчёте `deployment.signing: not-verified`, `installation: not-tested`, `launch: not-tested` — это не отрицательная проверка подписи и не установочный IPA.
+Workflow не запрашивает секреты, сохраняет read-only checkout и прежние Xcode / SDK / workload. Job — до 25 минут, сборка — до 18. Отдельный артефакт `nutriflow-ios-device-<run id>-<attempt>` содержит `.app` внутри `NutriFlow-ios-arm64-without-apple-signing.tar.gz` и настоящий device lock. Только успешные device-проверка и новая IPA-проверка допускают публикацию. `nutriflow-ios-device-diagnostics-<run id>-<attempt>` содержит доступные build log, выбранные свойства, инвентари, логи инструментов и `result.json`; он сохраняется также при обычном сбое после начала сборки. Временные рабочие копии упаковщика не загружаются. Срок хранения — семь дней. В отчётах `deployment.signing: not-verified`, `installation: not-tested`, `launch: not-tested`: ни компиляция, ни упаковка не подтверждают установку / запуск.
+
+`scripts/package-ios-device-ipa.mjs` повторно проверяет исходный bundle прежним unsigned verifier, создаёт отдельную копию `Payload/NutriFlow.Mobile.app` и упаковывает её через `ditto`. ZIP проверяется `unzip -tq`; записи сверяются по точным путям, типам, размерам и правам, затем извлечённые файлы — по SHA-256 и правам исходника. Скрипт требует неизменность исходного / промежуточного bundle и самой IPA, отклоняет ссылки, небезопасные пути и известные приватные имена файлов. До 30 секунд на команду / 1 МиБ вывода, до двух минут на весь шаг, до 5000 записей / 128 МиБ на файл / 512 МиБ общего содержимого и IPA. Workflow даёт шагу три минуты. SDK-свойство `BuildIpa=false` сохранено: контейнер создаёт отдельный проверяемый скрипт, не SDK или инструмент подписи.
+
+`nutriflow-ios-unsigned-ipa-<run id>-<attempt>` содержит только `NutriFlow-unsigned.ipa`, опубликованную после успеха packaging gate. Отчёт упаковки с SHA-256 находится в диагностическом артефакте. Перед передачей в AltStore из GitHub ZIP нужно извлечь саму IPA. `.ipa` игнорируется Git, как ключи и профили; автоматической локальной подписи нет. Состав пакета не изменяет статичный экран и не подключает сервер.
 
 Локально на Windows проверяются только регрессии инструмента:
 
 ```powershell
 node --check scripts/verify-ios-device-bundle.mjs
+node --check scripts/package-ios-device-ipa.mjs
 node --test scripts/tests/ios-device.test.mjs
+node --test scripts/tests/ios-ipa.test.mjs
 ```
 
 Через настроенный GitHub CLI после отправки workflow:
@@ -233,7 +239,7 @@ $githubCli = 'C:/Users/kiaev/AppData/Local/Programs/GitHub CLI/bin/gh.exe'
 
 [Run 37773708893](https://github.com/Vvvv4a40/NutriFlow/actions/runs/37773708893) на `a044ced` завершён успешно: компиляция заняла 9 мин 7,82 с, 0 предупреждений / ошибок; в build log присутствует `mono-aot-cross` основной сборки с `full` / `--llvm`. Отчёт bundle-проверки — `passed`, архив и lock скачаны / проверены. На Mac прошли 71 / 71 Node-регрессии; после сохранения lock локальный набор дополнен проверкой его графа и проходит 72 / 72. Полные фактические итоги сохраняются в [PROGRESS.md](PROGRESS.md). Установка на свой iPhone требует отдельного выбора способа распространения, подходящей Apple-подписи / профиля и проверки на устройстве. Пароли / сертификаты нельзя отправлять в чат или сохранять в Git.
 
-Способ подписи / установки ещё не выбран. [Подготовка установки на свой iPhone](IOS_INSTALLATION.md) описывает рекомендованный бесплатный Windows-маршрут, семидневный срок, необходимые загрузки и личные действия; это не отчёт о выполненной установке.
+Выбран бесплатный AltStore Classic через Windows. [Подготовка установки на свой iPhone](IOS_INSTALLATION.md) описывает семидневный срок, необходимые загрузки, передачу IPA и личные действия; это не отчёт о выполненной установке. Результат настоящей упаковки на облачном Mac фиксируется отдельно в [PROGRESS.md](PROGRESS.md), не подменяется fixture-тестами Windows.
 
 ## Границы клиента
 
