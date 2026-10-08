@@ -1,0 +1,134 @@
+name: iOS device build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-device-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build iPhone app without Apple signing
+    runs-on: macos-15
+    timeout-minutes: 25
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true'
+      MOBILE_PROJECT: mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj
+      IOS_RUNTIME: ios-arm64
+      DEVICE_LOCK: packages.ios-device.lock.json
+      WORKLOAD_VERSION: '10.0.100'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Verify Apple build tools
+        run: |
+          if [[ "$(uname -m)" != "arm64" || ! -d "$DEVELOPER_DIR" ]]; then
+            printf '%s\n' 'This workflow requires the pinned Xcode on an ARM64 macOS runner.' >&2
+            exit 1
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          dotnet --info
+
+      - name: Test device bundle verification
+        timeout-minutes: 2
+        run: |
+          node --check scripts/verify-ios-device-bundle.mjs
+          node --test scripts/tests/ios-device.test.mjs
+
+      - name: Configure NuGet HTTP cache
+        run: |
+          mkdir -p "$RUNNER_TEMP/nuget-http-cache"
+          printf 'NUGET_HTTP_CACHE_PATH=%s\n' "$RUNNER_TEMP/nuget-http-cache" >> "$GITHUB_ENV"
+
+      - name: Install pinned iOS workload
+        run: |
+          sudo env NUGET_HTTP_CACHE_PATH="$RUNNER_TEMP/nuget-http-cache-workload" \
+            "$(command -v dotnet)" workload install maui-ios \
+            --version "$WORKLOAD_VERSION" --source https://api.nuget.org/v3/index.json
+          dotnet workload list
+          test "$(dotnet workload --version)" = "$WORKLOAD_VERSION"
+
+      - name: Restore device dependencies
+        run: |
+          if [[ ! -f "mobile/NutriFlow.Mobile/$DEVICE_LOCK" ]]; then
+            dotnet restore "$MOBILE_PROJECT" -p:TargetFramework=net10.0-ios \
+              --runtime "$IOS_RUNTIME" -p:NuGetLockFilePath="$DEVICE_LOCK" --warnaserror
+          fi
+          dotnet restore "$MOBILE_PROJECT" -p:TargetFramework=net10.0-ios \
+            --runtime "$IOS_RUNTIME" -p:NuGetLockFilePath="$DEVICE_LOCK" --locked-mode --warnaserror
+          git diff --exit-code -- mobile/NutriFlow.Mobile/packages.android.lock.json \
+            mobile/NutriFlow.Mobile/packages.ios.lock.json "mobile/NutriFlow.Mobile/$DEVICE_LOCK"
+
+      - name: Build Release device app without Apple signing
+        id: device_build
+        timeout-minutes: 18
+        run: |
+          dotnet build "$MOBILE_PROJECT" -f net10.0-ios --runtime "$IOS_RUNTIME" \
+            --configuration Release --no-restore --warnaserror --verbosity normal \
+            -p:NuGetLockFilePath="$DEVICE_LOCK" -p:UseInterpreter=false -p:MtouchInterpreter= \
+            -p:PublishAot=false -p:MtouchUseLlvm=true -p:EnableCodeSigning=false \
+            -p:BuildIpa=false -p:ArchiveOnBuild=false \
+            2>&1 | tee "$RUNNER_TEMP/ios-device-build.log"
+          dotnet msbuild "$MOBILE_PROJECT" -nologo -p:TargetFramework=net10.0-ios \
+            -p:RuntimeIdentifier="$IOS_RUNTIME" -p:Configuration=Release \
+            -p:NuGetLockFilePath="$DEVICE_LOCK" -p:UseInterpreter=false -p:MtouchInterpreter= \
+            -p:PublishAot=false -p:MtouchUseLlvm=true -p:EnableCodeSigning=false \
+            -p:BuildIpa=false -p:ArchiveOnBuild=false \
+            -getProperty:TargetFramework,RuntimeIdentifier,Configuration,NuGetLockFilePath,UseInterpreter,MtouchInterpreter,PublishAot,MtouchUseLlvm,EnableCodeSigning,BuildIpa,ArchiveOnBuild \
+            > "$RUNNER_TEMP/ios-device-build-properties.json"
+
+      - name: Verify physical device bundle
+        timeout-minutes: 2
+        run: |
+          node scripts/verify-ios-device-bundle.mjs \
+            "mobile/NutriFlow.Mobile/bin/Release/net10.0-ios/$IOS_RUNTIME/NutriFlow.Mobile.app" \
+            "$RUNNER_TEMP/ios-device-build-properties.json" "$RUNNER_TEMP/ios-device-verification"
+
+      - name: Archive device build and dependency lock
+        run: |
+          mkdir -p ios-device-artifacts
+          tar -czf ios-device-artifacts/NutriFlow-ios-arm64-without-apple-signing.tar.gz \
+            -C "mobile/NutriFlow.Mobile/bin/Release/net10.0-ios/$IOS_RUNTIME" NutriFlow.Mobile.app
+          cp "mobile/NutriFlow.Mobile/$DEVICE_LOCK" ios-device-artifacts/
+
+      - name: Upload device build
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-ios-device-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ios-device-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload device build diagnostics
+        if: ${{ !cancelled() && (steps.device_build.outcome == 'success' || steps.device_build.outcome == 'failure') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-ios-device-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ios-device-build.log
+            ${{ runner.temp }}/ios-device-build-properties.json
+            ${{ runner.temp }}/ios-device-verification/
+          if-no-files-found: warn
+          retention-days: 7

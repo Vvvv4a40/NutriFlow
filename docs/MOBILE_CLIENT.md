@@ -202,6 +202,35 @@ node scripts/test-ios-simulator.mjs \
 
 **Архив симулятора нельзя установить на iPhone и нельзя считать IPA для AltStore.** Получение пакета для настоящего `ios-arm64`, проверка AOT / подписи, установка и обновление через выбранный способ — отдельный следующий шаг. Не передавайте Apple-пароль агенту и не сохраняйте сертификаты / пароли в YAML или Git.
 
+## Проверка сборки для физического iPhone
+
+Ручной [workflow iOS device build](https://github.com/Vvvv4a40/NutriFlow/actions/workflows/ios-device.yml) отдельно собирает тот же минимальный клиент для `ios-arm64` / Release на облачном Mac. `iossimulator-arm64` и `ios-arm64` используют процессор ARM64, но разные системные библиотеки и платформу Mach-O: `IOSSIMULATOR` против `IOS`. Архив симулятора нельзя переименовать и превратить в приложение для телефона.
+
+Этот шаг не требует Apple-аккаунта и не включает подпись / установку. `EnableCodeSigning=false`, `BuildIpa=false`, `ArchiveOnBuild=false` ограничены новой проверкой, не глобальными настройками `.csproj`. `UseInterpreter=false` вместе с пустым `MtouchInterpreter` отключает интерпретатор; `MtouchUseLlvm=true` включает LLVM для Mono AOT. `PublishAot=false` означает, что отдельный режим NativeAOT не включается. AOT компилирует управляемый код заранее, в отличие от исполнения интерпретатором. Успешная компиляция ещё не проверяет все пути выполнения, trimming или запуск Release на устройстве. [Свойства сборки iOS](https://learn.microsoft.com/en-us/dotnet/ios/building-apps/build-properties#mtouchinterpreter).
+
+На каждой restore / build команде явно задаётся `NuGetLockFilePath=packages.ios-device.lock.json`. Это новый файл для device RID, не замена `packages.ios.lock.json` симулятора. При его отсутствии первый restore получает реальные версии / хэши NuGet; второй выполняется с `--locked-mode`. Отслеживаемые lock-файлы не должны меняться. До скачивания и проверки артефакта файл устройства не считается сохранённым / проверенным; нельзя вручную дописывать пустой RID или копировать хэши из другого графа.
+
+После успешной сборки `verify-ios-device-bundle.mjs` требует выбранные Release / RID / AOT / unsigned-свойства, проверяет plist / privacy через `plutil`, ARM64 через `lipo` и ровно одну платформу `IOS` через `vtool`. Проверяется непустой `NutriFlow.Mobile.aotdata.arm64`; закреплённый [SDK копирует AOT-данные и включает скомпилированные объекты в исполняемый файл](https://github.com/dotnet/macios/blob/dotnet-10.0.1xx-xcode26.0-11017/dotnet/targets/Xamarin.Shared.Sdk.targets#L1276). Отдельно сохраняется нормальный build log для проверки реального компилятора. Эти данные не заменяют подпись и запуск. Скрипт не меняет `.app`, не вызывает `codesign`, `simctl` или `devicectl`, отклоняет вложенный provisioning profile. Главный файл проверяется на платформу; все вложенные библиотеки / возможные технические подписи этим скриптом не сертифицируются. Наличие linker ad-hoc подписи у какого-либо файла не является Apple-подписью для установки.
+
+Workflow не запрашивает секреты, сохраняет read-only checkout и прежние Xcode / SDK / workload. Job — до 25 минут, сборка — до 18. Отдельный артефакт `nutriflow-ios-device-<run id>-<attempt>` содержит `.app` внутри `NutriFlow-ios-arm64-without-apple-signing.tar.gz` и настоящий device lock. Только успешная проверка допускает упаковку. `nutriflow-ios-device-diagnostics-<run id>-<attempt>` содержит доступные build log, выбранные свойства, логи инструментов и `result.json`; он сохраняется также при обычном сбое после начала сборки. Срок хранения обоих — семь дней. В отчёте `deployment.signing: not-verified`, `installation: not-tested`, `launch: not-tested` — это не отрицательная проверка подписи и не установочный IPA.
+
+Локально на Windows проверяются только регрессии инструмента:
+
+```powershell
+node --check scripts/verify-ios-device-bundle.mjs
+node --test scripts/tests/ios-device.test.mjs
+```
+
+Через настроенный GitHub CLI после отправки workflow:
+
+```powershell
+$githubCli = 'C:/Users/kiaev/AppData/Local/Programs/GitHub CLI/bin/gh.exe'
+& $githubCli workflow run ios-device.yml --ref main
+& $githubCli run list --workflow ios-device.yml --limit 5
+```
+
+Настоящий нативный результат текущего шага ещё ожидается; фактические итоги сохраняются в [PROGRESS.md](PROGRESS.md). Установка на свой iPhone требует отдельного выбора способа распространения, подходящей Apple-подписи / профиля и проверки на устройстве. Пароли / сертификаты нельзя отправлять в чат или сохранять в Git.
+
 ## Границы клиента
 
 Мобильный проект не ссылается на `Api`, `Infrastructure` или `Domain`. Сервер остаётся единственным источником расчётов, хранения и AI-интеграций; ключ Groq не переносится на телефон. Следующий шаг после первого запуска — небольшой HTTP-клиент и проверка capabilities по [MOBILE_API.md](MOBILE_API.md), без всех экранов сразу. На телефоне `localhost` означает телефон, не компьютер с API.
