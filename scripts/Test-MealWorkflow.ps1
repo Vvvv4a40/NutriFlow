@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $apiAssembly = Join-Path $repositoryRoot "NutriFlow.Api/bin/$Configuration/net10.0/NutriFlow.Api.dll"
-$dotnetPath = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+$dotnetPath = (Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $trialRoot = Join-Path ([System.IO.Path]::GetTempPath()) "nutriflow-workflow-$([guid]::NewGuid().ToString('N'))"
 $mealDate = '2026-10-06'
 $fractionalMealDate = '2026-10-07'
