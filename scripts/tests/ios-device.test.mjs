@@ -436,16 +436,34 @@ test("device workflow verifies before packaging and retains bounded failure diag
     assert.ok(verification.includes("scripts/verify-ios-device-bundle.mjs"));
     assert.ok(verification.includes('bin/Release/net10.0-ios/$IOS_RUNTIME/NutriFlow.Mobile.app'));
     assert.ok(verification.includes('"$RUNNER_TEMP/ios-device-build-properties.json" "$RUNNER_TEMP/ios-device-verification"'));
-    const packaging = workflow.slice(offsets[2], offsets[3]);
+    const packaging = workflow.slice(offsets[2], workflow.indexOf("- name: Upload unsigned IPA for local signing"));
     assert.ok(packaging.includes("NutriFlow-ios-arm64-without-apple-signing.tar.gz"));
     assert.ok(packaging.includes('cp "mobile/NutriFlow.Mobile/$DEVICE_LOCK" ios-device-artifacts/'));
     assert.ok(!packaging.includes(".ipa"));
+    const ipaPackaging = workflow.indexOf("- name: Package unsigned IPA for local signing");
+    const ipaUpload = workflow.indexOf("- name: Upload unsigned IPA for local signing");
+    assert.ok(ipaPackaging > offsets[1] && ipaPackaging < offsets[2]);
+    assert.ok(ipaUpload > offsets[2] && ipaUpload < offsets[3]);
+    const ipaStep = workflow.slice(ipaPackaging, offsets[2]);
+    assert.ok(ipaStep.includes("timeout-minutes: 3"));
+    assert.ok(ipaStep.includes("scripts/package-ios-device-ipa.mjs"));
+    assert.ok(ipaStep.includes('"$RUNNER_TEMP/ios-device-build-properties.json" "$RUNNER_TEMP/ios-ipa-packaging"'));
+    const ipaArtifact = workflow.slice(ipaUpload, offsets[3]);
+    assert.ok(ipaArtifact.includes("nutriflow-ios-unsigned-ipa-${{ github.run_id }}-${{ github.run_attempt }}"));
+    assert.ok(ipaArtifact.includes("path: ${{ runner.temp }}/ios-ipa-packaging/NutriFlow-unsigned.ipa"));
+    assert.ok(ipaArtifact.includes("if-no-files-found: error"));
+    assert.ok(ipaArtifact.includes("retention-days: 7"));
+    assert.ok(workflow.includes("node --test scripts/tests/ios-ipa.test.mjs"));
     const diagnostics = workflow.slice(offsets[4]);
     assert.ok(diagnostics.includes("!cancelled()"));
     assert.ok(diagnostics.includes("steps.device_build.outcome == 'success' || steps.device_build.outcome == 'failure'"));
     for (const path of ["ios-device-build.log", "ios-device-build-properties.json", "ios-device-verification/"]) {
         assert.ok(diagnostics.includes(`\${{ runner.temp }}/${path}`));
     }
+    for (const path of ["ios-ipa-packaging/*.log", "ios-ipa-packaging/*.json", "ios-ipa-packaging/device-verification/"]) {
+        assert.ok(diagnostics.includes(`\${{ runner.temp }}/${path}`));
+    }
+    assert.ok(!diagnostics.includes("ios-ipa-packaging/work"));
     assert.ok(diagnostics.includes("if-no-files-found: warn"));
     assert.ok(diagnostics.includes("retention-days: 7"));
     assert.ok(workflow.slice(offsets[3], offsets[4]).includes("if-no-files-found: error"));
