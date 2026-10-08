@@ -1,11 +1,14 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { setTimeout } from "node:timers/promises";
+import { isAbsolute, join, resolve } from "node:path";
+import { setImmediate, setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-export async function testIosSimulator({ bundlePath, outputDirectory, execute = spawnSync, pause = setTimeout }) {
+export async function testIosSimulator({
+    bundlePath, outputDirectory, execute = spawnSync, pause = setTimeout,
+    start = spawn, developerDirectory = process.env.DEVELOPER_DIR
+}) {
     bundlePath = resolve(bundlePath);
     outputDirectory = resolve(outputDirectory);
     if (!statSync(bundlePath).isDirectory()) {
@@ -18,6 +21,9 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
     let deviceId;
     let failure;
     let recordingFailure;
+    let simulatorUi;
+    let simulatorUiFailure;
+    let simulatorUiExited = false;
 
     function record(path, content, append = false) {
         try {
@@ -61,6 +67,119 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         } catch (error) {
             record(join(outputDirectory, "diagnostic-errors.log"), `${error.message}\n`, true);
         }
+    }
+
+    function simulatorUiHasExited() {
+        return simulatorUiExited || simulatorUi.exitCode !== null || simulatorUi.signalCode !== null;
+    }
+
+    async function startSimulatorUi() {
+        const args = ["-CurrentDeviceUDID", deviceId, "-StartLastDeviceOnLaunch", "0",
+            "-ConnectHardwareKeyboard", "0", "-PasteboardAutomaticSync", "0"];
+        record(commandLog, `${JSON.stringify([report.simulatorUi.executable, ...args])}\n`, true);
+        try {
+            simulatorUi = start(report.simulatorUi.executable, args, { stdio: "ignore", shell: false, detached: false });
+            simulatorUi.on("error", error => {
+                simulatorUiFailure ??= error;
+                record(join(outputDirectory, "simulator-ui.log"), `error=${error.message}\n`, true);
+            });
+            simulatorUi.on("exit", (code, signal) => {
+                simulatorUiExited = true;
+                report.simulatorUi.exitCode = code;
+                report.simulatorUi.signal = signal;
+                record(join(outputDirectory, "simulator-ui.log"), `exitCode=${code}; signal=${signal}\n`, true);
+            });
+            await new Promise((resolveStarted, rejectStarted) => {
+                function finish(error) {
+                    globalThis.clearTimeout(timer);
+                    simulatorUi.removeListener("spawn", onSpawn);
+                    simulatorUi.removeListener("error", onError);
+                    simulatorUi.removeListener("exit", onExit);
+                    if (error) rejectStarted(error);
+                    else resolveStarted();
+                }
+                function onSpawn() {
+                    if (!Number.isSafeInteger(simulatorUi.pid) || simulatorUi.pid <= 0) {
+                        finish(new Error("Simulator UI did not return a positive PID."));
+                        return;
+                    }
+                    report.simulatorUi.pid = simulatorUi.pid;
+                    report.simulatorUi.status = "running";
+                    record(join(outputDirectory, "simulator-ui.log"), `pid=${simulatorUi.pid}\n`, true);
+                    finish();
+                }
+                function onError(error) { finish(error); }
+                function onExit() { finish(new Error("Simulator UI exited before startup.")); }
+                const timer = globalThis.setTimeout(() => finish(new Error("Simulator UI startup timed out after 10000ms.")), 10_000);
+                simulatorUi.once("spawn", onSpawn);
+                simulatorUi.once("error", onError);
+                simulatorUi.once("exit", onExit);
+            });
+        } catch (error) {
+            report.simulatorUi.status = "failed";
+            report.simulatorUi.failure = error.message;
+            throw error;
+        }
+    }
+
+    async function checkSimulatorUi() {
+        await setImmediate();
+        const error = simulatorUiFailure ?? (simulatorUiHasExited() ? new Error("Simulator UI exited unexpectedly; it is no longer running.") : null);
+        if (error) {
+            report.simulatorUi.status = "failed";
+            report.simulatorUi.failure = error.message;
+            throw error;
+        }
+    }
+
+    function signalSimulatorUi(signal) {
+        return new Promise((resolveStopped, rejectStopped) => {
+            function finish(error, stopped = false) {
+                globalThis.clearTimeout(timer);
+                simulatorUi.removeListener("exit", onExit);
+                if (error) rejectStopped(error);
+                else resolveStopped(stopped);
+            }
+            function onExit() { finish(null, true); }
+            const timer = globalThis.setTimeout(() => finish(null, false), 5_000);
+            simulatorUi.once("exit", onExit);
+            try {
+                record(join(outputDirectory, "simulator-ui.log"), `signal=${signal}\n`, true);
+                simulatorUi.kill(signal);
+            } catch (error) {
+                finish(error);
+            }
+        });
+    }
+
+    async function stopSimulatorUi() {
+        if (!simulatorUi) return;
+        await setImmediate();
+        let terminationFailure;
+        for (const signal of ["SIGTERM", "SIGKILL"]) {
+            if (simulatorUiHasExited() || simulatorUi.pid === undefined) {
+                report.simulatorUi.cleanup = { status: "passed", signal: report.simulatorUi.signal ?? null };
+                if (report.simulatorUi.status === "running") {
+                    report.simulatorUi.status = "failed";
+                    report.simulatorUi.failure = simulatorUiFailure?.message ?? "Simulator UI exited unexpectedly; it is no longer running.";
+                }
+                return;
+            }
+            try {
+                if (await signalSimulatorUi(signal)) {
+                    report.simulatorUi.cleanup = { status: "passed", signal };
+                    if (report.simulatorUi.status === "running") report.simulatorUi.status = "stopped";
+                    return;
+                }
+                terminationFailure ??= new Error("Simulator UI termination timed out.");
+            } catch (error) {
+                terminationFailure ??= error;
+            }
+        }
+        report.simulatorUi.cleanup = { status: "failed", failure: terminationFailure.message };
+        report.simulatorUi.status = "failed";
+        simulatorUi.unref();
+        throw terminationFailure;
     }
 
     function readLaunchPid(output, bundleIdentifier) {
@@ -127,6 +246,17 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         report.runtimeVersion = runtime.version;
         report.deviceTypeIdentifier = iphone.deviceTypeIdentifier;
 
+        report.phase = "select-simulator-ui";
+        const selectedDeveloperDirectory = developerDirectory ?? invoke("xcode-select", ["--print-path"]);
+        if (!isAbsolute(selectedDeveloperDirectory)) {
+            throw new Error("The selected Xcode Developer directory must be an absolute path.");
+        }
+        const simulatorExecutable = resolve(selectedDeveloperDirectory, "Applications/Simulator.app/Contents/MacOS/Simulator");
+        if (!statSync(simulatorExecutable).isFile()) {
+            throw new Error("The selected Xcode Simulator executable must be a file.");
+        }
+        report.simulatorUi = { executable: simulatorExecutable, status: "not-started" };
+
         report.phase = "create-device";
         const createdId = simctl(["create", `NutriFlow smoke ${randomUUID()}`, iphone.deviceTypeIdentifier, runtime.identifier]);
         if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(createdId)) {
@@ -134,6 +264,10 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         }
         deviceId = createdId;
         report.deviceId = deviceId;
+
+        report.phase = "start-simulator-ui";
+        await startSimulatorUi();
+        await checkSimulatorUi();
 
         report.bootAttempts = [];
         for (let number = 1; number <= 2; number++) {
@@ -158,6 +292,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
             }
             throw new Error(`The iOS simulator boot did not finish successfully (terminal status ${attempt.terminalStatus ?? "missing"}; ${attempt.summary ?? "missing summary"}).`);
         }
+        await checkSimulatorUi();
         report.phase = "readiness-launch";
         report.readiness = { bundleIdentifier: "com.apple.Preferences", status: "running" };
         const readinessLaunch = simctl(["launch", deviceId, report.readiness.bundleIdentifier], { file: "readiness-launch.log" });
@@ -166,6 +301,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         report.phase = "readiness-terminate";
         simctl(["terminate", deviceId, report.readiness.bundleIdentifier], { file: "readiness-terminate.log" });
         report.readiness.status = "passed";
+        await checkSimulatorUi();
         report.phase = "install";
         simctl(["install", deviceId, bundlePath], { timeout: 60_000, file: "install.log" });
         report.phase = "launch";
@@ -190,6 +326,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         await pause(5_000);
         report.phase = "check-after-screenshot";
         checkProcess("process-after-screenshot.log");
+        await checkSimulatorUi();
     } catch (error) {
         failure = error;
         if (report.readiness?.status === "running") {
@@ -203,6 +340,7 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
         if (deviceId) {
             diagnostic(() => simctl(["list", "devices", "--json"], { file: "devices-after-run.json" }));
             diagnostic(() => simctl(["spawn", deviceId, "launchctl", "list"], { file: "process-final.log" }));
+            diagnostic(() => simctl(["io", deviceId, "enumerate"], { file: "display-ports.log" }));
             diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "3m", "--style", "compact",
                 "--predicate", `process == ${JSON.stringify(report.executable)}`], { file: "app-system.log" }));
             const launchPredicate = [
@@ -212,9 +350,26 @@ export async function testIosSimulator({ bundlePath, outputDirectory, execute = 
             ].join(" OR ");
             diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "20m", "--style", "compact",
                 "--predicate", launchPredicate], { file: "launch-system.log" }));
+            const systemFailurePredicate = '(eventMessage CONTAINS[c] "error" OR eventMessage CONTAINS[c] "failed" OR eventMessage CONTAINS[c] "watchdog" OR eventMessage CONTAINS[c] "display")';
+            diagnostic(() => simctl(["spawn", deviceId, "log", "show", "--last", "20m", "--style", "compact",
+                "--predicate", `(process IN {"backboardd", "SpringBoard"} AND ${systemFailurePredicate})`], { file: "boot-system.log" }));
+            if (report.simulatorUi?.pid) {
+                diagnostic(() => invoke("log", ["show", "--last", "20m", "--style", "compact",
+                    "--predicate", `(process == "Simulator" AND processID == ${report.simulatorUi.pid} AND ${systemFailurePredicate})`], { file: "simulator-host.log" }));
+            }
             if (failure) {
                 diagnostic(() => simctl(["io", deviceId, "screenshot", "--type=png",
                     join(outputDirectory, "failure.png")], { file: "failure-screenshot.log" }));
+            }
+            try {
+                if (report.simulatorUi?.status === "running" && !failure) await checkSimulatorUi();
+            } catch (error) {
+                failure ??= error;
+            }
+            try {
+                await stopSimulatorUi();
+            } catch (error) {
+                failure ??= error;
             }
             for (const command of ["shutdown", "delete"]) {
                 try {

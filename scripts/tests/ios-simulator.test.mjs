@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,17 +13,27 @@ const bundleId = "com.nutriflow.app";
 const pid = 1234;
 const readinessBundleId = "com.apple.Preferences";
 const readinessPid = 4321;
+const simulatorUiPid = 9876;
 const bootPassed = "[2026-10-07 16:32:21 +0000] Status=4294967295, isTerminal=YES, Elapsed=01:26.\n\tFinished\n";
 const bootMigrationFailed = "[2026-10-07 18:17:38 +0000] Status=3, isTerminal=YES, Elapsed=01:57.\n\tData Migration Failed\n";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 
-function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
+function fixture(context, {
+    change = () => undefined, startChange = () => undefined, pauseChange = () => undefined,
+    developerDirectory: selectedDeveloperDirectory = null, jobs, inventory
+} = {}) {
     const directory = mkdtempSync(join(tmpdir(), "nutriflow-ios-smoke-"));
     context.after(() => rmSync(directory, { recursive: true, force: true }));
     const bundlePath = join(directory, "app with spaces.app");
     const outputDirectory = join(directory, "output with spaces");
+    const developerDirectory = join(directory, "Xcode with spaces.app", "Contents", "Developer");
+    const simulatorExecutable = join(developerDirectory, "Applications", "Simulator.app", "Contents", "MacOS", "Simulator");
     mkdirSync(bundlePath);
+    mkdirSync(join(simulatorExecutable, ".."), { recursive: true });
+    writeFileSync(simulatorExecutable, "synthetic simulator executable");
     const calls = [];
+    const starts = [];
+    const uiProcesses = [];
     const pauses = [];
     let processChecks = 0;
     const data = inventory ?? {
@@ -43,7 +54,12 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
             return changed;
         }
         let stdout = "";
-        if (command === "plutil") {
+        if (command === "xcode-select") {
+            assert.deepEqual(args, ["--print-path"]);
+            stdout = `${developerDirectory}\n`;
+        } else if (command === "log") {
+            stdout = "Simulator host diagnostics";
+        } else if (command === "plutil") {
             stdout = args[1] === "CFBundleIdentifier" ? bundleId : "NutriFlow.Mobile";
         } else {
             assert.equal(command, "xcrun");
@@ -61,16 +77,56 @@ function fixture(context, { change = () => undefined, jobs, inventory } = {}) {
                         stdout = jobs?.(processChecks) ?? `PID Status Label\n${pid}\t0\tUIKitApplication:${bundleId}[1234]\n`;
                     }
                     break;
-                case "io": writeFileSync(args.at(-1), png); break;
+                case "io":
+                    if (args[3] === "screenshot") {
+                        writeFileSync(args.at(-1), png);
+                    } else {
+                        assert.equal(args[3], "enumerate");
+                        stdout = "Display ports for owned simulator";
+                    }
+                    break;
                 default: assert.ok(["terminate", "install", "help", "shutdown", "delete"].includes(args[1]));
             }
         }
         return { status: 0, stdout, stderr: "" };
     }
 
+    function start(command, args, options) {
+        starts.push({ command, args, options });
+        const child = new EventEmitter();
+        child.pid = simulatorUiPid;
+        child.exitCode = null;
+        child.signalCode = null;
+        child.signals = [];
+        child.unrefCalls = 0;
+        child.unref = () => child.unrefCalls++;
+        child.kill = signal => {
+            child.signals.push(signal);
+            queueMicrotask(() => {
+                child.signalCode = signal;
+                child.emit("exit", null, signal);
+            });
+            return true;
+        };
+        uiProcesses.push(child);
+        const changed = startChange(child, command, args, options);
+        if (changed !== undefined) {
+            return changed;
+        }
+        queueMicrotask(() => child.emit("spawn"));
+        return child;
+    }
+
     return {
-        calls, pauses, outputDirectory, bundlePath,
-        run: () => testIosSimulator({ bundlePath, outputDirectory, execute, pause: async milliseconds => pauses.push(milliseconds) }),
+        calls, starts, uiProcesses, pauses, outputDirectory, bundlePath, developerDirectory, simulatorExecutable,
+        run: (options = {}) => testIosSimulator({
+            bundlePath, outputDirectory, execute, start, developerDirectory: selectedDeveloperDirectory,
+            pause: async milliseconds => {
+                pauses.push(milliseconds);
+                await pauseChange(milliseconds);
+            },
+            ...options
+        }),
         report: () => JSON.parse(readFileSync(join(outputDirectory, "result.json"), "utf8"))
     };
 }
@@ -83,6 +139,13 @@ function assertOwnedCleanup(calls, recoveryAttempted = false) {
     ]);
 }
 
+async function waitForUiSignal(sample, signal) {
+    for (let turn = 0; turn < 10 && !sample.uiProcesses[0]?.signals.includes(signal); turn++) {
+        await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.ok(sample.uiProcesses[0]?.signals.includes(signal), `Expected the owned UI process to receive ${signal}`);
+}
+
 test("runs an isolated iPhone, checks PID around a PNG and deletes only its own device", async context => {
     const sample = fixture(context);
     const report = await sample.run();
@@ -93,6 +156,13 @@ test("runs an isolated iPhone, checks PID around a PNG and deletes only its own 
     assert.equal(report.screenshot, "startup.png");
     assert.deepEqual(report.bootAttempts, [{ number: 1, log: "boot.log", status: "passed", terminalStatus: "4294967295", summary: "Finished" }]);
     assert.deepEqual(report.readiness, { bundleIdentifier: readinessBundleId, status: "passed", pid: readinessPid });
+    assert.equal(report.simulatorUi.executable, sample.simulatorExecutable);
+    assert.equal(report.simulatorUi.pid, simulatorUiPid);
+    assert.equal(report.simulatorUi.status, "stopped");
+    assert.deepEqual(sample.starts, [{ command: sample.simulatorExecutable,
+        args: ["-CurrentDeviceUDID", deviceId, "-StartLastDeviceOnLaunch", "0", "-ConnectHardwareKeyboard", "0", "-PasteboardAutomaticSync", "0"],
+        options: { stdio: "ignore", shell: false, detached: false } }]);
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
     assert.deepEqual(sample.pauses, [700, 10_000, 5_000]);
     const commands = sample.calls.filter(call => call.command === "xcrun");
     assert.deepEqual(commands.slice(0, 11).map(call => call.args[1]), [
@@ -115,9 +185,296 @@ test("runs an isolated iPhone, checks PID around a PNG and deletes only its own 
         assert.equal(call.options.shell, false);
         assert.equal(call.options.killSignal, "SIGKILL");
         assert.ok(!call.args.some(arg => ["booted", "all", "unavailable"].includes(arg)));
+        assert.ok(!["killall", "pkill", "open", "ps"].includes(call.command));
     }
     assertOwnedCleanup(sample.calls);
     assert.equal(sample.report().status, "passed");
+});
+
+test("selects Simulator from the active Xcode path without shell interpolation", async context => {
+    const sample = fixture(context);
+    await sample.run();
+    assert.ok(sample.simulatorExecutable.includes("Xcode with spaces.app"));
+    const selected = sample.calls.filter(call => call.command === "xcode-select");
+    assert.equal(selected.length, 1);
+    assert.deepEqual(selected[0].args, ["--print-path"]);
+    assert.equal(sample.starts[0].command, sample.simulatorExecutable);
+    assert.ok(!sample.starts[0].command.includes('"'));
+    assert.equal(sample.starts[0].options.shell, false);
+    assert.equal(sample.report().simulatorUi.cleanup.status, "passed");
+    assert.equal(sample.report().simulatorUi.cleanup.signal, "SIGTERM");
+});
+
+test("uses explicit DEVELOPER_DIR instead of another system Xcode selection", async context => {
+    const sample = fixture(context, { change: command => command === "xcode-select" ?
+        { status: 17, stderr: "the system Xcode must not be selected" } : undefined });
+    await sample.run({ developerDirectory: sample.developerDirectory });
+    assert.equal(sample.starts[0].command, sample.simulatorExecutable);
+    assert.ok(!sample.calls.some(call => call.command === "xcode-select"));
+});
+
+for (const [name, selectedPath] of [["empty", ""], ["relative", "relative/Xcode/Developer"]]) {
+    test(`rejects ${name} Xcode selection before creating a device`, async context => {
+        const sample = fixture(context, { change: command => command === "xcode-select" ?
+            { status: 0, stdout: selectedPath } : undefined });
+        await assert.rejects(sample.run(), /absolute|Simulator|Xcode|Developer/i);
+        assert.equal(sample.report().phase, "select-simulator-ui");
+        assert.equal(sample.starts.length, 0);
+        assert.ok(!sample.calls.some(call => ["create", "shutdown", "delete"].includes(call.args[1])));
+    });
+}
+
+test("a failed xcode-select command stops before creating a device", async context => {
+    const sample = fixture(context, { change: command => command === "xcode-select" ?
+        { status: 17, stderr: "Xcode selection unavailable" } : undefined });
+    await assert.rejects(sample.run(), /Xcode selection unavailable/);
+    assert.equal(sample.report().phase, "select-simulator-ui");
+    assert.equal(sample.starts.length, 0);
+    assert.ok(!sample.calls.some(call => call.args[1] === "create"));
+});
+
+for (const kind of ["missing", "directory"]) {
+    test(`rejects a ${kind} Simulator executable before creating a device`, async context => {
+        const sample = fixture(context);
+        rmSync(sample.simulatorExecutable);
+        if (kind === "directory") {
+            mkdirSync(sample.simulatorExecutable);
+        }
+        await assert.rejects(sample.run(), /ENOENT|Simulator|executable/i);
+        assert.equal(sample.report().phase, "select-simulator-ui");
+        assert.equal(sample.starts.length, 0);
+        assert.ok(!sample.calls.some(call => ["create", "shutdown", "delete"].includes(call.args[1])));
+    });
+}
+
+test("a thrown UI spawn error keeps its message and cleans only the created device", async context => {
+    const sample = fixture(context, { startChange: () => { throw new Error("synthetic UI spawn error"); } });
+    await assert.rejects(sample.run(), /synthetic UI spawn error/);
+    assert.equal(sample.report().phase, "start-simulator-ui");
+    assert.equal(sample.report().status, "failed");
+    assert.equal(sample.report().simulatorUi.pid, undefined);
+    assert.ok(!sample.calls.some(call => call.command === "log"));
+    assert.ok(!sample.calls.some(call => ["bootstatus", "install", "launch"].includes(call.args[1])));
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a child-process error event is a failed UI startup and does not boot NutriFlow", async context => {
+    const sample = fixture(context, { startChange: child => {
+        queueMicrotask(() => child.emit("error", Object.assign(new Error("synthetic Simulator ENOENT"), { code: "ENOENT" })));
+    } });
+    await assert.rejects(sample.run(), /synthetic Simulator ENOENT/);
+    assert.equal(sample.report().phase, "start-simulator-ui");
+    assert.equal(sample.report().status, "failed");
+    assert.equal(sample.report().simulatorUi.pid, undefined);
+    assert.ok(!sample.calls.some(call => call.command === "log"));
+    assert.ok(!sample.calls.some(call => ["bootstatus", "install", "launch"].includes(call.args[1])));
+    assertOwnedCleanup(sample.calls);
+});
+
+for (const invalidPid of [undefined, 0, -1, 9007199254740993]) {
+    test(`rejects an invalid Simulator UI PID before boot: ${invalidPid}`, async context => {
+        const sample = fixture(context, { startChange: child => { child.pid = invalidPid; } });
+        await assert.rejects(sample.run(), /positive PID/);
+        assert.equal(sample.report().phase, "start-simulator-ui");
+        assert.equal(sample.report().status, "failed");
+        assert.ok(!sample.calls.some(call => ["bootstatus", "install", "launch"].includes(call.args[1])));
+        assertOwnedCleanup(sample.calls);
+    });
+}
+
+test("a Simulator UI exit before the spawn event fails without booting", async context => {
+    const sample = fixture(context, { startChange: child => {
+        queueMicrotask(() => {
+            child.exitCode = 9;
+            child.emit("exit", 9, null);
+        });
+        return child;
+    } });
+    await assert.rejects(sample.run(), /exited before startup/);
+    assert.equal(sample.report().phase, "start-simulator-ui");
+    assert.equal(sample.report().simulatorUi.exitCode, 9);
+    assert.ok(!sample.calls.some(call => ["bootstatus", "install", "launch"].includes(call.args[1])));
+    assert.deepEqual(sample.uiProcesses[0].signals, []);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a Simulator child-process error after startup stops before Settings launch", async context => {
+    const sample = fixture(context, { change: (_, args) => {
+        if (args[1] === "bootstatus") {
+            queueMicrotask(() => sample.uiProcesses[0].emit("error", new Error("late Simulator process error")));
+        }
+    } });
+    await assert.rejects(sample.run(), /late Simulator process error/);
+    assert.equal(sample.report().status, "failed");
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("an exited UI process after boot prevents Settings and NutriFlow launch", async context => {
+    const sample = fixture(context, { change: (_, args) => {
+        if (args[1] === "bootstatus") {
+            queueMicrotask(() => {
+                sample.uiProcesses[0].exitCode = 2;
+                sample.uiProcesses[0].emit("exit", 2, null);
+            });
+        }
+    } });
+    await assert.rejects(sample.run(), /Simulator.*(exit|running)|UI.*(exit|running)/i);
+    assert.equal(sample.report().status, "failed");
+    assert.equal(sample.report().simulatorUi.exitCode, 2);
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assert.deepEqual(sample.uiProcesses[0].signals, []);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a simultaneous boot timeout and UI exit keeps the boot error and records the exited UI", async context => {
+    const sample = fixture(context, { change: (_, args) => {
+        if (args[1] === "bootstatus") {
+            queueMicrotask(() => {
+                sample.uiProcesses[0].exitCode = 6;
+                sample.uiProcesses[0].emit("exit", 6, null);
+            });
+            return { status: null, error: Object.assign(new Error("original boot timeout"), { code: "ETIMEDOUT" }) };
+        }
+    } });
+    await assert.rejects(sample.run(), /simctl bootstatus.*ETIMEDOUT/);
+    const report = sample.report();
+    assert.equal(report.phase, "boot");
+    assert.match(report.failure, /simctl bootstatus.*ETIMEDOUT/);
+    assert.equal(report.simulatorUi.status, "failed");
+    assert.equal(report.simulatorUi.exitCode, 6);
+    assert.match(report.simulatorUi.failure, /exited|running/);
+    assert.deepEqual(sample.uiProcesses[0].signals, []);
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assertOwnedCleanup(sample.calls);
+});
+
+test("an exited UI after Settings readiness prevents installing NutriFlow", async context => {
+    const sample = fixture(context, { change: (_, args) => {
+        if (args[1] === "terminate" && args.at(-1) === readinessBundleId) {
+            sample.uiProcesses[0].exitCode = 3;
+            sample.uiProcesses[0].emit("exit", 3, null);
+        }
+    } });
+    await assert.rejects(sample.run(), /Simulator.*(exit|running)|UI.*(exit|running)/i);
+    assert.equal(sample.report().readiness.status, "passed");
+    assert.equal(sample.report().simulatorUi.exitCode, 3);
+    assert.ok(!sample.calls.some(call => call.args[1] === "install"));
+    assertOwnedCleanup(sample.calls);
+});
+
+test("an exited UI during final stabilization cannot yield a successful smoke", async context => {
+    const sample = fixture(context, { pauseChange: milliseconds => {
+        if (milliseconds === 5_000) {
+            sample.uiProcesses[0].exitCode = 4;
+            sample.uiProcesses[0].emit("exit", 4, null);
+        }
+    } });
+    await assert.rejects(sample.run(), /Simulator.*(exit|running)|UI.*(exit|running)/i);
+    assert.equal(sample.report().simulatorUi.exitCode, 4);
+    assert.equal(sample.report().status, "failed");
+    assertOwnedCleanup(sample.calls);
+});
+
+test("the Simulator UI PID cannot substitute for a live NutriFlow process", async context => {
+    const sample = fixture(context, { change: (_, args) => args[1] === "launch" && args.at(-1) === bundleId ?
+        { status: 0, stdout: `${bundleId}: ${simulatorUiPid}` } : undefined });
+    await assert.rejects(sample.run(), /no longer running/);
+    assert.equal(sample.report().simulatorUi.pid, simulatorUiPid);
+    assert.equal(sample.report().status, "failed");
+    assertOwnedCleanup(sample.calls);
+});
+
+test("UI cleanup failure does not hide the primary NutriFlow install error", async context => {
+    const sample = fixture(context, {
+        change: (_, args) => args[1] === "install" ? { status: 17, stderr: "primary install failure" } : undefined,
+        startChange: child => {
+            child.kill = signal => {
+                child.signals.push(signal);
+                throw new Error("owned UI termination failure");
+            };
+        }
+    });
+    await assert.rejects(sample.run(), /primary install failure/);
+    assert.match(sample.report().failure, /primary install failure/);
+    assert.equal(sample.report().simulatorUi.cleanup.status, "failed");
+    assert.ok(sample.uiProcesses[0].signals.length > 0);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("failed UI cleanup cannot make an otherwise successful smoke green", async context => {
+    const sample = fixture(context, { startChange: child => {
+        child.kill = signal => {
+            child.signals.push(signal);
+            throw new Error("owned UI termination failure");
+        };
+    } });
+    await assert.rejects(sample.run(), /owned UI termination failure/);
+    assert.equal(sample.report().status, "failed");
+    assert.equal(sample.report().simulatorUi.cleanup.status, "failed");
+    assertOwnedCleanup(sample.calls);
+});
+
+test("UI spawn has a ten-second deadline and cleanup still stops the owned child", { timeout: 5_000 }, async context => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const sample = fixture(context, { startChange: child => child });
+    const rejected = assert.rejects(sample.run(), /Simulator|UI|spawn|timed/i);
+    await new Promise(resolve => setImmediate(resolve));
+    context.mock.timers.tick(10_000);
+    await rejected;
+    assert.equal(sample.report().phase, "start-simulator-ui");
+    assert.equal(sample.report().status, "failed");
+    assert.ok(!sample.calls.some(call => ["bootstatus", "install", "launch"].includes(call.args[1])));
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a UI ignoring SIGTERM receives only an owned SIGKILL after five seconds", { timeout: 5_000 }, async context => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const sample = fixture(context, { startChange: child => {
+        child.kill = signal => {
+            child.signals.push(signal);
+            if (signal === "SIGKILL") {
+                queueMicrotask(() => {
+                    child.signalCode = signal;
+                    child.emit("exit", null, signal);
+                });
+            }
+            return true;
+        };
+    } });
+    const running = sample.run();
+    await waitForUiSignal(sample, "SIGTERM");
+    context.mock.timers.tick(5_000);
+    const report = await running;
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM", "SIGKILL"]);
+    assert.equal(report.simulatorUi.status, "stopped");
+    assert.equal(report.simulatorUi.cleanup.status, "passed");
+    assert.equal(report.simulatorUi.cleanup.signal, "SIGKILL");
+    assert.equal(report.status, "passed");
+    assertOwnedCleanup(sample.calls);
+});
+
+test("a UI ignoring both termination deadlines fails without broad process cleanup", { timeout: 5_000 }, async context => {
+    context.mock.timers.enable({ apis: ["setTimeout"] });
+    const sample = fixture(context, { startChange: child => {
+        child.kill = signal => {
+            child.signals.push(signal);
+            return true;
+        };
+    } });
+    const rejected = assert.rejects(sample.run(), /Simulator|UI|stop|terminat|timed/i);
+    await waitForUiSignal(sample, "SIGTERM");
+    context.mock.timers.tick(5_000);
+    await waitForUiSignal(sample, "SIGKILL");
+    context.mock.timers.tick(5_000);
+    await rejected;
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM", "SIGKILL"]);
+    assert.equal(sample.report().status, "failed");
+    assert.equal(sample.report().simulatorUi.cleanup.status, "failed");
+    assert.ok(!sample.calls.some(call => ["killall", "pkill", "open", "ps"].includes(call.command)));
+    assertOwnedCleanup(sample.calls);
 });
 
 for (const inventory of [
@@ -397,7 +754,7 @@ test("captures bundle and system launch diagnostics even when Settings never ope
     } });
     await assert.rejects(sample.run(), /not ready/);
     const logs = sample.calls.filter(call => call.args[1] === "spawn" && call.args[3] === "log");
-    assert.equal(logs.length, 2);
+    assert.equal(logs.length, 3);
     assert.equal(logs[0].args.at(-1), 'process == "NutriFlow.Mobile"');
     assert.deepEqual(logs[1].args.slice(0, -1), [
         "simctl", "spawn", deviceId, "log", "show", "--last", "20m", "--style", "compact", "--predicate"
@@ -408,9 +765,62 @@ test("captures bundle and system launch diagnostics even when Settings never ope
     assert.ok(!logs[1].args.at(-1).includes("process IN"));
     assert.equal(logs[1].options.maxBuffer, 4 * 1024 * 1024);
     assert.equal(logs[1].options.timeout, 30_000);
+    assert.deepEqual(logs[2].args.slice(0, -1), [
+        "simctl", "spawn", deviceId, "log", "show", "--last", "20m", "--style", "compact", "--predicate"
+    ]);
+    assert.match(logs[2].args.at(-1), /backboardd/);
+    assert.match(logs[2].args.at(-1), /SpringBoard/);
+    assert.match(logs[2].args.at(-1), /display/);
     assertOwnedCleanup(sample.calls);
     assert.match(readFileSync(join(sample.outputDirectory, "launch-system.log"), "utf8"), /com.apple.Preferences readiness diagnostic/);
 });
+
+test("captures owned display ports, bounded boot services and filtered Simulator host diagnostics", async context => {
+    const sample = fixture(context);
+    await sample.run();
+    const displays = sample.calls.filter(call => call.args[1] === "io" && call.args[3] === "enumerate");
+    assert.equal(displays.length, 1);
+    assert.deepEqual(displays[0].args, ["simctl", "io", deviceId, "enumerate"]);
+    assert.match(readFileSync(join(sample.outputDirectory, "display-ports.log"), "utf8"), /owned simulator/);
+    const bootLog = sample.calls.find(call => call.args[1] === "spawn" && call.args[3] === "log" && call.args.at(-1).includes("backboardd"));
+    assert.ok(bootLog);
+    assert.equal(bootLog.args[2], deviceId);
+    const failures = '(eventMessage CONTAINS[c] "error" OR eventMessage CONTAINS[c] "failed" OR eventMessage CONTAINS[c] "watchdog" OR eventMessage CONTAINS[c] "display")';
+    assert.equal(bootLog.args.at(-1), `(process IN {"backboardd", "SpringBoard"} AND ${failures})`);
+    const hostLogs = sample.calls.filter(call => call.command === "log");
+    assert.equal(hostLogs.length, 1);
+    assert.deepEqual(hostLogs[0].args.slice(0, -1), ["show", "--last", "20m", "--style", "compact", "--predicate"]);
+    assert.equal(hostLogs[0].args.at(-1), `(process == "Simulator" AND processID == ${simulatorUiPid} AND ${failures})`);
+    assert.match(readFileSync(join(sample.outputDirectory, "simulator-host.log"), "utf8"), /Simulator host diagnostics/);
+    for (const call of sample.calls.filter(call => call.args[1] === "spawn" || call.args[1] === "io")) {
+        assert.equal(call.args[2], deviceId);
+    }
+    assertOwnedCleanup(sample.calls);
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+});
+
+for (const [name, file, matches] of [
+    ["display ports", "display-ports.log", (command, args) => command === "xcrun" && args[1] === "io" && args[3] === "enumerate"],
+    ["boot services", "boot-system.log", (command, args) => command === "xcrun" && args[1] === "spawn" && args[3] === "log" && args.at(-1).includes("backboardd")],
+    ["Simulator host", "simulator-host.log", command => command === "log"]
+]) {
+    test(`partial ${name} diagnostic failure preserves the original error and both owned cleanups`, async context => {
+        const sample = fixture(context, { change: (command, args) => {
+            if (args[1] === "install") {
+                return { status: 17, stderr: "primary app install error" };
+            }
+            if (matches(command, args)) {
+                return { status: null, stdout: `partial ${name} diagnostic`, error: Object.assign(new Error("capture buffer exhausted"), { code: "ENOBUFS" }) };
+            }
+        } });
+        await assert.rejects(sample.run(), /primary app install error/);
+        assert.match(sample.report().failure, /primary app install error/);
+        assert.match(readFileSync(join(sample.outputDirectory, file), "utf8"), new RegExp(`partial ${name} diagnostic`));
+        assert.match(readFileSync(join(sample.outputDirectory, "diagnostic-errors.log"), "utf8"), /ENOBUFS/);
+        assertOwnedCleanup(sample.calls);
+        assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
+    });
+}
 
 for (const code of ["ETIMEDOUT", "ENOBUFS"]) {
     test(`launch-log ${code} preserves the app failure and any partial output`, async context => {
@@ -438,6 +848,9 @@ test("reports a command timeout and still attempts bounded cleanup", async conte
     assertOwnedCleanup(sample.calls);
     assert.ok(sample.calls.some(call => call.args.at(-1) === join(sample.outputDirectory, "failure.png")));
     assert.ok(sample.calls.some(call => call.args[1] === "spawn" && call.args[3] === "log"));
+    assert.equal(sample.calls.find(call => call.args[1] === "bootstatus").options.timeout, 240_000);
+    assert.ok(!sample.calls.some(call => ["install", "launch"].includes(call.args[1])));
+    assert.deepEqual(sample.uiProcesses[0].signals, ["SIGTERM"]);
 });
 
 for (const text of [`${bundleId}: 0`, `${bundleId}: -1`, "another.bundle: 1234", `${bundleId}: 9007199254740993`]) {
@@ -468,7 +881,7 @@ for (const jobs of [`999\t0\tUIKitApplication:${bundleId}[1234]`, `${pid}\t0\tUI
 
 test("rejects an invalid screenshot despite successful simctl exit", async context => {
     const sample = fixture(context, { change: (_, args) => {
-        if (args[1] === "io") {
+        if (args[1] === "io" && args[3] === "screenshot") {
             writeFileSync(args.at(-1), "not a PNG");
             return { status: 0, stdout: "" };
         }
@@ -557,7 +970,8 @@ test("workflow time budget includes one recovery boot, diagnostics and cleanup r
     const commandBudget = sample.calls.reduce((total, call) => total + call.options.timeout, 0);
     const pauseBudget = sample.pauses.reduce((total, milliseconds) => total + milliseconds, 0);
     assert.ok(Number.isFinite(limit));
-    assert.ok(commandBudget + pauseBudget + 30_000 + 30_000 < limit);
+    const totalBudget = commandBudget + pauseBudget + 10_000 + 5_000 + 5_000 + 30_000 + 30_000;
+    assert.ok(totalBudget < limit, `Required budget ${totalBudget}ms exceeds workflow limit ${limit}ms`);
 });
 
 test("workflow invokes the tested script and uploads startup diagnostics even after smoke failure", () => {
