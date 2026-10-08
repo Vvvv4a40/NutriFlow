@@ -12,9 +12,9 @@ concurrency:
 
 jobs:
   build:
-    name: Build unsigned iOS simulator app
+    name: Build and test iOS simulator app
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 36
 
     defaults:
       run:
@@ -59,7 +59,8 @@ jobs:
         run: |
           node --version
           node --check scripts/test-ios-simulator.mjs
-          node --test scripts/tests/ios-simulator.test.mjs
+          node --check scripts/verify-ios-simulator-signature.mjs
+          node --test scripts/tests/ios-simulator*.test.mjs
 
       - name: Configure NuGet HTTP cache
         run: |
@@ -87,10 +88,43 @@ jobs:
             --runtime "$IOS_RUNTIME" --locked-mode --warnaserror
           git diff --exit-code -- mobile/NutriFlow.Mobile/packages.android.lock.json
 
-      - name: Build simulator app
+      - name: Build simulator app without SDK signing
         run: |
           dotnet build "$MOBILE_PROJECT" -f net10.0-ios --runtime "$IOS_RUNTIME" \
             --configuration Debug --no-restore --warnaserror -p:EnableCodeSigning=false
+
+      - name: Inspect original simulator signature
+        id: ios_signature_before
+        timeout-minutes: 3
+        run: |
+          node scripts/verify-ios-simulator-signature.mjs \
+            "mobile/NutriFlow.Mobile/bin/Debug/net10.0-ios/$IOS_RUNTIME/NutriFlow.Mobile.app" \
+            "$RUNNER_TEMP/ios-signature-before" --observe
+
+      - name: Sign simulator app with the SDK
+        timeout-minutes: 2
+        run: |
+          dotnet build "$MOBILE_PROJECT" -f net10.0-ios --runtime "$IOS_RUNTIME" \
+            --configuration Debug --no-restore --warnaserror \
+            -p:EnableCodeSigning=true -p:CodesignKey=-
+
+      - name: Verify simulator signature before packaging
+        timeout-minutes: 3
+        run: |
+          node scripts/verify-ios-simulator-signature.mjs \
+            "mobile/NutriFlow.Mobile/bin/Debug/net10.0-ios/$IOS_RUNTIME/NutriFlow.Mobile.app" \
+            "$RUNNER_TEMP/ios-signature-after"
+
+      - name: Upload simulator signature diagnostics
+        if: ${{ !cancelled() && (steps.ios_signature_before.outcome == 'success' || steps.ios_signature_before.outcome == 'failure') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-ios-signature-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ios-signature-before/
+            ${{ runner.temp }}/ios-signature-after/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify and archive simulator bundle
         run: |

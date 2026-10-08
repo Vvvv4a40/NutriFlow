@@ -1203,7 +1203,7 @@ test("workflow time budget includes recovery boot, verified already-shutdown cle
 
 test("workflow invokes the tested script and uploads startup diagnostics even after smoke failure", () => {
     const workflow = readFileSync(new URL("../../.github/workflows/ios-simulator.yml", import.meta.url), "utf8");
-    assert.ok(workflow.includes("node --test scripts/tests/ios-simulator.test.mjs"));
+    assert.ok(workflow.includes("node --test scripts/tests/ios-simulator*.test.mjs"));
     assert.ok(workflow.includes("node scripts/test-ios-simulator.mjs"));
     assert.ok(workflow.includes("steps.ios_smoke.outcome == 'success' || steps.ios_smoke.outcome == 'failure'"));
     assert.ok(workflow.includes("!cancelled()"));
