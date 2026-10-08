@@ -358,6 +358,17 @@ test("a lost diagnostics directory preserves the original native tool failure", 
     assert.throws(() => sample.run(), /original architecture-tool failure/);
 });
 
+test("the tracked device lock preserves the simulator package graph with its own runtime section", () => {
+    const device = JSON.parse(readFileSync(new URL("../../mobile/NutriFlow.Mobile/packages.ios-device.lock.json", import.meta.url), "utf8"));
+    const simulator = JSON.parse(readFileSync(new URL("../../mobile/NutriFlow.Mobile/packages.ios.lock.json", import.meta.url), "utf8"));
+    const framework = "net10.0-ios26.0";
+    assert.equal(device.version, 1);
+    assert.deepEqual(Object.keys(device.dependencies).sort(), [framework, `${framework}/ios-arm64`]);
+    assert.deepEqual(device.dependencies[framework], simulator.dependencies[framework]);
+    assert.equal(Object.keys(device.dependencies[framework]).length, 20);
+    assert.deepEqual(device.dependencies[`${framework}/ios-arm64`], {});
+});
+
 test("device workflow isolates the Release RID and lock while preserving the pinned toolchain", () => {
     const workflow = readFileSync(new URL("../../.github/workflows/ios-device.yml", import.meta.url), "utf8");
     const simulator = readFileSync(new URL("../../.github/workflows/ios-simulator.yml", import.meta.url), "utf8");
