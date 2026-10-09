@@ -11,6 +11,7 @@
 - `mobile/NutriFlow.Mobile.Core/NutriFlow.Mobile.Core.csproj` — ссылки на Infrastructure / Domain и `Compile Link` существующего workflow / DTO без ссылки на исполняемый ASP.NET-проект.
 - `mobile/NutriFlow.Mobile.Core.Tests/LocalMobileTests.cs` — сценарии ручного ввода, сохранения, повторов, перезапуска, одноимённых продуктов и изоляции. Проверяются без Android SDK через `mobile/NutriFlow.Mobile.Core.slnx`.
 - `.github/workflows/android-apk.yml` — облачная сборка с постоянной подписью; `scripts/verify-android-apk.mjs` — проверка сертификата, manifest, состава и checksum.
+- `scripts/test-android-emulator.mjs` — установка / запуск того же APK, создание искусственного профиля и проверка после перезапуска на облачном Android; диагностика без личных данных или AI-ключа.
 
 [Установка и настройки](ANDROID_INSTALLATION.md) · [Подробности клиента](MOBILE_CLIENT.md).
 
