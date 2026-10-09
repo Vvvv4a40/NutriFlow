@@ -57,6 +57,17 @@ jobs:
           node --check scripts/verify-android-apk.mjs
           node --test scripts/tests/android-apk.test.mjs
 
+      - name: Select exact SDK for this build
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync("global.json", "utf8"));
+            if (config.sdk.version !== "10.0.400") throw new Error("Unexpected SDK version.");
+            config.sdk.rollForward = "disable";
+            writeFileSync("global.json", JSON.stringify(config, null, 2) + "\n");
+          '
+          test "$(dotnet --version)" = '10.0.400'
+
       - name: Prepare Android tools on the cloud runner
         timeout-minutes: 5
         run: |
