@@ -111,8 +111,8 @@ export function verifyAndroidApk({ apkPath, buildPropertiesPath, buildToolsDirec
                 throw new Error("The APK contains an unsafe entry path.");
             }
             const name = basename(entry);
-            if (/^(?:\.env(?:\..*)?|appsettings(?:\.[^.]*)?\.json|secrets\.json)$/i.test(name) ||
-                /\.(?:db|sqlite3?|keystore|jks|pfx|p12|pem|key)$/i.test(name)) {
+            if (/^(?:\.env(?:\..*)?|appsettings(?:\.[^.]*)?\.json|secrets\.json|profiles\.json)$/i.test(name) ||
+                /\.(?:db|sqlite3?|keystore|jks|pfx|p12|pem|key|dpapi)$/i.test(name)) {
                 throw new Error("The APK must not contain private storage, credentials, or signing keys.");
             }
         }

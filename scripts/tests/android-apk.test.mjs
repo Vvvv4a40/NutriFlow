@@ -18,6 +18,34 @@ const publicCertificate = Buffer.from("synthetic DER public signing certificate"
 const signerSha256 = createHash("sha256").update(publicCertificate).digest("hex");
 const signature = `Verifies\nSigner #1 certificate DN: CN=NutriFlow Personal\nSigner #1 certificate SHA-256 digest: ${signerSha256}\n`;
 
+test("native Linux lock keeps the same versions and dependencies as the Windows graph", () => {
+    const windows = JSON.parse(readFileSync(new URL("../../mobile/NutriFlow.Mobile/packages.android.lock.json", import.meta.url), "utf8"));
+    const linux = JSON.parse(readFileSync(new URL("../../mobile/NutriFlow.Mobile/packages.android-ci.lock.json", import.meta.url), "utf8"));
+    const hashes = [];
+    for (const [framework, packages] of Object.entries(windows.dependencies)) {
+        for (const [name, entry] of Object.entries(packages)) {
+            const native = linux.dependencies[framework]?.[name];
+            assert.ok(native, `${framework}: ${name}`);
+            const { contentHash: windowsHash, ...windowsPackage } = entry;
+            const { contentHash: linuxHash, ...linuxPackage } = native;
+            assert.deepEqual(linuxPackage, windowsPackage);
+            if (linuxHash !== windowsHash) hashes.push(name);
+        }
+    }
+    assert.deepEqual(Object.keys(linux.dependencies).sort(), Object.keys(windows.dependencies).sort());
+    for (const framework of Object.keys(windows.dependencies)) {
+        assert.deepEqual(Object.keys(linux.dependencies[framework]).sort(), Object.keys(windows.dependencies[framework]).sort());
+    }
+    assert.deepEqual(hashes.sort(), ["Microsoft.Maui.Controls.Build.Tasks", "Microsoft.Maui.Resizetizer"]);
+});
+
+test("permanent local signing material stays outside Git and the Docker context", () => {
+    const gitIgnore = readFileSync(new URL("../../.gitignore", import.meta.url), "utf8");
+    const dockerIgnore = readFileSync(new URL("../../.dockerignore", import.meta.url), "utf8");
+    assert.match(gitIgnore, /^\/\.private\/android-signing\/$/m);
+    assert.match(dockerIgnore, /^\.private\/$/m);
+});
+
 function fixture(context, overrides = {}) {
     const directory = mkdtempSync(join(tmpdir(), "nutriflow-android-apk-"));
     context.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }));
@@ -91,7 +119,9 @@ for (const selected of [
     { name: "unsafe ZIP path", entries: [...entries, "../outside.txt"] },
     { name: "credential file", entries: [...entries, "assets/.env"] },
     { name: "private database", entries: [...entries, "assets/nutriflow.db"] },
-    { name: "private signing key", entries: [...entries, "assets/android.keystore"] }
+    { name: "private signing key", entries: [...entries, "assets/android.keystore"] },
+    { name: "protected signing password", entries: [...entries, "assets/password.dpapi"] },
+    { name: "private profile catalog", entries: [...entries, "assets/profiles.json"] }
 ]) {
     test(`rejects ${selected.name} before publishing a checksum`, context => {
         const sample = fixture(context, selected);
