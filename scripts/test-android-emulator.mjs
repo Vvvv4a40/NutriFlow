@@ -166,8 +166,8 @@ export async function testAndroidEmulator({
         report.emulatorPid = child.pid;
         report.phase = "boot";
         adb(["wait-for-device"], { timeout: 150_000 });
-        const identity = adb(["emu", "avd", "name"]);
-        if (identity !== `${avdName}\nOK`) throw new Error("The selected serial does not belong to the newly created emulator.");
+        const identity = adb(["emu", "avd", "name"]).split(/\r?\n/);
+        if (identity.length !== 2 || identity[0] !== avdName || identity[1] !== "OK") throw new Error("The selected serial does not belong to the newly created emulator.");
         deviceOwned = true;
         const bootDeadline = Math.min(deadline, now() + 120_000);
         let booted = false;
