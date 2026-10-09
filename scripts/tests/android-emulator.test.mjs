@@ -25,7 +25,8 @@ function hierarchy(screen) {
     return `<?xml version="1.0"?><hierarchy rotation="0">${screens[screen]}</hierarchy>`;
 }
 
-function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true } = {}) {
+function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
+    consoleLineEnding = "\n", extraConsoleLine = "" } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -58,7 +59,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
             else {
                 assert.deepEqual(args.slice(0, 2), ["-s", serial]);
                 const operation = args.slice(2);
-                if (operation[0] === "emu") stdout = `${avdName}\nOK`;
+                if (operation[0] === "emu") stdout = `${avdName}${consoleLineEnding}OK${consoleLineEnding}${extraConsoleLine}`;
                 else if (operation[0] === "install") stdout = "Success\n";
                 else if (operation[0] === "exec-out") stdout = png;
                 else if (operation[0] === "shell") {
@@ -129,6 +130,21 @@ test("rejects am start failure even when adb exits zero and still stops its owne
     assert.equal(sample.report().profile.creation, "not-tested");
     assert.deepEqual(sample.child.signals, ["SIGTERM"]);
     assert.ok(existsSync(join(sample.outputDirectory, "failure.png")));
+});
+
+test("accepts the owned emulator console identity with actual CRLF line endings", async context => {
+    const sample = fixture(context, { consoleLineEnding: "\r\n" });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.installation, "passed");
+    assert.equal(report.profile.persistence, "passed");
+});
+
+test("rejects extra emulator console identity lines even when the owned name and OK are present", async context => {
+    const sample = fixture(context, { consoleLineEnding: "\r\n", extraConsoleLine: "unexpected" });
+    await assert.rejects(sample.run(), /does not belong/);
+    assert.ok(!sample.calls.some(call => call.args.includes("install")));
+    assert.deepEqual(sample.child.signals, ["SIGTERM"]);
 });
 
 test("an app process and splash alone do not pass the native welcome screen check", async context => {
