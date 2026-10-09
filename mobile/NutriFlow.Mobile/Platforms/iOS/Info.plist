@@ -4,6 +4,12 @@
     <dict>
         <key>LSRequiresIPhoneOS</key>
         <true/>
+        <key>NSCameraUsageDescription</key>
+        <string>Фото этикетки для чтения состава и пищевой ценности.</string>
+        <key>NSPhotoLibraryUsageDescription</key>
+        <string>Выбор фото этикетки для чтения пищевой ценности.</string>
+        <key>NSMicrophoneUsageDescription</key>
+        <string>Запись описания еды для преобразования в редактируемый текст.</string>
         <key>UIDeviceFamily</key>
         <array>
             <integer>1</integer>

@@ -53,6 +53,12 @@ jobs:
       - name: Run tests
         run: dotnet test NutriFlow.sln --configuration Release --no-build --no-restore
 
+      - name: Verify offline mobile core
+        run: |
+          dotnet restore mobile/NutriFlow.Mobile.Core.slnx --locked-mode --warnaserror
+          dotnet test mobile/NutriFlow.Mobile.Core.slnx --configuration Release --no-restore --warnaserror
+          dotnet format mobile/NutriFlow.Mobile.Core.slnx --no-restore --verify-no-changes
+
       - name: Verify standalone meal workflow
         shell: pwsh
         run: ./scripts/Test-MealWorkflow.ps1

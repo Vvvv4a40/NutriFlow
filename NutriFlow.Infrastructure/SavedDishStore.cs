@@ -66,6 +66,13 @@ public sealed class SavedDishStore
         string name,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (name.StartsWith("saved-dish:", StringComparison.Ordinal) &&
+            Guid.TryParseExact(name[11..], "N", out Guid selectedId))
+        {
+            return await FindAsync(selectedId, cancellationToken);
+        }
+
         string normalizedName = NormalizeName(name);
         SavedDishRecord? record = await _dbContext.SavedDishes
             .AsNoTracking()

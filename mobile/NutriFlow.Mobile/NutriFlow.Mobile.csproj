@@ -12,9 +12,10 @@
     <MauiVersion>10.0.0</MauiVersion>
     <ApplicationTitle>NutriFlow</ApplicationTitle>
     <ApplicationId>com.nutriflow.app</ApplicationId>
-    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">android-arm;android-arm64;android-x64</RuntimeIdentifiers>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
     <NuGetLockFilePath>packages.$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')).lock.json</NuGetLockFilePath>
   </PropertyGroup>
@@ -23,6 +24,7 @@
     <MauiIcon Include="Resources/AppIcon/appicon.svg" Color="#185B45" />
     <MauiSplashScreen Include="Resources/Splash/splash.svg" Color="#185B45" BaseSize="128,128" />
     <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+    <ProjectReference Include="../NutriFlow.Mobile.Core/NutriFlow.Mobile.Core.csproj" GlobalPropertiesToRemove="TargetFramework;RuntimeIdentifier;RuntimeIdentifiers" />
   </ItemGroup>
 
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">

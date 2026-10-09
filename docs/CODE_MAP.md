@@ -1,5 +1,19 @@
 # Навигация по коду
 
+## Автономный Android
+
+- `mobile/NutriFlow.Mobile/MauiProgram.cs` — старт и регистрация мобильных сервисов; `App.xaml.cs` создаёт окно с навигацией.
+- `MainPage.xaml.cs` — выбор профиля, вкладки, дневник, цели и исправление записей. Файлы `MainPage.Input.cs`, `Products.cs`, `Dishes.cs`, `Settings.cs`, `Media.cs` продолжают тот же `partial`-класс по сценариям.
+- `FormPage.cs` и `Ui.cs` — формы, состояние выполнения, компоненты и отображение чисел; бизнес-расчётов здесь нет.
+- `ProfileSettings.cs` — отдельный ключ Groq через `SecureStorage` и настройки / последний черновик по GUID профиля; `AudioCapture.cs` — нативная запись Android.
+- `mobile/NutriFlow.Mobile.Core/LocalProfileStore.cs` — локальный список и выбранный профиль; `LocalMealClient.cs` — офлайн-сценарии, явный владелец и прямые HTTPS-интеграции.
+- `NutriFlow.Infrastructure/LocalProfileDatabase.cs` — новая отдельная SQLite-база выбранного профиля, миграции и явный GUID владельца; серверная рабочая база не подключается.
+- `mobile/NutriFlow.Mobile.Core/NutriFlow.Mobile.Core.csproj` — ссылки на Infrastructure / Domain и `Compile Link` существующего workflow / DTO без ссылки на исполняемый ASP.NET-проект.
+- `mobile/NutriFlow.Mobile.Core.Tests/LocalMobileTests.cs` — сценарии ручного ввода, сохранения, повторов, перезапуска, одноимённых продуктов и изоляции. Проверяются без Android SDK через `mobile/NutriFlow.Mobile.Core.slnx`.
+- `.github/workflows/android-apk.yml` — облачная сборка с постоянной подписью; `scripts/verify-android-apk.mjs` — проверка сертификата, manifest, состава и checksum.
+
+[Установка и настройки](ANDROID_INSTALLATION.md) · [Подробности клиента](MOBILE_CLIENT.md).
+
 ## Запуск API
 
 Начальная точка — `NutriFlow.Api/Program.cs`. В нём виден порядок регистрации сервисов, настройки HTTP и подключения маршрутов.
