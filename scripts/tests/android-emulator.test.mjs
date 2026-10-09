@@ -15,18 +15,23 @@ function node(text, extra = "") {
     return `<node text="${text}" package="${packageId}" class="android.widget.TextView" enabled="true" bounds="[20,200][300,250]" ${extra} />`;
 }
 function hierarchy(screen) {
+    const diary = node("Дневник питания") + node("Съедено за день") +
+        node("Smoke", 'clickable="true"').replace("android.widget.TextView", "android.widget.EditText") +
+        node("Добавить еду", 'clickable="true"');
     const screens = {
         welcome: node("Питание под вашим контролем") + node("СОЗДАТЬ ПРОФИЛЬ", 'clickable="true"'),
         form: node("Локальный профиль") + node("Создать", 'clickable="true"') + node("Имя профиля").replace("android.widget.TextView", "android.widget.EditText"),
         filled: node("Локальный профиль") + node("Создать", 'clickable="true"') + node("Smoke").replace("android.widget.TextView", "android.widget.EditText"),
-        diary: node("Дневник питания") + node("Съедено за день") + node("Smoke"),
+        diary,
+        "busy-diary": diary + node("Выполняется…"),
+        "disabled-diary": diary.replaceAll('enabled="true"', 'enabled="false"'),
         splash: node("NutriFlow")
     };
     return `<?xml version="1.0"?><hierarchy rotation="0">${screens[screen]}</hierarchy>`;
 }
 
 function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
-    consoleLineEnding = "\n", extraConsoleLine = "" } = {}) {
+    consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [] } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -36,6 +41,8 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
     writeFileSync(apkPath, "fixture APK, not an actual Android package");
     const calls = [];
     const starts = [];
+    const diarySnapshots = [];
+    const screenshots = [];
     const child = new EventEmitter();
     Object.assign(child, { pid: startFailure ? undefined : 4000, exitCode: null, signalCode: null,
         stdout: new PassThrough(), stderr: new PassThrough(), signals: [], unref: () => {} });
@@ -61,7 +68,10 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                 const operation = args.slice(2);
                 if (operation[0] === "emu") stdout = `${avdName}${consoleLineEnding}OK${consoleLineEnding}${extraConsoleLine}`;
                 else if (operation[0] === "install") stdout = "Success\n";
-                else if (operation[0] === "exec-out") stdout = png;
+                else if (operation[0] === "exec-out") {
+                    screenshots.push({ screen, diarySnapshots: [...diarySnapshots] });
+                    stdout = png;
+                }
                 else if (operation[0] === "shell") {
                     if (operation[1] === "getprop") stdout = "1";
                     else if (operation[1] === "pidof") stdout = String(5000 + launches);
@@ -70,7 +80,11 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                         launches++;
                         if (launches > 1) screen = persisted ? "diary" : "welcome";
                         stdout = "Starting: Intent {}\nStatus: ok\nActivity: com.nutriflow.app/crc123.MainActivity\n";
-                    } else if (operation[1] === "cat") stdout = hierarchy(screen);
+                    } else if (operation[1] === "cat") {
+                        const snapshot = screen === "diary" ? diarySequence.shift() ?? diaryScreen : screen;
+                        if (screen === "diary") diarySnapshots.push(snapshot);
+                        stdout = hierarchy(snapshot);
+                    }
                     else if (operation[1] === "input" && operation[2] === "tap") {
                         assert.deepEqual(operation.slice(3), ["160", "225"]);
                         if (screen === "welcome") screen = "form";
@@ -86,7 +100,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
         return { status: 0, stdout, stderr: "" };
     }
     return {
-        runnerTemp, outputDirectory, apkPath, sdkDirectory, calls, starts, child,
+        runnerTemp, outputDirectory, apkPath, sdkDirectory, calls, starts, child, diarySnapshots, screenshots,
         run: options => testAndroidEmulator({ apkPath, outputDirectory, sdkDirectory, runnerTemp, execute,
             start: (command, args, settings) => {
                 starts.push({ command, args, settings });
@@ -161,6 +175,32 @@ test("fails when the profile and diary disappear after restarting", async contex
     assert.equal(sample.report().profile.creation, "passed");
     assert.equal(sample.report().profile.persistence, "not-tested");
     assert.equal(sample.report().status, "failed");
+});
+
+test("does not accept a busy diary even when its content and enabled controls are already visible", async context => {
+    const sample = fixture(context, { diaryScreen: "busy-diary" });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*diary.xml/);
+    assert.equal(sample.report().profile.creation, "not-tested");
+    assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+    assert.deepEqual(sample.child.signals, ["SIGTERM"]);
+});
+
+test("does not accept diary content while the profile and action controls are disabled", async context => {
+    const sample = fixture(context, { diaryScreen: "disabled-diary" });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*diary.xml/);
+    assert.equal(sample.report().profile.creation, "not-tested");
+    assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+});
+
+test("waits through a brief ready-to-busy transition and captures PNG only after two consecutive idle diary snapshots", async context => {
+    const sample = fixture(context, { diarySequence: ["busy-diary", "diary", "busy-diary", "diary", "diary"] });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.deepEqual(sample.diarySnapshots, ["busy-diary", "diary", "busy-diary", "diary", "diary", "diary", "diary"]);
+    assert.deepEqual(sample.screenshots.filter(item => item.screen === "diary").map(item => item.diarySnapshots), [
+        ["busy-diary", "diary", "busy-diary", "diary", "diary"],
+        ["busy-diary", "diary", "busy-diary", "diary", "diary", "diary", "diary"]
+    ]);
 });
 
 test("does not reuse or send device commands to an existing selected serial", async context => {
