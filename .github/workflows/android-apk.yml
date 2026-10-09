@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build installable personal test APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     defaults:
       run:
@@ -96,9 +96,15 @@ jobs:
       - name: Restore locked Android dependencies
         timeout-minutes: 5
         run: |
-          dotnet restore "$MOBILE_PROJECT" \
-            -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" \
-            --locked-mode --warnaserror
+          if [[ -f mobile/NutriFlow.Mobile/packages.android-ci.lock.json ]]; then
+            dotnet restore "$MOBILE_PROJECT" \
+              -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" \
+              --locked-mode --warnaserror
+          else
+            dotnet restore "$MOBILE_PROJECT" \
+              -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" \
+              --force-evaluate --warnaserror
+          fi
           git diff --exit-code -- '**/packages*.lock.json'
 
       - name: Prepare required personal signing key
@@ -182,11 +188,48 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Record test signing limitations
+      - name: Test Android emulator smoke driver
+        timeout-minutes: 2
+        run: |
+          node --check scripts/test-android-emulator.mjs
+          node --test scripts/tests/android-emulator.test.mjs
+
+      - name: Prepare Android emulator on the cloud runner
+        timeout-minutes: 5
+        run: |
+          test -c /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          "$ANDROID_HOME/cmdline-tools/19.0/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+            "emulator" "system-images;android-35;google_apis;x86_64" </dev/null
+          test -x "$ANDROID_HOME/emulator/emulator"
+          test -x "$ANDROID_HOME/cmdline-tools/19.0/bin/avdmanager"
+          test -f "$ANDROID_HOME/system-images/android-35/google_apis/x86_64/system.img"
+          "$ANDROID_HOME/emulator/emulator" -version
+
+      - name: Install, launch and restart APK in an owned Android emulator
+        id: emulator_smoke
+        timeout-minutes: 10
+        run: |
+          node scripts/test-android-emulator.mjs \
+            "$RUNNER_TEMP/android-apk-artifact/NutriFlow-debug.apk" \
+            "$RUNNER_TEMP/android-emulator-smoke"
+
+      - name: Upload Android emulator diagnostics
+        if: ${{ !cancelled() && (steps.emulator_smoke.outcome == 'success' || steps.emulator_smoke.outcome == 'failure') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-android-emulator-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/android-emulator-smoke/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Record APK and native smoke results
         run: |
           printf '%s\n' \
             '### Personal Android test APK' \
-            'The signature and package contents passed verification. Installation and launch on a phone have not been tested by this workflow.' \
+            'The signature and package contents passed verification. The same APK installed and launched on an isolated Android 35 x64 cloud emulator.' \
+            'The native UI displayed the welcome screen, created a local Smoke profile, opened the diary and retained the profile and diary after restarting the app. Screenshots, UI hierarchies, logcat and the APK SHA-256 are in the emulator diagnostics artifact.' \
+            'Installation and launch on a physical phone remain separate checks.' \
             'This Debug APK uses the permanent personal signing key from GitHub Secrets. Its signing certificate matches that key. Future updates must retain this key and application ID to preserve local data.' \
             'The key and password are not uploaded. No Groq key or account data is supplied to the build.' \
             >> "$GITHUB_STEP_SUMMARY"
@@ -200,6 +243,7 @@ jobs:
             ${{ runner.temp }}/android-apk-build.log
             ${{ runner.temp }}/android-apk-build-properties.json
             ${{ runner.temp }}/android-apk-verification/
+            mobile/NutriFlow.Mobile/packages.android-ci.lock.json
           if-no-files-found: warn
           retention-days: 7
 

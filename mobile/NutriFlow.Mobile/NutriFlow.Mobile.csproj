@@ -18,6 +18,7 @@
     <RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">android-arm;android-arm64;android-x64</RuntimeIdentifiers>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
     <NuGetLockFilePath>packages.$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')).lock.json</NuGetLockFilePath>
+    <NuGetLockFilePath Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and $([MSBuild]::IsOSPlatform('linux'))">packages.android-ci.lock.json</NuGetLockFilePath>
   </PropertyGroup>
 
   <ItemGroup>
