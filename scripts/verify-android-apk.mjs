@@ -59,7 +59,7 @@ export function verifyAndroidApk({ apkPath, buildPropertiesPath, buildToolsDirec
                 throw new Error(`Unexpected Android build property: ${name}`);
             }
         }
-        if (typeof properties.NuGetLockFilePath !== "string" || basename(properties.NuGetLockFilePath) !== "packages.android.lock.json") {
+        if (typeof properties.NuGetLockFilePath !== "string" || basename(properties.NuGetLockFilePath) !== "packages.android-ci.lock.json") {
             throw new Error("Expected the Android dependency lock.");
         }
         report.properties = Object.fromEntries([...Object.keys(expected), "NuGetLockFilePath"].map(name => [name, properties[name]]));

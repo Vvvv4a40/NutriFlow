@@ -9,7 +9,7 @@ import { verifyAndroidApk } from "../verify-android-apk.mjs";
 const properties = {
     TargetFramework: "net10.0-android", Configuration: "Debug", EmbedAssembliesIntoApk: "true",
     PublishTrimmed: "false", AndroidLinkMode: "None", AndroidPackageFormats: "apk", AndroidKeyStore: "true", AndroidSigningKeyAlias: "nutriflow-personal",
-    AndroidNETSdkVersion: "36.1.2", MauiVersion: "10.0.0", NuGetLockFilePath: "packages.android.lock.json"
+    AndroidNETSdkVersion: "36.1.2", MauiVersion: "10.0.0", NuGetLockFilePath: "packages.android-ci.lock.json"
 };
 const entries = ["AndroidManifest.xml", "classes.dex", "lib/arm64-v8a/libmonodroid.so", "lib/x86_64/libmonodroid.so", "assemblies/NutriFlow.Mobile.dll"];
 const badging = "package: name='com.nutriflow.app' versionCode='1' versionName='0.1.0'\nsdkVersion:'21'\nuses-permission: name='android.permission.INTERNET'\nlaunchable-activity: name='crc.MainActivity' label='NutriFlow' icon=''\n";

@@ -83,6 +83,8 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 `SignAndroidPackage` создаёт подписанное APK; `EmbedAssembliesIntoApk=true` делает Debug-пакет пригодным для отдельной установки без fast deployment через IDE. Это пробная Debug-сборка со стандартным debug-ключом, не релиз для распространения. После успешной сборки ищите `*-Signed.apk` в `mobile/NutriFlow.Mobile/bin/Debug/net10.0-android/`. Сейчас такого проверенного артефакта нет. [Android build targets](https://learn.microsoft.com/en-us/dotnet/android/building-apps/build-targets#signandroidpackage), [правила подписи](https://learn.microsoft.com/en-us/dotnet/maui/android/deployment/publish-cli?view=net-maui-10.0).
 
+Эта локальная команда остаётся только отдельной технической пробой. Текущая поставка собирается workflow `android-apk.yml` с **постоянным личным** ключом, а не стандартным debug-key. Не пытайтесь обновить установленную постоянную сборку APK, подписанным другим сертификатом: Android отклонит обновление. Для пользовательских обновлений берите проверенный артефакт workflow.
+
 Для первого запуска предпочтителен настоящий Android-телефон: эмулятор пока не нужен. Установка APK, разрешение установки из выбранного источника и проверка экрана требуют участия пользователя. Не создавайте релизный keystore внутри репозитория и не коммитьте его; выпуск и подпись релизных обновлений — отдельный шаг.
 
 ## Что скачать
