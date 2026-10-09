@@ -1,0 +1,200 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build installable personal test APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 'true'
+      MOBILE_PROJECT: mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj
+      WORKLOAD_VERSION: '10.0.100'
+      ANDROID_BUILD_TOOLS: '36.0.0'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.400'
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Node.js for APK checks
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Test APK verifier
+        timeout-minutes: 2
+        run: |
+          node --check scripts/verify-android-apk.mjs
+          node --test scripts/tests/android-apk.test.mjs
+
+      - name: Prepare Android tools on the cloud runner
+        timeout-minutes: 5
+        run: |
+          test -n "$ANDROID_HOME"
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+            "cmdline-tools;19.0" </dev/null
+          "$ANDROID_HOME/cmdline-tools/19.0/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+            "platforms;android-36" "build-tools;$ANDROID_BUILD_TOOLS" "platform-tools" </dev/null
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -x "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt"
+          test -x "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner"
+          test -x "$JAVA_HOME/bin/jar"
+          java -version
+          test "$(dotnet --version)" = '10.0.400'
+
+      - name: Install pinned Android workload
+        timeout-minutes: 10
+        run: |
+          sudo env NUGET_HTTP_CACHE_PATH="$RUNNER_TEMP/nuget-http-cache-workload" \
+            "$(command -v dotnet)" workload install maui-android \
+            --version "$WORKLOAD_VERSION" --source https://api.nuget.org/v3/index.json
+          dotnet workload list
+          test "$(dotnet workload --version)" = "$WORKLOAD_VERSION"
+
+      - name: Restore locked Android dependencies
+        timeout-minutes: 5
+        run: |
+          dotnet restore "$MOBILE_PROJECT" \
+            -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" \
+            --locked-mode --warnaserror
+          git diff --exit-code -- '**/packages*.lock.json'
+
+      - name: Prepare required personal signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD" || "$ANDROID_KEY_ALIAS" != 'nutriflow-personal' ]]; then
+            printf '%s\n' 'The permanent personal Android signing secrets must be configured before building.' >&2
+            exit 1
+          fi
+          test ! -e "$RUNNER_TEMP/nutriflow-personal.keystore"
+          test ! -e "$RUNNER_TEMP/nutriflow-personal.cer"
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nutriflow-personal.keystore"
+          test -s "$RUNNER_TEMP/nutriflow-personal.keystore"
+          "$JAVA_HOME/bin/keytool" -exportcert -alias nutriflow-personal \
+            -keystore "$RUNNER_TEMP/nutriflow-personal.keystore" \
+            -storepass:env NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD \
+            -file "$RUNNER_TEMP/nutriflow-personal.cer" </dev/null
+
+      - name: Build signed standalone Debug APK
+        id: apk_build
+        timeout-minutes: 10
+        env:
+          NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          dotnet build "$MOBILE_PROJECT" -f net10.0-android --configuration Debug \
+            --no-restore --warnaserror --verbosity minimal -t:SignAndroidPackage \
+            -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME" \
+            -p:AndroidSdkBuildToolsVersion="$ANDROID_BUILD_TOOLS" \
+            -p:AndroidRestoreOnBuild=false -p:AndroidPackageFormats=apk \
+            -p:EmbedAssembliesIntoApk=true -p:PublishTrimmed=false -p:AndroidLinkMode=None \
+            -p:AndroidKeyStore=true -p:AndroidSigningKeyAlias=nutriflow-personal \
+            -p:AndroidSigningKeyStore="$RUNNER_TEMP/nutriflow-personal.keystore" \
+            -p:AndroidSigningStorePass=env:NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD \
+            -p:AndroidSigningKeyPass=env:NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD \
+            2>&1 | tee "$RUNNER_TEMP/android-apk-build.log"
+          dotnet msbuild "$MOBILE_PROJECT" -nologo -p:TargetFramework=net10.0-android \
+            -p:Configuration=Debug -p:AndroidSdkDirectory="$ANDROID_HOME" \
+            -p:JavaSdkDirectory="$JAVA_HOME" -p:AndroidSdkBuildToolsVersion="$ANDROID_BUILD_TOOLS" \
+            -p:AndroidRestoreOnBuild=false -p:AndroidPackageFormats=apk \
+            -p:EmbedAssembliesIntoApk=true -p:PublishTrimmed=false -p:AndroidLinkMode=None \
+            -p:AndroidKeyStore=true -p:AndroidSigningKeyAlias=nutriflow-personal \
+            -p:AndroidSigningKeyStore="$RUNNER_TEMP/nutriflow-personal.keystore" \
+            -p:AndroidSigningStorePass=env:NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD \
+            -p:AndroidSigningKeyPass=env:NUTRIFLOW_ANDROID_KEYSTORE_PASSWORD \
+            -getProperty:TargetFramework,Configuration,EmbedAssembliesIntoApk,PublishTrimmed,AndroidLinkMode,AndroidPackageFormats,AndroidKeyStore,AndroidSigningKeyAlias,AndroidNETSdkVersion,MauiVersion,NuGetLockFilePath \
+            > "$RUNNER_TEMP/android-apk-build-properties.json"
+
+      - name: Verify APK signature and contents
+        id: apk_verify
+        timeout-minutes: 3
+        run: |
+          shopt -s nullglob
+          signed_apks=(mobile/NutriFlow.Mobile/bin/Debug/net10.0-android/*-Signed.apk)
+          if [[ ${#signed_apks[@]} -ne 1 ]]; then
+            printf '%s\n' 'Expected exactly one signed Android APK.' >&2
+            exit 1
+          fi
+          mkdir "$RUNNER_TEMP/android-apk-artifact"
+          cp "${signed_apks[0]}" "$RUNNER_TEMP/android-apk-artifact/NutriFlow-debug.apk"
+          node scripts/verify-android-apk.mjs \
+            "$RUNNER_TEMP/android-apk-artifact/NutriFlow-debug.apk" \
+            "$RUNNER_TEMP/android-apk-build-properties.json" \
+            "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS" \
+            "$RUNNER_TEMP/nutriflow-personal.cer" \
+            "$RUNNER_TEMP/android-apk-verification"
+          cp "$RUNNER_TEMP/android-apk-verification/NutriFlow-debug.apk.sha256" \
+            "$RUNNER_TEMP/android-apk-verification/result.json" "$RUNNER_TEMP/android-apk-artifact/"
+
+      - name: Upload verified test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-android-apk-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/android-apk-artifact/NutriFlow-debug.apk
+            ${{ runner.temp }}/android-apk-artifact/NutriFlow-debug.apk.sha256
+            ${{ runner.temp }}/android-apk-artifact/result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Record test signing limitations
+        run: |
+          printf '%s\n' \
+            '### Personal Android test APK' \
+            'The signature and package contents passed verification. Installation and launch on a phone have not been tested by this workflow.' \
+            'This Debug APK uses the permanent personal signing key from GitHub Secrets. Its signing certificate matches that key. Future updates must retain this key and application ID to preserve local data.' \
+            'The key and password are not uploaded. No Groq key or account data is supplied to the build.' \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK diagnostics
+        if: ${{ !cancelled() && (steps.apk_build.outcome == 'success' || steps.apk_build.outcome == 'failure') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nutriflow-android-apk-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/android-apk-build.log
+            ${{ runner.temp }}/android-apk-build-properties.json
+            ${{ runner.temp }}/android-apk-verification/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove temporary signing material
+        if: ${{ always() }}
+        run: |
+          test -n "$RUNNER_TEMP"
+          test -d "$RUNNER_TEMP"
+          rm -f -- "$RUNNER_TEMP/nutriflow-personal.keystore" "$RUNNER_TEMP/nutriflow-personal.cer"

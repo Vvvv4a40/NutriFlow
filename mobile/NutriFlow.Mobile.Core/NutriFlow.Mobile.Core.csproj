@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj" />
+    <Compile Include="../../NutriFlow.Api/Services/MealWorkflowService.cs" Link="Workflow/MealWorkflowService.cs" />
+    <Compile Include="../../NutriFlow.Api/Services/MealPreviewValidator.cs" Link="Workflow/MealPreviewValidator.cs" />
+    <Compile Include="../../NutriFlow.Api/Services/MealParserResponseException.cs" Link="Workflow/MealParserResponseException.cs" />
+    <Compile Include="../../NutriFlow.Api/Contracts/MealSessionContracts.cs" Link="Contracts/MealSessionContracts.cs" />
+    <Compile Include="../../NutriFlow.Api/Contracts/DailyProgressResponse.cs" Link="Contracts/DailyProgressResponse.cs" />
+    <Compile Include="../../NutriFlow.Api/Contracts/ProductResponse.cs" Link="Contracts/ProductResponse.cs" />
+    <Compile Include="../../NutriFlow.Api/Contracts/NutritionResponse.cs" Link="Contracts/NutritionResponse.cs" />
+    <Compile Include="../../NutriFlow.Api/Contracts/ResponseMapper.cs" Link="Contracts/ResponseMapper.cs" />
+  </ItemGroup>
+</Project>

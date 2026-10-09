@@ -133,6 +133,49 @@ public sealed class LocalProductCatalog
         return MapProduct(record);
     }
 
+    public async Task<string> CreateSelectionAliasAsync(
+        Product selected,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(selected);
+        string normalizedName = NormalizeName(selected.Name);
+        await using var transaction =
+            await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        List<ProductRecord> candidates = await _dbContext.Products
+            .AsNoTracking()
+            .Where(product => product.UserId == _ownerId ||
+                (product.UserId == null && (product.Barcode == null ||
+                    !_dbContext.Products.Any(personal => personal.UserId == _ownerId &&
+                                                        personal.Barcode == product.Barcode))))
+            .Where(product => product.NormalizedName == normalizedName && product.Barcode == selected.Barcode)
+            .OrderBy(product => product.Id)
+            .ToListAsync(cancellationToken);
+        ProductRecord record = candidates.FirstOrDefault(candidate =>
+                MatchesSelection(MapProduct(candidate), selected))
+            ?? throw new KeyNotFoundException("Выбранный продукт недоступен или изменился. Обновите каталог и выберите его заново.");
+        string alias = $"selected-{Guid.NewGuid():N}";
+        ProductAliasRecord addedAlias = new()
+        {
+            UserId = _ownerId,
+            ProductId = record.Id,
+            Name = alias,
+            NormalizedName = NormalizeName(alias)
+        };
+        _dbContext.ProductAliases.Add(addedAlias);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return alias;
+        }
+        catch
+        {
+            _dbContext.Entry(addedAlias).State = EntityState.Detached;
+            throw;
+        }
+    }
+
     public async Task<IReadOnlyList<Product>> FindByNameAsync(
         string name,
         CancellationToken cancellationToken = default)
@@ -176,6 +219,47 @@ public sealed class LocalProductCatalog
             .DistinctBy(record => record.Id)
             .Select(MapProduct)
             .ToArray();
+    }
+
+    public async Task<IReadOnlyList<Product>> SearchAsync(
+        string? query = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 200)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "The search limit must be between 1 and 200.");
+        }
+
+        IQueryable<ProductRecord> matches = _dbContext.Products
+            .AsNoTracking()
+            .Where(product => product.UserId == null || product.UserId == _ownerId);
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            string normalizedQuery = NormalizeName(query);
+            matches = matches.Where(product =>
+                product.NormalizedName.Contains(normalizedQuery) ||
+                (product.Barcode != null && product.Barcode.Contains(normalizedQuery)) ||
+                product.Aliases.Any(alias => alias.UserId == _ownerId &&
+                                            alias.NormalizedName.Contains(normalizedQuery)));
+        }
+
+        IQueryable<ProductRecord> withoutSharedOverrides = matches.Where(product =>
+            product.UserId != null || product.Barcode == null ||
+            !_dbContext.Products.Any(personal => personal.UserId == _ownerId &&
+                                                personal.Barcode == product.Barcode));
+        IQueryable<ProductRecord> personalOverrides = _dbContext.Products
+            .AsNoTracking()
+            .Where(personal => personal.UserId == _ownerId && personal.Barcode != null &&
+                matches.Any(shared => shared.UserId == null && shared.Barcode == personal.Barcode));
+        List<ProductRecord> records = await withoutSharedOverrides
+            .Union(personalOverrides)
+            .OrderBy(product => product.NormalizedName)
+            .ThenBy(product => product.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        return records.Select(MapProduct).ToArray();
     }
 
     public async Task<Product?> FindByBarcodeAsync(
@@ -422,6 +506,17 @@ public sealed class LocalProductCatalog
             record.SourceReference);
 
         return new Product(record.Name, nutrition, source, record.Barcode);
+    }
+
+    private static bool MatchesSelection(Product candidate, Product selected)
+    {
+        return candidate.Name == selected.Name && candidate.Barcode == selected.Barcode &&
+               candidate.NutritionPer100Grams.Calories == selected.NutritionPer100Grams.Calories &&
+               candidate.NutritionPer100Grams.ProteinGrams == selected.NutritionPer100Grams.ProteinGrams &&
+               candidate.NutritionPer100Grams.FatGrams == selected.NutritionPer100Grams.FatGrams &&
+               candidate.NutritionPer100Grams.CarbohydratesGrams == selected.NutritionPer100Grams.CarbohydratesGrams &&
+               candidate.Source.Kind == selected.Source.Kind && candidate.Source.Quality == selected.Source.Quality &&
+               candidate.Source.Name == selected.Source.Name && candidate.Source.Reference == selected.Source.Reference;
     }
 
     private static string NormalizeName(string name)

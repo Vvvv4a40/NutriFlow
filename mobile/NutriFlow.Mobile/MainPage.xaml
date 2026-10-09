@@ -3,17 +3,4 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="NutriFlow.Mobile.MainPage"
              Title="NutriFlow">
-    <ScrollView>
-        <VerticalStackLayout Padding="24" Spacing="20" VerticalOptions="Center">
-            <Label Text="NutriFlow" FontSize="36" FontAttributes="Bold" />
-            <Label Text="Учёт питания без лишней рутины" FontSize="22" />
-            <Label Text="Опиши приготовленное и съеденное. NutriFlow соберёт состав блюда и рассчитает порции." FontSize="17" />
-            <Border Padding="20" Stroke="#D0DDCF" StrokeShape="RoundRectangle 16">
-                <VerticalStackLayout Spacing="10">
-                    <Label Text="Мобильный клиент" FontSize="18" FontAttributes="Bold" />
-                    <Label Text="Это первый экран приложения. Подключение к серверу пока не настроено." FontSize="16" />
-                </VerticalStackLayout>
-            </Border>
-        </VerticalStackLayout>
-    </ScrollView>
 </ContentPage>
