@@ -8,13 +8,30 @@ NutriFlow — приложение для восстановления сост�
 
 [Навигация по коду](docs/CODE_MAP.md) · [Результаты ревью](docs/CODE_REVIEW.md)
 
+## С чего начать знакомство с проектом
+
+Для передачи другому разработчику или AI-агенту начните с [HANDOFF](docs/HANDOFF.md): там порядок чтения, границы реализации, правила изменений и безопасные проверки. Переписка с автором для понимания проекта не требуется.
+
+| Документ | На какой вопрос отвечает |
+| --- | --- |
+| [Концепт](docs/PRODUCT.md) | Какую проблему решаем и какие продуктовые правила нельзя нарушать |
+| [MVP](docs/MVP.md) | Что уже реализовано, что ещё не проверено и что отложено |
+| [Архитектура](docs/ARCHITECTURE.md) | Как связаны MAUI, Domain, SQLite, сервер и внешние сервисы |
+| [Бизнес-гипотезы](docs/BUSINESS.md) | Будущая монетизация, стоимость AI и вопросы до выбора подписки |
+| [Гранты](docs/FUNDING.md) | Проверенные программы, ограничения, отчётность и публичность поддержки |
+| [Дорожная карта](docs/ROADMAP.md) / [Прогресс](docs/PROGRESS.md) | Направление развития и фактические результаты проверок |
+
+Приоритет — удобное мобильное приложение; веб не является самостоятельной продуктовой целью. Текущий APK работает локально с личным Groq-ключом. Облачные аккаунты, синхронизация, подписка и переработка UX пока не реализованы. Бизнес- и грантовые документы фиксируют варианты на будущее, а не разрешение на их реализацию.
+
 ## Android без сервера
 
 Мобильный клиент хранит отдельную SQLite-базу для каждого локального профиля. Продукты, собственные блюда, дневник, цели и исправление порций работают офлайн. Для текстового разбора, фото этикеток и речи используется личный Groq-ключ в защищённом хранилище телефона. Облачного входа и синхронизации пока нет.
 
 Подписанное APK собирается ручным workflow **Android APK**. [Установка, подключение ключа и ограничения](docs/ANDROID_INSTALLATION.md) · [Устройство мобильного клиента](docs/MOBILE_CLIENT.md). Все расчёты переиспользуют существующее доменное ядро; сервер на телефоне не запускается.
 
-## Сквозной поток
+## Продуктовый поток
+
+Это целевой сценарий. В текущей версии фото этикетки распознаётся отдельной операцией, затем данные проверяются и сохраняются как продукт; произвольное объединение всех типов медиа внутри сессии ещё не реализовано. Текстовая реконструкция требует сети и AI, а ручной дневник и расчёты работают офлайн.
 
 ```text
 сообщения и фотография этикетки
@@ -77,18 +94,23 @@ NutriFlow — приложение для восстановления сост�
 
 ```mermaid
 flowchart LR
+    Mobile[Android MAUI UI] --> Core[Local mobile workflow]
+    Core --> Domain[Domain model and calculations]
+    Core --> Local[(Profile SQLite on phone)]
+    Core --> Groq[Groq Chat Completions]
+    Core --> OFF[Open Food Facts]
     Browser[Web UI] --> Api[ASP.NET Core Minimal API]
     Api --> Workflow[Meal workflow]
-    Workflow --> Domain[Domain model and calculations]
+    Workflow --> Domain
     Workflow --> Catalog[Local product catalog]
     Workflow --> Diary[Sessions and daily diary]
     Catalog --> SQLite[(SQLite)]
     Diary --> SQLite
-    Catalog --> OFF[Open Food Facts]
+    Catalog --> OFF
     Workflow --> Parser{IMealParser}
     Parser --> Fake[Fake provider]
     Parser --> OpenAI[OpenAI Responses API]
-    Parser --> Groq[Groq Chat Completions]
+    Parser --> Groq
     Api --> Labels[Label photo analysis]
     Labels --> OpenAI
     Labels --> Groq
@@ -96,7 +118,7 @@ flowchart LR
     Speech --> Whisper[Groq Whisper]
 ```
 
-Зависимости направлены к доменному ядру: `Domain` не знает об HTTP, EF Core, SQLite или внешних сервисах. `Infrastructure` реализует хранение и интеграции, а `Api` соединяет компоненты и предоставляет HTTP-контракты.
+На диаграмме показаны вызовы / данные, не все `ProjectReference`. Android не вызывает собственный API и не запускает его на телефоне. Зависимости направлены к доменному ядру: `Domain` не знает об HTTP, EF Core, SQLite или внешних сервисах. `Infrastructure` реализует хранение и интеграции, `Mobile.Core` соединяет их локально, а `Api` предоставляет независимый HTTP-вариант. [Точный граф проектов и варианты дальнейшего развития](docs/ARCHITECTURE.md).
 
 | Проект | Ответственность |
 | --- | --- |
@@ -108,6 +130,9 @@ flowchart LR
 | `NutriFlow.Domain.Tests` | Тесты доменных правил и арифметики |
 | `NutriFlow.Infrastructure.Tests` | Тесты хранения и внешних адаптеров |
 | `NutriFlow.Api.Tests` | Сквозные HTTP-тесты workflow |
+| `NutriFlow.Mobile` | MAUI-экраны, навигация, камера / микрофон и защищённое хранение ключа |
+| `NutriFlow.Mobile.Core` | Автономные профили, выбранная SQLite-база и мобильные сценарии |
+| `NutriFlow.Mobile.Core.Tests` | Проверки ядра без Android SDK |
 
 Нативный клиент .NET MAUI находится в `mobile/NutriFlow.Mobile.slnx`. Android теперь использует автономное мобильное ядро с отдельной SQLite-базой каждого профиля, дневником, продуктами, собственными блюдами и прямыми Groq-интеграциями; `mobile/NutriFlow.Mobile.Core.slnx` позволяет проверять ядро без платформенных SDK. Windows по умолчанию выбирает Android, macOS — iOS; серверное solution и Docker независимы от клиента. Локальная упаковка APK требует ещё не установленного Android SDK, поэтому используется облачный workflow. Предыдущие успешные iOS-сборки относятся к статичному экрану: новый функциональный клиент на iOS пока не проверен. [Структура и команды](docs/MOBILE_CLIENT.md) · [Установка Android](docs/ANDROID_INSTALLATION.md).
 
