@@ -23,6 +23,7 @@ public partial class MainPage : ContentPage
     private string _draftText = "";
     private string _tab = "Дневник";
     private bool _busy;
+    private bool _scrollToPreview;
 
     public MainPage(LocalProfileStore profiles, LocalMealClient client)
     {
@@ -192,6 +193,12 @@ public partial class MainPage : ContentPage
             case "Продукты": await RenderProductsAsync(profileId); break;
             case "Блюда": await RenderDishesAsync(profileId); break;
             case "Настройки": await RenderSettingsAsync(profileId); break;
+        }
+
+        if (_scrollToPreview && _tab == "Ввод")
+        {
+            _scrollToPreview = false;
+            await _scroll.ScrollToAsync(0, 0, false);
         }
     }
 
