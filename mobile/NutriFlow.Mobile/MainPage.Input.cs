@@ -7,27 +7,45 @@ public partial class MainPage
 {
     private void RenderInput(Guid profileId)
     {
-        _body.Children.Add(Ui.Title("Добавить еду"));
-        _body.Children.Add(Ui.Text("Опишите состав, веса и съеденную порцию. Проверьте расчёт перед подтверждением.", true));
-        Picker purpose = new() { Title = "Что сделать", ItemsSource = new[] { "Записать в дневник", "Создать блюдо" }, SelectedIndex = (int)_purpose, IsEnabled = _session is null };
-        purpose.SelectedIndexChanged += (_, _) => _purpose = purpose.SelectedIndex == 1 ? MealSessionPurpose.CreateDish : MealSessionPurpose.Diary;
-        _body.Children.Add(purpose);
-        DatePicker date = new() { Date = (_session?.MealDate ?? _date).ToDateTime(TimeOnly.MinValue), Format = "dd.MM.yyyy", IsEnabled = _session is null };
+        Label heading = Ui.Title("");
+        heading.FontSize = 28;
+        heading.Margin = 0;
+        Label explanation = Ui.Text("", true);
+        _body.Children.Add(heading);
+        _body.Children.Add(explanation);
+
+        DatePicker date = new()
+        {
+            AutomationId = "input-date",
+            Date = (_session?.MealDate ?? _date).ToDateTime(TimeOnly.MinValue),
+            Format = "dd.MM.yyyy",
+            IsEnabled = _session is null
+        };
+        SemanticProperties.SetDescription(date, "Дата записи в дневник");
         date.DateSelected += (_, _) => _date = DateOnly.FromDateTime(date.Date ?? DateTime.Today);
-        _body.Children.Add(date);
+        Label dateLabel = Ui.Text("Дата записи", true);
+        dateLabel.FontSize = 12;
+        dateLabel.VerticalOptions = LayoutOptions.Center;
+        Grid dateRow = new()
+        {
+            ColumnSpacing = 12,
+            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star } }
+        };
+        dateRow.Add(dateLabel, 0);
+        dateRow.Add(date, 1);
+
         Editor editor = new()
         {
+            AutomationId = "input-description",
             Text = _draftText,
-            Placeholder = _session is null ? "Например: омлет из 2 яиц, 50 г молока. Готовый вес 180 г, съел 90 г." : "Дополните описание или ответьте на вопросы…",
             AutoSize = EditorAutoSizeOption.TextChanges,
-            MinimumHeightRequest = 140,
+            MinimumHeightRequest = 120,
             MaxLength = 4000,
-            BackgroundColor = Ui.SurfaceRaised,
+            FontSize = 16,
+            BackgroundColor = Ui.Surface,
             TextColor = Ui.TextPrimary
         };
-        editor.TextChanged += (_, _) => _draftText = editor.Text ?? "";
-        _body.Children.Add(editor);
-        _body.Children.Add(Ui.Action(_session is null ? "Разобрать описание" : "Добавить уточнение", () => RunAsync(async () =>
+        Button submit = Ui.Action(_session is null ? "Разобрать описание" : "Добавить уточнение", () => RunAsync(async () =>
         {
             string message = _draftText.Trim();
             if (message.Length == 0)
@@ -43,10 +61,61 @@ public partial class MainPage
             SetSession(profileId, session);
             _draftText = "";
             await RenderAsync();
-        })));
-        _body.Children.Add(Ui.Row(Ui.Action("Голос / аудиофайл", () => AudioPageAsync(profileId), true),
-            Ui.Action("Продукт вручную", () => ChooseManualMealPageAsync(profileId), true)));
-        _body.Children.Add(Ui.Action("Блюдо из ингредиентов", () => ManualDishPageAsync(profileId), true));
+        }));
+        submit.AutomationId = "input-submit";
+        submit.FontSize = 14;
+        void RefreshSubmit()
+        {
+            bool hasText = !string.IsNullOrWhiteSpace(_draftText);
+            submit.IsEnabled = hasText;
+            submit.BackgroundColor = hasText ? Ui.Accent : Ui.SurfaceRaised;
+            submit.TextColor = hasText ? Ui.Background : Ui.Muted;
+        }
+        RefreshSubmit();
+        Label count = Ui.Text($"{_draftText.Length}/4000", true);
+        count.FontSize = 11;
+        count.HorizontalTextAlignment = TextAlignment.End;
+        count.VerticalOptions = LayoutOptions.Center;
+        editor.TextChanged += (_, _) =>
+        {
+            _draftText = editor.Text ?? "";
+            count.Text = $"{_draftText.Length}/4000";
+            RefreshSubmit();
+        };
+
+        VerticalStackLayout alternatives = new() { Spacing = 10 };
+        Label reassurance = Ui.Text("", true);
+        reassurance.FontSize = 12;
+        void RefreshPurpose()
+        {
+            bool creatingDish = _purpose == MealSessionPurpose.CreateDish;
+            heading.Text = _session is not null ? "Дополните черновик" : creatingDish ? "Ваше блюдо. Ваш состав." : "Что сегодня на тарелке?";
+            explanation.Text = _session is not null
+                ? "Ответьте на вопросы или добавьте детали. Состав и КБЖУ обновятся перед подтверждением."
+                : creatingDish ? "Сохраните состав один раз, чтобы позже добавлять порции этого блюда в дневник."
+                : "Расскажите, что приготовили и съели. NutriFlow соберёт описание в понятный черновик.";
+            editor.Placeholder = _session is not null ? "Дополните описание или ответьте на вопросы…"
+                : creatingDish ? "Например: мой омлет — 2 яйца, 50 г молока и 5 г масла. Готовый вес 180 г."
+                : "Например: омлет из 2 яиц и 50 г молока. Готовый вес 180 г, съел половину.";
+            dateRow.IsVisible = !creatingDish;
+            reassurance.Text = creatingDish ? "Блюдо сохранится только после вашего подтверждения."
+                : "Ничего не попадёт в дневник без вашего подтверждения.";
+            RenderInputAlternatives(profileId, alternatives);
+        }
+
+        _body.Children.Add(InputPurposeSelector(RefreshPurpose));
+        if (_session is not null)
+        {
+            Label locked = Ui.Text("Режим зафиксирован для этого черновика. Для другого режима начните новую запись.", true);
+            locked.FontSize = 12;
+            locked.AutomationId = "input-draft-lock";
+            _body.Children.Add(locked);
+        }
+        _body.Children.Add(dateRow);
+        _body.Children.Add(InputComposer(profileId, editor, count, submit));
+        _body.Children.Add(reassurance);
+        _body.Children.Add(alternatives);
+        RefreshPurpose();
         if (_session is not null)
         {
             RenderSession(profileId, _session);

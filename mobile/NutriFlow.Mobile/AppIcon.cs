@@ -11,7 +11,8 @@ internal enum AppIconKind
     Previous,
     Next,
     Target,
-    More
+    More,
+    Microphone
 }
 
 internal sealed class AppIcon : GraphicsView
@@ -84,6 +85,20 @@ internal sealed class AppIcon : GraphicsView
                     canvas.FillEllipse(3, 10, 4, 4);
                     canvas.FillEllipse(10, 10, 4, 4);
                     canvas.FillEllipse(17, 10, 4, 4);
+                    break;
+                case AppIconKind.Microphone:
+                    canvas.DrawRoundedRectangle(9, 2, 6, 12, 3);
+                    using (PathF cradle = new())
+                    {
+                        cradle.MoveTo(6, 10);
+                        cradle.LineTo(6, 12);
+                        cradle.CurveTo(6, 15.3f, 8.7f, 18, 12, 18);
+                        cradle.CurveTo(15.3f, 18, 18, 15.3f, 18, 12);
+                        cradle.LineTo(18, 10);
+                        canvas.DrawPath(cradle);
+                    }
+                    canvas.DrawLine(12, 18, 12, 22);
+                    canvas.DrawLine(8, 22, 16, 22);
                     break;
             }
 
