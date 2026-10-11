@@ -44,7 +44,33 @@
 
 ## Подготовка Android на Windows
 
-Уже установлен .NET SDK 10.0.400 и workload `maui-android` 10.0.0; .NET Android tools имеют версию 36.1.2. Workload добавляет средства .NET, но не заменяет Google Android SDK и Java JDK. Пользователь решил установить последние позже самостоятельно; установщик ниже агентом не запускался, лицензии Android не принимались.
+На текущем компьютере установлены .NET SDK 10.0.400 / 10.0.401, workload `maui-android` 10.0.0 и .NET Android tools 36.1.2. Пользователь самостоятельно установил Google Android SDK, JDK 21, расширение .NET MAUI и создал виртуальный телефон. Workload добавляет средства .NET, но не заменяет Google Android SDK и Java JDK. Приведённый ниже `InstallAndroidDependencies` агентом не запускался; лицензии Android агент не принимал.
+
+### SDK для локального запуска
+
+Windows Android lock-файл проверен с SDK **10.0.400** и его неявным `Microsoft.NET.ILLink.Tasks` **10.0.11**. Корневой `global.json` разрешает `latestPatch`, поэтому при наличии SDK 10.0.401 выбирает его и запрашивает ILLink 10.0.12. Не отключайте locked mode и не обновляйте только Windows lock ради локальной отладки: Linux Android CI использует SDK 10.0.400 и тот же граф версий.
+
+Для личной Android-среды предусмотрен [пример локального выбора SDK](../mobile/global.example.json). На текущем компьютере его копия уже создана в `mobile/global.json`; этот файл игнорируется Git. На другом Windows-компьютере с установленным SDK 10.0.400 подготовьте её из корня репозитория:
+
+```powershell
+if (-not (Test-Path -LiteralPath 'mobile/global.json')) {
+    Copy-Item -LiteralPath 'mobile/global.example.json' -Destination 'mobile/global.json'
+}
+```
+
+Не перезаписывайте существующий личный файл без проверки. Эта настройка действует на всю локальную папку `mobile`, включая Mobile.Core и iOS; она предназначена для текущей Windows Android-отладки. Корневой SDK-конфиг и удалённые workflow она не меняет. Не переносите её вслепую в среду iOS с другой проверенной SDK-связкой.
+
+**Открывайте папку `mobile` в VS Code и выполняйте мобильные CLI-команды из неё.** `dotnet --version` должен показать `10.0.400`. Запуск `dotnet` из корня репозитория может выбрать другой SDK. После создания локального файла перезагрузите окно редактора, затем через `.NET: Switch Solution` выберите `NutriFlow.Mobile.slnx`, не `NutriFlow.Mobile.Core.slnx`. Команды `.NET MAUI: Select Startup Project` и `.NET MAUI: Select Android Device` позволяют выбрать `NutriFlow.Mobile` и эмулятор; F5 запускает отладку.
+
+Если восстановление сообщает `NETSDK1147` / `wasm-tools`, сначала проверьте отсутствующий компонент:
+
+```powershell
+dotnet msbuild NutriFlow.Mobile/NutriFlow.Mobile.csproj -getItem:MissingWorkloadPack
+```
+
+В проверенном сбое 11 октября отсутствовал общий MonoTargets 10.0.12 при установленном 10.0.11, а не WebAssembly-цель приложения. С явного разрешения пользователя выполнен `dotnet workload repair --source https://api.nuget.org/v3/index.json`: восстановлены компоненты текущей нагрузки, старые Mono / AOT packs заменены версиями из установленных манифестов. Это установка системных компонентов, а не обычный NuGet restore; не запускайте её автоматически при любой ошибке пакетов. [Назначение workload repair](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-workload-repair).
+
+### Установка инструментов на другом компьютере
 
 На другом компьютере сначала установите SDK из `global.json`, затем нужную нагрузку:
 
@@ -53,15 +79,15 @@ dotnet workload install maui-android --skip-manifest-update --source https://api
 dotnet workload list
 ```
 
-Для редактора можно добавить расширение `.NET MAUI` в VS Code. Оно необязательно для CLI-сборки; здесь оно не устанавливалось. [Установка MAUI и инструментов Android](https://learn.microsoft.com/en-us/dotnet/maui/get-started/installation?view=net-maui-10.0&tabs=visual-studio-code).
+Для редактора нужно расширение `.NET MAUI` в VS Code. На текущем компьютере его установил пользователь; для CLI-сборки оно необязательно. [Установка MAUI и инструментов Android](https://learn.microsoft.com/en-us/dotnet/maui/get-started/installation?view=net-maui-10.0&tabs=visual-studio-code).
 
-Когда будете готовы скачать инструменты и принять условия лицензий, выполните из корня репозитория:
+Когда будете готовы скачать инструменты и принять условия лицензий, выполните из папки `mobile` после подготовки локального SDK-файла:
 
 ```powershell
 $androidSdkDirectory = Join-Path $env:LOCALAPPDATA 'Android/Sdk'
 $javaSdkDirectory = Join-Path $env:LOCALAPPDATA 'Microsoft/OpenJDK/jdk-21'
 
-dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
+dotnet build NutriFlow.Mobile/NutriFlow.Mobile.csproj `
   -f net10.0-android -t:InstallAndroidDependencies `
   "-p:AndroidSdkDirectory=$androidSdkDirectory" `
   "-p:JavaSdkDirectory=$javaSdkDirectory" `
@@ -74,10 +100,20 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 ## Проверка и пробное APK после установки
 
-```powershell
-dotnet restore mobile/NutriFlow.Mobile.slnx --locked-mode --warnaserror
+Следующие команды выполняются из папки `mobile` с выбранным SDK 10.0.400. Переменные `androidSdkDirectory` / `javaSdkDirectory` должны указывать на реальные каталоги установленного SDK и JDK 21; не на старый Java 8 из PATH.
 
-dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
+На текущем компьютере реальные пути задаются так; на другом компьютере замените их своими:
+
+```powershell
+$androidSdkDirectory = Join-Path $env:LOCALAPPDATA 'Android/Sdk'
+$javaSdkDirectory = Join-Path $env:LOCALAPPDATA 'Programs/Microsoft/jdk-21.0.12.101-hotspot'
+```
+
+```powershell
+dotnet --version
+dotnet restore NutriFlow.Mobile.slnx --locked-mode --warnaserror
+
+dotnet build NutriFlow.Mobile/NutriFlow.Mobile.csproj `
   -f net10.0-android --configuration Debug --no-restore `
   -t:SignAndroidPackage `
   "-p:AndroidSdkDirectory=$androidSdkDirectory" `
@@ -93,11 +129,13 @@ dotnet build mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 ## Что скачать
 
-### На текущем Windows-компьютере для Android
+### Для Android на Windows
+
+На текущем компьютере перечисленные инструменты уже установлены пользователем; список нужен для подготовки другой среды.
 
 1. **JDK 21 x64**, не Java 8 JRE: [Microsoft Build of OpenJDK](https://learn.microsoft.com/en-us/java/openjdk/download).
-2. **Android SDK**: [официальная страница Android Studio и Command-line tools](https://developer.android.com/studio). Для нашего первого APK достаточно Command-line tools, Platform 36, Build Tools 36.0.0 и Platform Tools; полный Android Studio, эмулятор и NDK пока не нужны. Можно вместо ручной установки использовать приведённый выше `InstallAndroidDependencies`, который скачивает и SDK, и подходящий JDK.
-3. Необязательно — [расширение .NET MAUI для VS Code](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.dotnet-maui). .NET SDK и `maui-android` на этом компьютере уже установлены, повторно скачивать их не требуется.
+2. **Android SDK**: [официальная страница Android Studio и Command-line tools](https://developer.android.com/studio). Для CLI-упаковки достаточно Command-line tools, Platform 36, Build Tools 36.0.0 и Platform Tools. Для отладки на виртуальном телефоне нужны также Android Emulator и образ системы; Android Studio удобен для их настройки, но код можно писать в VS Code. NDK текущему проекту не нужен. Можно вместо ручной установки базового SDK использовать приведённый выше `InstallAndroidDependencies`, который скачивает и подходящий JDK, но не эмулятор.
+3. Для запуска через F5 — [расширение .NET MAUI для VS Code](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.dotnet-maui); для CLI оно необязательно. .NET SDK и `maui-android` на текущем компьютере уже установлены, повторно скачивать их не требуется.
 
 ### На Mac для iOS
 
