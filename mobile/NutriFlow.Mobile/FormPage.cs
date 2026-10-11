@@ -2,14 +2,16 @@ namespace NutriFlow.Mobile;
 
 internal sealed class FormPage : ContentPage
 {
-    private readonly ActivityIndicator _activity = new() { Color = Ui.Green };
+    private readonly ActivityIndicator _activity = new() { Color = Ui.Accent, IsVisible = false };
     private readonly Label _status = Ui.Text("", true);
     private bool _busy;
 
     public FormPage(string title)
     {
         Title = title;
-        Fields = new VerticalStackLayout { Padding = 20, Spacing = 12 };
+        BackgroundColor = Ui.Background;
+        _status.IsVisible = false;
+        Fields = new VerticalStackLayout { Padding = new Thickness(20, 16, 20, 32), Spacing = 16 };
         Fields.Children.Add(_activity);
         Fields.Children.Add(_status);
         Content = new ScrollView { Content = Fields };
@@ -36,12 +38,15 @@ internal sealed class FormPage : ContentPage
         _busy = true;
         NavigationPage.SetHasBackButton(this, false);
         Fields.IsEnabled = false;
+        _activity.IsVisible = true;
         _activity.IsRunning = true;
         _status.Text = "Выполняется…";
+        _status.IsVisible = true;
         try
         {
             await action();
             _status.Text = "";
+            _status.IsVisible = false;
         }
         catch (Exception exception)
         {
@@ -51,6 +56,7 @@ internal sealed class FormPage : ContentPage
         finally
         {
             _activity.IsRunning = false;
+            _activity.IsVisible = false;
             Fields.IsEnabled = true;
             _busy = false;
             NavigationPage.SetHasBackButton(this, true);

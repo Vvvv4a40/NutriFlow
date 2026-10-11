@@ -14,10 +14,10 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 function node(text, extra = "") {
     return `<node text="${text}" package="${packageId}" class="android.widget.TextView" enabled="true" bounds="[20,200][300,250]" ${extra} />`;
 }
-function hierarchy(screen) {
+function hierarchy(screen, diaryAddAction = node("Добавить еду", 'clickable="true"')) {
     const diary = node("Дневник питания") + node("Съедено за день") +
         node("Smoke", 'clickable="true"').replace("android.widget.TextView", "android.widget.EditText") +
-        node("Добавить еду", 'clickable="true"');
+        diaryAddAction;
     const screens = {
         welcome: node("Питание под вашим контролем") + node("СОЗДАТЬ ПРОФИЛЬ", 'clickable="true"'),
         form: node("Локальный профиль") + node("Создать", 'clickable="true"') + node("Имя профиля").replace("android.widget.TextView", "android.widget.EditText"),
@@ -31,7 +31,7 @@ function hierarchy(screen) {
 }
 
 function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
-    consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [] } = {}) {
+    consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [], diaryAddAction } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -83,7 +83,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                     } else if (operation[1] === "cat") {
                         const snapshot = screen === "diary" ? diarySequence.shift() ?? diaryScreen : screen;
                         if (screen === "diary") diarySnapshots.push(snapshot);
-                        stdout = hierarchy(snapshot);
+                        stdout = hierarchy(snapshot, diaryAddAction);
                     }
                     else if (operation[1] === "input" && operation[2] === "tap") {
                         assert.deepEqual(operation.slice(3), ["160", "225"]);
@@ -134,6 +134,29 @@ test("installs and launches the selected emulator, creates a profile by UI bound
         assert.ok(existsSync(join(sample.outputDirectory, file)));
     }
 });
+
+test("accepts the diary icon-only add action through its accessible description after creation and restart", async context => {
+    const sample = fixture(context, { diaryAddAction: node("+", 'content-desc="Добавить еду" clickable="true"') });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.deepEqual(report.profile, { name: "Smoke", creation: "passed", persistence: "passed" });
+    assert.ok(existsSync(join(sample.outputDirectory, "diary-after-restart.png")));
+});
+
+for (const [description, action] of [
+    ["missing accessible description", node("+", 'clickable="true"')],
+    ["wrong accessible description", node("+", 'content-desc="Другая команда" clickable="true"')],
+    ["disabled accessible action", node("+", 'content-desc="Добавить еду" clickable="true"').replace('enabled="true"', 'enabled="false"')],
+    ["nonclickable accessible action", node("+", 'content-desc="Добавить еду" clickable="false"')]
+]) {
+    test(`rejects an icon-only diary add action with ${description}`, async context => {
+        const sample = fixture(context, { diaryAddAction: action });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*diary.xml/);
+        assert.equal(sample.report().profile.creation, "not-tested");
+        assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+        assert.deepEqual(sample.child.signals, ["SIGTERM"]);
+    });
+}
 
 test("rejects am start failure even when adb exits zero and still stops its owned emulator", async context => {
     const sample = fixture(context, { change: (command, args) => command.endsWith("adb") && args.includes("start") ?

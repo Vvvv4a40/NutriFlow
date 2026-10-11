@@ -5,14 +5,26 @@ namespace NutriFlow.Mobile;
 
 internal static class Ui
 {
-    public static readonly Color Green = Color.FromArgb("#185B45");
-    public static readonly Color Muted = Color.FromArgb("#63776D");
+    public static readonly Color Background = Color.FromArgb("#0C0E11");
+    public static readonly Color Surface = Color.FromArgb("#191C22");
+    public static readonly Color SurfaceRaised = Color.FromArgb("#242832");
+    public static readonly Color SurfacePressed = Color.FromArgb("#343B49");
+    public static readonly Color TextPrimary = Color.FromArgb("#F5F6FA");
+    public static readonly Color Muted = Color.FromArgb("#A4AAB8");
+    public static readonly Color Accent = Color.FromArgb("#4D8DFF");
+    public static readonly Color AccentPressed = Color.FromArgb("#75A7FF");
+    public static readonly Color Protein = Color.FromArgb("#45A9F7");
+    public static readonly Color Fat = Color.FromArgb("#F8C545");
+    public static readonly Color Carbs = Color.FromArgb("#FF7184");
+    public static readonly Color Green = Accent;
 
     public static Label Title(string text) => new()
     {
         Text = text,
         FontSize = 24,
         FontAttributes = FontAttributes.Bold,
+        TextColor = TextPrimary,
+        FontAutoScalingEnabled = true,
         Margin = new Thickness(0, 8, 0, 2)
     };
 
@@ -20,7 +32,9 @@ internal static class Ui
     {
         Text = text,
         FontSize = 15,
-        TextColor = muted ? Muted : Color.FromArgb("#18372C")
+        FontAutoScalingEnabled = true,
+        LineBreakMode = LineBreakMode.WordWrap,
+        TextColor = muted ? Muted : TextPrimary
     };
 
     public static Entry Field(string placeholder, string? value = null, bool number = false) => new()
@@ -28,9 +42,11 @@ internal static class Ui
         Placeholder = placeholder,
         Text = value,
         Keyboard = number ? Keyboard.Numeric : Keyboard.Default,
-        BackgroundColor = Colors.White,
-        TextColor = Color.FromArgb("#18372C"),
+        BackgroundColor = SurfaceRaised,
+        TextColor = TextPrimary,
         PlaceholderColor = Muted,
+        FontSize = 16,
+        FontAutoScalingEnabled = true,
         MinimumHeightRequest = 48,
         ClearButtonVisibility = ClearButtonVisibility.WhileEditing
     };
@@ -40,20 +56,63 @@ internal static class Ui
         Button button = new()
         {
             Text = text,
-            FontSize = 14,
-            BackgroundColor = secondary ? Color.FromArgb("#E5EEE8") : Green,
-            TextColor = secondary ? Green : Colors.White,
-            CornerRadius = 12,
-            MinimumHeightRequest = 46,
-            Padding = new Thickness(12, 8)
+            FontSize = 15,
+            FontAttributes = FontAttributes.Bold,
+            FontAutoScalingEnabled = true,
+            LineBreakMode = LineBreakMode.WordWrap,
+            BackgroundColor = secondary ? SurfaceRaised : Accent,
+            TextColor = secondary ? TextPrimary : Background,
+            CornerRadius = 16,
+            MinimumHeightRequest = 48,
+            MinimumWidthRequest = 48,
+            Padding = new Thickness(16, 12)
         };
+        if (secondary)
+        {
+            ApplySecondaryStates(button);
+        }
+
         button.Clicked += async (_, _) => await action();
         return button;
     }
 
+    private static void ApplySecondaryStates(Button button)
+    {
+        VisualStateGroup states = new() { Name = "CommonStates" };
+        states.States.Add(new VisualState { Name = "Normal" });
+        states.States.Add(new VisualState
+        {
+            Name = "Pressed",
+            Setters =
+            {
+                new Setter { Property = VisualElement.BackgroundColorProperty, Value = SurfacePressed },
+                new Setter { Property = Button.TextColorProperty, Value = TextPrimary }
+            }
+        });
+        states.States.Add(new VisualState
+        {
+            Name = "Focused",
+            Setters =
+            {
+                new Setter { Property = Button.BorderColorProperty, Value = Accent },
+                new Setter { Property = Button.BorderWidthProperty, Value = 2d }
+            }
+        });
+        states.States.Add(new VisualState
+        {
+            Name = "Disabled",
+            Setters =
+            {
+                new Setter { Property = VisualElement.BackgroundColorProperty, Value = SurfaceRaised },
+                new Setter { Property = Button.TextColorProperty, Value = Muted }
+            }
+        });
+        VisualStateManager.SetVisualStateGroups(button, new VisualStateGroupList { states });
+    }
+
     public static Border Card(params View[] children)
     {
-        VerticalStackLayout layout = new() { Spacing = 10 };
+        VerticalStackLayout layout = new() { Spacing = 12 };
         foreach (View child in children)
         {
             layout.Children.Add(child);
@@ -62,10 +121,10 @@ internal static class Ui
         return new Border
         {
             Content = layout,
-            Padding = 16,
-            BackgroundColor = Colors.White,
-            Stroke = Color.FromArgb("#DAE5DD"),
-            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 16 }
+            Padding = 20,
+            BackgroundColor = Surface,
+            Stroke = SurfaceRaised,
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = 24 }
         };
     }
 

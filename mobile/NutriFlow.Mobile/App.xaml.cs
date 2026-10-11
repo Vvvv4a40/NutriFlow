@@ -7,6 +7,7 @@ public partial class App : Application
     public App(MainPage mainPage)
     {
         InitializeComponent();
+        UserAppTheme = AppTheme.Dark;
         _mainPage = mainPage;
     }
 
@@ -14,8 +15,8 @@ public partial class App : Application
     {
         return new Window(new NavigationPage(_mainPage)
         {
-            BarBackgroundColor = Ui.Green,
-            BarTextColor = Colors.White
+            BarBackgroundColor = Ui.Background,
+            BarTextColor = Ui.TextPrimary
         });
     }
 }

@@ -22,8 +22,8 @@ public partial class MainPage
             AutoSize = EditorAutoSizeOption.TextChanges,
             MinimumHeightRequest = 140,
             MaxLength = 4000,
-            BackgroundColor = Colors.White,
-            TextColor = Color.FromArgb("#18372C")
+            BackgroundColor = Ui.SurfaceRaised,
+            TextColor = Ui.TextPrimary
         };
         editor.TextChanged += (_, _) => _draftText = editor.Text ?? "";
         _body.Children.Add(editor);
