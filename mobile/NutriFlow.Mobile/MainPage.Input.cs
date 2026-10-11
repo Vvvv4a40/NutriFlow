@@ -7,6 +7,11 @@ public partial class MainPage
 {
     private void RenderInput(Guid profileId)
     {
+        if (_session is not null)
+        {
+            RenderSession(profileId, _session);
+        }
+
         Label heading = Ui.Title("");
         heading.FontSize = 28;
         heading.Margin = 0;
@@ -89,7 +94,7 @@ public partial class MainPage
         void RefreshPurpose()
         {
             bool creatingDish = _purpose == MealSessionPurpose.CreateDish;
-            heading.Text = _session is not null ? "Дополните черновик" : creatingDish ? "Ваше блюдо. Ваш состав." : "Что сегодня на тарелке?";
+            heading.Text = _session is not null ? "Уточнить описание" : creatingDish ? "Ваше блюдо. Ваш состав." : "Что сегодня на тарелке?";
             explanation.Text = _session is not null
                 ? "Ответьте на вопросы или добавьте детали. Состав и КБЖУ обновятся перед подтверждением."
                 : creatingDish ? "Сохраните состав один раз, чтобы позже добавлять порции этого блюда в дневник."
@@ -118,8 +123,7 @@ public partial class MainPage
         RefreshPurpose();
         if (_session is not null)
         {
-            RenderSession(profileId, _session);
-            _body.Children.Add(Ui.Action("Начать новую запись", () => RunAsync(async () =>
+            Button restart = Ui.Action("Начать новую запись", () => RunAsync(async () =>
             {
                 if (await DisplayAlertAsync("Новая запись", "Текущий черновик ещё не подтверждён. Начать новую запись?", "Начать", "Отмена"))
                 {
@@ -127,8 +131,11 @@ public partial class MainPage
                     _draftText = "";
                     ProfileSettings.ClearSession(profileId);
                     await RenderAsync();
+                    await _scroll.ScrollToAsync(0, 0, false);
                 }
-            }), true));
+            }), true);
+            restart.AutomationId = "draft-restart";
+            _body.Children.Add(restart);
         }
     }
 
@@ -144,111 +151,8 @@ public partial class MainPage
         _date = session.MealDate;
         _purpose = session.Purpose == "CreateDish" ? MealSessionPurpose.CreateDish : MealSessionPurpose.Diary;
         _tab = "Ввод";
+        _scrollToPreview = true;
         ProfileSettings.SaveSession(profileId, session.Id);
-    }
-
-    private void RenderSession(Guid profileId, MealSessionResponse session)
-    {
-        _body.Children.Add(Ui.Title(session.Purpose == "CreateDish" ? "Предпросмотр блюда" : "Предпросмотр записи"));
-        foreach (string message in session.Messages)
-        {
-            _body.Children.Add(Ui.Card(Ui.Text(message, true)));
-        }
-
-        foreach (string question in session.ClarificationQuestions)
-        {
-            _body.Children.Add(Ui.Text($"Уточните: {question}"));
-        }
-
-        foreach (WorkflowIssueResponse issue in session.Issues)
-        {
-            _body.Children.Add(Ui.Text($"{issue.DishName}{(issue.IngredientName is null ? "" : $" · {issue.IngredientName}")}: {issue.Message}"));
-        }
-
-        foreach (DishPreviewResponse dish in session.Dishes)
-        {
-            VerticalStackLayout details = new() { Spacing = 8 };
-            details.Children.Add(Ui.Title(dish.Name));
-            details.Children.Add(Ui.Text($"Готовый вес: {(dish.FinalWeightInGrams is decimal grams ? Ui.Amount(grams) + " г" : "не указан")} · {Ui.Quality(dish.FinalWeightQuality)}", true));
-            foreach (IngredientPreviewResponse ingredient in dish.Ingredients)
-            {
-                string weight = ingredient.WeightInGrams is decimal known ? Ui.Amount(known) + " г" : "вес не указан";
-                details.Children.Add(Ui.Text($"{ingredient.ResolvedProduct?.Name ?? ingredient.ProductName}: {weight}"));
-                if (ingredient.RemovedWeightInGrams is > 0)
-                {
-                    details.Children.Add(Ui.Text($"Убрано {Ui.Amount(ingredient.RemovedWeightInGrams.Value)} г", true));
-                }
-
-                if (ingredient.ResolvedProduct is ProductResponse product)
-                {
-                    details.Children.Add(Ui.Text($"Источник: {product.SourceName} · {Ui.Quality(product.DataQuality)}", true));
-                }
-                else
-                {
-                    details.Children.Add(Ui.Text("Добавьте пищевую ценность продукта в каталог.", true));
-                    string productName = ingredient.ProductName;
-                    details.Children.Add(Ui.Action("Добавить продукт", () => ProductEditorPageAsync(profileId, productName), true));
-                }
-            }
-
-            if (dish.TotalNutrition is not null)
-            {
-                details.Children.Add(Ui.Text($"Всё блюдо: {Ui.Nutrition(dish.TotalNutrition)}"));
-                details.Children.Add(Ui.Text(Ui.Quality(dish.TotalNutritionQuality), true));
-            }
-
-            if (dish.NutritionPer100Grams is not null)
-            {
-                details.Children.Add(Ui.Text($"На 100 г: {Ui.Nutrition(dish.NutritionPer100Grams)}"));
-            }
-
-            foreach (PortionPreviewResponse portion in dish.Portions)
-            {
-                string weight = portion.WeightInGrams is decimal known ? Ui.Amount(known) + " г" : "вес неизвестен";
-                details.Children.Add(Ui.Text($"Порция: {weight}"));
-                if (portion.Nutrition is not null)
-                {
-                    details.Children.Add(Ui.Text(Ui.Nutrition(portion.Nutrition)));
-                    details.Children.Add(Ui.Text(Ui.Quality(portion.NutritionQuality), true));
-                }
-            }
-
-            _body.Children.Add(Ui.Card(details));
-        }
-
-        _body.Children.Add(Ui.Action("Обновить расчёт после добавления продуктов", () => RunAsync(async () =>
-        {
-            _session = await _client.FindSessionAsync(profileId, session.Id)
-                ?? throw new InvalidOperationException("Черновик не найден.");
-            await RenderAsync();
-        }), true));
-        Button confirm = Ui.Action(session.Purpose == "CreateDish" ? "Подтвердить и сохранить блюдо" : "Подтвердить и записать в дневник", () => RunAsync(async () =>
-        {
-            ConfirmMealSessionResponse result = await _client.ConfirmAsync(profileId, session.Id, session.PreviewToken)
-                ?? throw new InvalidOperationException("Черновик не найден.");
-            _session = result.Session;
-            if (result.Session.Status == "Confirmed")
-            {
-                _date = result.Session.MealDate;
-                ProfileSettings.ClearSession(profileId);
-                _session = null;
-                _draftText = "";
-                _tab = result.SavedDish is null ? "Дневник" : "Блюда";
-                await RenderAsync();
-                await DisplayAlertAsync("Сохранено", result.SavedDish is null ? "Запись добавлена в дневник." : "Блюдо сохранено. Его порции можно добавлять без интернета.", "Готово");
-            }
-            else
-            {
-                await RenderAsync();
-                await DisplayAlertAsync("Проверьте черновик", result.Message ?? "Перед подтверждением нужны уточнения. Проверьте обновлённый расчёт.", "Понятно");
-            }
-        }));
-        confirm.IsEnabled = session.CanConfirm;
-        _body.Children.Add(confirm);
-        if (!session.CanConfirm)
-        {
-            _body.Children.Add(Ui.Text("Подтверждение станет доступно после уточнений и заполнения пищевой ценности.", true));
-        }
     }
 
     private async Task ChooseManualMealPageAsync(Guid profileId)
