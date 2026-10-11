@@ -90,8 +90,10 @@ export async function testAndroidEmulator({
         return uiNodes(xml).filter(node => node.package === packageId);
     }
     function hasText(nodes, text) { return nodes.some(node => node.text?.toLocaleLowerCase("ru") === text.toLocaleLowerCase("ru")); }
-    function enabledAction(nodes, text) {
-        return nodes.some(node => node.text?.toLocaleLowerCase("ru") === text.toLocaleLowerCase("ru") &&
+    function enabledAction(nodes, text, allowDescription = true) {
+        const expected = text.toLocaleLowerCase("ru");
+        return nodes.some(node => (node.text?.toLocaleLowerCase("ru") === expected ||
+            allowDescription && node["content-desc"]?.toLocaleLowerCase("ru") === expected) &&
             node.enabled === "true" && node.clickable === "true");
     }
     async function waitUi(file, predicate) {
@@ -203,16 +205,16 @@ export async function testAndroidEmulator({
         adb(["logcat", "-c"]);
         report.phase = "launch";
         launch("launch.log");
-        const welcome = await waitUi("welcome.xml", nodes => hasText(nodes, "Питание под вашим контролем") && enabledAction(nodes, "Создать профиль"));
+        const welcome = await waitUi("welcome.xml", nodes => hasText(nodes, "Питание под вашим контролем") && enabledAction(nodes, "Создать профиль", false));
         screenshot("welcome.png");
         report.launch = "passed";
         report.phase = "create-profile";
         tap(welcome, node => node.text?.toLocaleLowerCase("ru") === "создать профиль" && node.clickable === "true");
-        const form = await waitUi("profile-form.xml", nodes => hasText(nodes, "Локальный профиль") && enabledAction(nodes, "Создать"));
+        const form = await waitUi("profile-form.xml", nodes => hasText(nodes, "Локальный профиль") && enabledAction(nodes, "Создать", false));
         tap(form, node => node.class === "android.widget.EditText");
         adb(["shell", "input", "text", "Smoke"]);
         adb(["shell", "input", "keyevent", "4"]);
-        const filled = await waitUi("profile-filled.xml", nodes => nodes.some(node => node.class === "android.widget.EditText" && node.text === "Smoke") && enabledAction(nodes, "Создать"));
+        const filled = await waitUi("profile-filled.xml", nodes => nodes.some(node => node.class === "android.widget.EditText" && node.text === "Smoke") && enabledAction(nodes, "Создать", false));
         tap(filled, node => node.text?.toLocaleLowerCase("ru") === "создать" && node.clickable === "true");
         const diaryPredicate = nodes => hasText(nodes, "Дневник питания") && hasText(nodes, "Съедено за день") &&
             enabledAction(nodes, "Smoke") && enabledAction(nodes, "Добавить еду");

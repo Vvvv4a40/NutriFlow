@@ -9,11 +9,12 @@ public partial class MainPage : ContentPage
 {
     private readonly LocalProfileStore _profiles;
     private readonly LocalMealClient _client;
-    private readonly Picker _profilePicker = new() { Title = "Выберите профиль", ItemDisplayBinding = new Binding(nameof(LocalProfile.Name)) };
-    private readonly Button _newProfile;
-    private readonly VerticalStackLayout _body = new() { Padding = new Thickness(18, 8, 18, 24), Spacing = 12 };
-    private readonly HorizontalStackLayout _navigation = new() { Spacing = 6, Padding = new Thickness(18, 0, 18, 4) };
-    private readonly ActivityIndicator _activity = new() { Color = Ui.Green };
+    private readonly Button _profileButton;
+    private readonly VerticalStackLayout _body = new() { Padding = new Thickness(20, 0, 20, 28), Spacing = 16 };
+    private readonly Label _sectionLabel = Ui.Text("Питание в твоём ритме", true);
+    private readonly Grid _navigation = new() { ColumnSpacing = 4, Padding = new Thickness(8, 8, 8, 12) };
+    private readonly ScrollView _scroll;
+    private readonly ActivityIndicator _activity = new() { Color = Ui.Accent, IsVisible = false, WidthRequest = 20, HeightRequest = 20 };
     private readonly Label _status = Ui.Text("", true);
     private LocalProfile? _profile;
     private MealSessionResponse? _session;
@@ -22,7 +23,6 @@ public partial class MainPage : ContentPage
     private string _draftText = "";
     private string _tab = "Дневник";
     private bool _busy;
-    private bool _changingProfiles;
 
     public MainPage(LocalProfileStore profiles, LocalMealClient client)
     {
@@ -30,45 +30,55 @@ public partial class MainPage : ContentPage
         _profiles = profiles;
         _client = client;
         Title = "NutriFlow";
-        _profilePicker.HorizontalOptions = LayoutOptions.Fill;
-        _profilePicker.SelectedIndexChanged += async (_, _) =>
-        {
-            if (_changingProfiles || _busy || _profilePicker.SelectedItem is not LocalProfile selected || selected.Id == _profile?.Id)
-            {
-                return;
-            }
+        BackgroundColor = Ui.Background;
+        NavigationPage.SetHasNavigationBar(this, false);
+        _profileButton = Ui.Action("Профиль", OpenProfilesAsync, true);
+        _profileButton.FontSize = 13;
+        _profileButton.MaximumWidthRequest = 140;
+        _profileButton.LineBreakMode = LineBreakMode.TailTruncation;
+        _profileButton.AutomationId = "profile-switcher";
 
-            await RunAsync(async () =>
-            {
-                _profile = await _profiles.SelectAsync(selected.Id);
-                _session = null;
-                _draftText = "";
-                await ResumeSessionAsync(selected.Id);
-                await RenderAsync();
-            });
-        };
-        _newProfile = Ui.Action("+ Профиль", CreateProfilePageAsync, true);
-        Grid profileRow = new() { Padding = new Thickness(18, 8), ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } } };
-        profileRow.Add(_profilePicker, 0);
-        profileRow.Add(_newProfile, 1);
-        foreach (string tab in new[] { "Дневник", "Ввод", "Продукты", "Блюда", "Настройки" })
+        Label brand = Ui.Title("nutriflow");
+        brand.FontSize = 25;
+        brand.Margin = 0;
+        brand.CharacterSpacing = -0.8;
+        _sectionLabel.FontSize = 12;
+        VerticalStackLayout wordmark = new() { Spacing = 2, VerticalOptions = LayoutOptions.Center };
+        wordmark.Children.Add(brand);
+        wordmark.Children.Add(_sectionLabel);
+        Grid header = new()
         {
-            _navigation.Children.Add(Ui.Action(tab, () => RunAsync(async () =>
-            {
-                _tab = tab;
-                await RenderAsync();
-            }), true));
+            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } },
+            ColumnSpacing = 12,
+            Padding = new Thickness(22, 14, 20, 16)
+        };
+        header.Add(wordmark, 0);
+        header.Add(_profileButton, 1);
+        _status.IsVisible = false;
+        _status.FontSize = 12;
+        HorizontalStackLayout feedback = new() { Spacing = 8, Margin = new Thickness(22, 0, 20, 8) };
+        feedback.Children.Add(_activity);
+        feedback.Children.Add(_status);
+        VerticalStackLayout top = new() { Spacing = 0 };
+        top.Children.Add(header);
+        top.Children.Add(feedback);
+
+        for (int index = 0; index < 5; index++)
+        {
+            _navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
         }
 
-        VerticalStackLayout top = new() { Spacing = 0 };
-        top.Children.Add(profileRow);
-        top.Children.Add(new ScrollView { Orientation = ScrollOrientation.Horizontal, Content = _navigation });
-        top.Children.Add(_activity);
-        _status.Margin = new Thickness(18, 0);
-        top.Children.Add(_status);
-        Grid layout = new() { RowDefinitions = new RowDefinitionCollection { new() { Height = GridLength.Auto }, new() { Height = GridLength.Star } } };
+        _scroll = new ScrollView { Content = _body };
+        Grid layout = new()
+        {
+            RowDefinitions = new RowDefinitionCollection
+            {
+                new() { Height = GridLength.Auto }, new() { Height = GridLength.Star }, new() { Height = GridLength.Auto }
+            }
+        };
         layout.Add(top, 0, 0);
-        layout.Add(new ScrollView { Content = _body }, 0, 1);
+        layout.Add(_scroll, 0, 1);
+        layout.Add(_navigation, 0, 2);
         Content = layout;
     }
 
@@ -98,18 +108,11 @@ public partial class MainPage : ContentPage
         });
     }
 
-    private async Task RefreshProfilesAsync()
+    private Task RefreshProfilesAsync()
     {
-        _changingProfiles = true;
-        try
-        {
-            _profilePicker.ItemsSource = (await _profiles.ListAsync()).ToList();
-            _profilePicker.SelectedItem = _profilePicker.ItemsSource.Cast<LocalProfile>().FirstOrDefault(item => item.Id == _profile?.Id);
-        }
-        finally
-        {
-            _changingProfiles = false;
-        }
+        _profileButton.Text = _profile?.Name ?? "Профиль";
+        SemanticProperties.SetDescription(_profileButton, _profile is null ? "Локальные профили" : $"Профиль: {_profile.Name}. Сменить профиль");
+        return Task.CompletedTask;
     }
 
     private async Task ResumeSessionAsync(Guid profileId)
@@ -140,16 +143,18 @@ public partial class MainPage : ContentPage
         }
 
         _busy = true;
-        _profilePicker.IsEnabled = false;
-        _newProfile.IsEnabled = false;
+        _profileButton.IsEnabled = false;
         _navigation.IsEnabled = false;
         _body.IsEnabled = false;
         _activity.IsRunning = true;
+        _activity.IsVisible = true;
         _status.Text = "Выполняется…";
+        _status.IsVisible = true;
         try
         {
             await action();
             _status.Text = "";
+            _status.IsVisible = false;
         }
         catch (Exception exception)
         {
@@ -159,8 +164,8 @@ public partial class MainPage : ContentPage
         finally
         {
             _activity.IsRunning = false;
-            _profilePicker.IsEnabled = true;
-            _newProfile.IsEnabled = true;
+            _activity.IsVisible = false;
+            _profileButton.IsEnabled = true;
             _navigation.IsEnabled = true;
             _body.IsEnabled = true;
             _busy = false;
@@ -171,13 +176,11 @@ public partial class MainPage : ContentPage
 
     private async Task RenderAsync()
     {
+        RenderNavigation();
         _body.Children.Clear();
         if (_profile is null)
         {
-            _body.Children.Add(Ui.Title("Питание под вашим контролем"));
-            _body.Children.Add(Ui.Text("Создайте локальный профиль. Продукты, блюда, дневник и цели сохраняются на этом телефоне."));
-            _body.Children.Add(Ui.Action("Создать профиль", CreateProfilePageAsync));
-            _body.Children.Add(Ui.Text("Ручной ввод работает без интернета. Для описания еды, фото этикеток и голоса можно добавить личный ключ Groq.", true));
+            RenderWelcome();
             return;
         }
 
@@ -206,74 +209,6 @@ public partial class MainPage : ContentPage
             await Navigation.PopAsync();
         })));
         return Navigation.PushAsync(page);
-    }
-
-    private async Task RenderDiaryAsync(Guid profileId)
-    {
-        _body.Children.Add(Ui.Title("Дневник питания"));
-        DatePicker date = new() { Date = _date.ToDateTime(TimeOnly.MinValue), Format = "dd.MM.yyyy" };
-        date.DateSelected += async (_, _) => await RunAsync(async () =>
-        {
-            _date = DateOnly.FromDateTime(date.Date ?? DateTime.Today);
-            await RenderDiaryRefreshAsync(profileId);
-        });
-        _body.Children.Add(date);
-        DailyProgressResponse progress = await _client.GetDailyProgressAsync(profileId, _date);
-        _body.Children.Add(Ui.Card(Ui.Text("Съедено за день"), Ui.Title($"{Ui.Amount(progress.Consumed.Calories)} ккал"), Ui.Text(Ui.Nutrition(progress.Consumed))));
-        if (progress.Goal is not null)
-        {
-            _body.Children.Add(Ui.Card(Ui.Text("Дневная цель"), Ui.Text(Ui.Nutrition(progress.Goal)),
-                GoalProgress("Калории", progress.Consumed.Calories, progress.Goal.Calories, "ккал"),
-                GoalProgress("Белки", progress.Consumed.ProteinGrams, progress.Goal.ProteinGrams, "г"),
-                GoalProgress("Жиры", progress.Consumed.FatGrams, progress.Goal.FatGrams, "г"),
-                GoalProgress("Углеводы", progress.Consumed.CarbohydratesGrams, progress.Goal.CarbohydratesGrams, "г")));
-        }
-        else
-        {
-            _body.Children.Add(Ui.Text("Установите цель, чтобы видеть прогресс по КБЖУ.", true));
-        }
-
-        DateOnly selectedDate = _date;
-        _body.Children.Add(Ui.Action("Настроить цель", () => EditGoalPageAsync(profileId, selectedDate, progress.Goal), true));
-        _body.Children.Add(Ui.Action("Добавить еду", () => RunAsync(async () => { _tab = "Ввод"; await RenderAsync(); })));
-        if (progress.Entries.Count == 0)
-        {
-            _body.Children.Add(Ui.Text("За этот день пока нет записей.", true));
-        }
-
-        foreach (MealEntryResponse entry in progress.Entries)
-        {
-            _body.Children.Add(Ui.Card(Ui.Text(entry.Name), Ui.Text($"{Ui.Amount(entry.WeightInGrams)} г · {Ui.Quality(entry.Quality)}", true),
-                Ui.Text(Ui.Nutrition(entry.Nutrition)),
-                Ui.Row(Ui.Action("Изменить вес", () => EditEntryPageAsync(profileId, entry), true),
-                    Ui.Action("Удалить", () => RunAsync(async () =>
-                    {
-                        if (await DisplayAlertAsync("Удалить запись?", $"{entry.Name}, {Ui.Amount(entry.WeightInGrams)} г", "Удалить", "Отмена"))
-                        {
-                            await _client.DeleteEntryAsync(profileId, entry.Id, entry.Revision);
-                            await RenderAsync();
-                        }
-                    }), true))));
-        }
-    }
-
-    private Task RenderDiaryRefreshAsync(Guid profileId)
-    {
-        _body.Children.Clear();
-        return RenderDiaryAsync(profileId);
-    }
-
-    private static View GoalProgress(string name, decimal consumed, decimal goal, string unit)
-    {
-        VerticalStackLayout row = new() { Spacing = 4 };
-        row.Children.Add(Ui.Text($"{name}: {Ui.Amount(consumed)} / {Ui.Amount(goal)} {unit}", true));
-        row.Children.Add(new ProgressBar { Progress = goal > 0 ? (double)Math.Min(consumed / goal, 1m) : 0, ProgressColor = Ui.Green });
-        if (consumed > goal)
-        {
-            row.Children.Add(Ui.Text($"Превышение: {Ui.Amount(consumed - goal)} {unit}", true));
-        }
-
-        return row;
     }
 
     private Task EditGoalPageAsync(Guid profileId, DateOnly date, NutritionResponse? goal)
