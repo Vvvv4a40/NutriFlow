@@ -20,3 +20,4 @@ appsettings.Local.json
 *.provisionprofile
 *.ipa
 /.private/android-signing/
+/mobile/global.json
