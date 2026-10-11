@@ -6,9 +6,13 @@
 
 Выбран нативный .NET MAUI с C# и XAML. Исходники клиента находятся в `mobile/NutriFlow.Mobile`, отдельное решение — `mobile/NutriFlow.Mobile.slnx`. Оно не включено в серверное `NutriFlow.sln`: сборка бэкенда не должна требовать мобильных SDK.
 
+Мобильное решение явно включает пять проектов: `NutriFlow.Mobile`, `NutriFlow.Mobile.Core`, `NutriFlow.Mobile.Core.Tests`, `NutriFlow.Infrastructure` и `NutriFlow.Domain`. Это позволяет VS Code полноценно редактировать клиент, его библиотеки и тесты в одном окне без предупреждения «project is not part of this solution». Ссылки `ProjectReference` в `.csproj` по-прежнему определяют зависимости сборки; запись проекта в solution их не заменяет. После изменения состава решения выполните `Developer: Reload Window`, затем при необходимости `.NET: Switch Solution` → `NutriFlow.Mobile.slnx`. Для серверных файлов, не включённых в мобильное ядро, открывайте `NutriFlow.sln`.
+
 9 октября по запросу пользователя клиент переведён на **автономный Android с локальными профилями**. Реализованы дневник, цели, продукты, собственные блюда, подтверждение и исправление порций, Groq-текст, фото этикетки и речь. В отличие от первого статичного экрана, новый клиент не требует запущенного API. [Установка и личные настройки](ANDROID_INSTALLATION.md).
 
 `NutriFlow.Mobile.Core` — обычная `net10.0` библиотека без Android SDK. Она связывает профили с отдельными SQLite-базами и переиспользует `Infrastructure` / `Domain`. Восемь ASP.NET-независимых исходников workflow и DTO включены через `Compile Link`: это тот же код, а не ссылка на исполняемый Web-проект или копия формул. `NutriFlow.Mobile.Core.Tests` проверяет офлайн-сценарии, изоляцию, повтор подтверждения, перезапуск и явный выбор одноимённых продуктов. Эти проекты собираются отдельно через `mobile/NutriFlow.Mobile.Core.slnx`; основной CI также запускает их тесты.
+
+Для Android-сборки с `-f net10.0-android` указывайте именно `NutriFlow.Mobile/NutriFlow.Mobile.csproj`, как в командах ниже: общие библиотеки и тесты имеют цель `net10.0`, поэтому платформенную цель нельзя принудительно передавать всему решению.
 
 Нативные экраны разделены на `MainPage.Input.cs`, `Products.cs`, `Dishes.cs`, `Settings.cs` и `Media.cs`. `FormPage` управляет выполнением формы и ошибками; `Ui` содержит только компоненты и отображение. `ProfileSettings` хранит Groq-ключ отдельно для каждого GUID через MAUI `SecureStorage`, а `AudioCapture` реализует Android-запись микрофона. Профили не являются облачной аутентификацией и не защищают от доступа к разблокированному телефону.
 
@@ -40,7 +44,7 @@
 - `Platforms/iOS/PrivacyInfo.xcprivacy` — минимальные причины обращения .NET / MAUI к времени файлов, времени работы системы и свободному месту. Файл явно включён как `BundleResource` только для iOS. Это не разрешение на сбор любых данных: при добавлении функций и SDK декларации нужно пересмотреть. [Privacy manifest в MAUI](https://learn.microsoft.com/en-us/dotnet/maui/ios/privacy-manifest?view=net-maui-10.0).
 - `Resources/AppIcon` / `Resources/Splash` — самостоятельные SVG-ресурсы. Рисунок использует существующий знак NutriFlow, но не зависит от файлов веб-клиента или серверного проекта.
 
-`.slnx` — XML-формат solution, поддерживаемый установленным .NET SDK. Он перечисляет мобильный проект; это не новое приложение и не отдельная библиотека. Серверное `.sln` не преобразовывалось. [Формат solution и команды CLI](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-sln).
+`.slnx` — XML-формат solution, поддерживаемый установленным .NET SDK. Он перечисляет проекты решения; это не новое приложение и не отдельная библиотека. Серверное `.sln` не преобразовывалось. [Формат solution и команды CLI](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-sln).
 
 ## Подготовка Android на Windows
 
