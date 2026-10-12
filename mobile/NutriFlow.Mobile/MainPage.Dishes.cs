@@ -8,20 +8,37 @@ public partial class MainPage
 {
     private async Task RenderDishesAsync(Guid profileId)
     {
-        _body.Children.Add(Ui.Title("Сохранённые блюда"));
-        _body.Children.Add(Ui.Text("Сохранённый состав и КБЖУ позволяют добавлять порции без повторного разбора AI.", true));
-        _body.Children.Add(Ui.Action("Собрать блюдо вручную", () => ManualDishPageAsync(profileId)));
+        Label title = Ui.Title("Ваши блюда");
+        title.FontSize = 28;
+        title.Margin = 0;
+        SemanticProperties.SetHeadingLevel(title, SemanticHeadingLevel.Level1);
+        _body.Children.Add(title);
+        _body.Children.Add(Ui.Text("Сохранённый состав и КБЖУ — для повторных порций без разбора AI.", true));
+        Button manual = Ui.Action("Собрать блюдо вручную", () => ManualDishPageAsync(profileId), true);
+        manual.AutomationId = "dish-create-manual";
+        _body.Children.Add(manual);
         IReadOnlyList<SavedDishResponse> dishes = await _client.GetSavedDishesAsync(profileId);
+        Label count = Ui.Text($"Показано: {dishes.Count}", true);
+        count.FontSize = 12;
+        count.AutomationId = "dish-results-count";
+        _body.Children.Add(count);
         if (dishes.Count == 0)
         {
-            _body.Children.Add(Ui.Text("Сохранённых блюд пока нет. Соберите ингредиенты вручную или выберите «Создать блюдо» в разделе «Ввод».", true));
+            Label emptyTitle = Ui.Title("Пока нет блюд");
+            emptyTitle.FontSize = 20;
+            emptyTitle.Margin = 0;
+            SemanticProperties.SetHeadingLevel(emptyTitle, SemanticHeadingLevel.Level2);
+            Border empty = Ui.Card(emptyTitle,
+                Ui.Text("Соберите состав вручную или нажмите + и выберите «Создать блюдо», чтобы описать приготовление своими словами.", true),
+                Ui.Text("После проверки и подтверждения блюдо сохранится в выбранном локальном профиле. Порции добавляются в дневник отдельно.", true));
+            empty.AutomationId = "dish-catalog-empty";
+            _body.Children.Add(empty);
+            return;
         }
 
         foreach (SavedDishResponse dish in dishes)
         {
-            _body.Children.Add(Ui.Card(Ui.Title(dish.Name), Ui.Text($"Готовый вес {Ui.Amount(dish.FinalWeightInGrams)} г", true),
-                Ui.Text($"На 100 г: {Ui.Nutrition(dish.NutritionPer100Grams)}"), Ui.Text(Ui.Quality(dish.NutritionQuality), true),
-                Ui.Action("Состав и порция", () => DishDetailPageAsync(profileId, dish), true)));
+            _body.Children.Add(SavedDishCard(profileId, dish));
         }
     }
 
