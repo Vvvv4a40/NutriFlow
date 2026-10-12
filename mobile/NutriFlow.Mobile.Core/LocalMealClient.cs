@@ -155,7 +155,7 @@ public sealed class LocalMealClient
         MealDraft draft = new([new DishDraft(name, ingredients, finalGrams, quality, [])], []);
         return WithContextAsync(profileId, async context =>
         {
-            foreach (IngredientDraft ingredient in ingredients)
+            foreach (IngredientDraft ingredient in draft.Dishes[0].Ingredients)
             {
                 await RequireUnambiguousNameAsync(context, profileId, ingredient.ProductName, cancellationToken);
             }
@@ -178,7 +178,7 @@ public sealed class LocalMealClient
         {
             LocalProductCatalog catalog = new(context, profileId);
             List<IngredientDraft> selectedIngredients = [];
-            for (int index = 0; index < ingredients.Count; index++)
+            for (int index = 0; index < validated.Length; index++)
             {
                 string alias = await catalog.CreateSelectionAliasAsync(products[index], cancellationToken);
                 IngredientDraft ingredient = validated[index];
@@ -218,10 +218,11 @@ public sealed class LocalMealClient
         GroqSettings settings, CancellationToken cancellationToken = default)
     {
         using HttpClient client = CreateGroqClient(settings);
+        string[]? capturedMessages = messages?.ToArray();
         return await WithWorkflowAsync(profileId, new GroqMealParser(client, settings.TextModel), async workflow =>
         {
             MealSessionCreationResult result = await workflow.CreateAsync(
-                messages, date, cancellationToken, Guid.NewGuid(), purpose);
+                capturedMessages, date, cancellationToken, Guid.NewGuid(), purpose);
             return result.Session;
         }, cancellationToken);
     }
@@ -425,13 +426,16 @@ public sealed class LocalMealClient
             context => operation(CreateWorkflow(context, profileId, parser)), cancellationToken);
     }
 
-    private async Task<T> WithContextAsync<T>(Guid profileId,
+    private Task<T> WithContextAsync<T>(Guid profileId,
         Func<NutriFlowDbContext, Task<T>> operation, CancellationToken cancellationToken)
     {
-        await _profiles.RequireAsync(profileId, cancellationToken);
-        await using NutriFlowDbContext context = await LocalProfileDatabase.OpenAsync(
-            _profiles.GetDatabasePath(profileId), profileId, cancellationToken);
-        return await operation(context);
+        return Task.Run(async () =>
+        {
+            await _profiles.RequireAsync(profileId, cancellationToken);
+            await using NutriFlowDbContext context = await LocalProfileDatabase.OpenAsync(
+                _profiles.GetDatabasePath(profileId), profileId, cancellationToken);
+            return await operation(context);
+        }, cancellationToken);
     }
 
     private static MealWorkflowService CreateWorkflow(NutriFlowDbContext context, Guid profileId, IMealParser? parser)
