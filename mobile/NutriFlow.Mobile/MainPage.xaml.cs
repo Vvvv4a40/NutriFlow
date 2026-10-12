@@ -101,7 +101,9 @@ public partial class MainPage : ContentPage
             }
             else if (_profile is not null && _session is not null)
             {
-                _session = await _client.FindSessionAsync(_profile.Id, _session.Id);
+                Guid profileId = _profile.Id;
+                Guid sessionId = _session.Id;
+                _session = await Task.Run(() => _client.FindSessionAsync(profileId, sessionId));
             }
 
             await RefreshProfilesAsync();
@@ -123,7 +125,7 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        MealSessionResponse? session = await _client.FindSessionAsync(profileId, id);
+        MealSessionResponse? session = await Task.Run(() => _client.FindSessionAsync(profileId, id));
         if (session is not null && session.Status != "Confirmed")
         {
             _session = session;
