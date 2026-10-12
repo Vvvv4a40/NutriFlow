@@ -6,36 +6,87 @@ public partial class MainPage
 {
     private async Task RenderProductsAsync(Guid profileId)
     {
-        _body.Children.Add(Ui.Title("Продукты"));
-        _body.Children.Add(Ui.Text("Пищевая ценность всегда хранится вместе с источником. Значения ниже указаны на 100 г.", true));
-        Entry search = Ui.Field("Название продукта");
-        _body.Children.Add(search);
+        Label title = Ui.Title("Ваши продукты");
+        title.FontSize = 28;
+        title.Margin = 0;
+        SemanticProperties.SetHeadingLevel(title, SemanticHeadingLevel.Level1);
+        _body.Children.Add(title);
+        _body.Children.Add(Ui.Text("Сохранённая пищевая ценность для быстрых записей. Все значения — на 100 г.", true));
+
+        Label searchLabel = Ui.Text("Поиск по названию");
+        searchLabel.FontSize = 13;
+        Entry search = Ui.Field("Например, овсянка");
+        search.AutomationId = "product-search";
+        search.ReturnType = ReturnType.Search;
+        search.MaxLength = 200;
         VerticalStackLayout results = new() { Spacing = 10 };
-        _body.Children.Add(Ui.Action("Найти в каталоге", () => RunAsync(async () =>
+        Task FindProductsAsync() => RunAsync(async () =>
         {
-            RenderProductList(results, profileId, await _client.SearchProductsAsync(profileId, search.Text));
-        }), true));
-        _body.Children.Add(Ui.Row(Ui.Action("Ввести вручную", () => ProductEditorPageAsync(profileId), true),
-            Ui.Action("Фото этикетки", () => LabelSourcePageAsync(profileId), true)));
-        _body.Children.Add(Ui.Action("Найти по штрихкоду", () => BarcodePageAsync(profileId), true));
+            string query = search.Text?.Trim() ?? "";
+            RenderProductList(results, profileId, await _client.SearchProductsAsync(profileId, query), query);
+        });
+        Button find = Ui.Action("Найти", FindProductsAsync);
+        find.AutomationId = "product-search-submit";
+        Button clear = Ui.Action("Сбросить", async () =>
+        {
+            search.Text = "";
+            await FindProductsAsync();
+        }, true);
+        clear.AutomationId = "product-search-clear";
+        search.Completed += async (_, _) => await FindProductsAsync();
+        Label localSearch = Ui.Text("Поиск среди сохранённых продуктов — без интернета.", true);
+        localSearch.FontSize = 12;
+        _body.Children.Add(Ui.Card(searchLabel, search, Ui.Row(find, clear), localSearch));
+
+        Label addLabel = Ui.Text("Пополнить каталог");
+        addLabel.FontAttributes = FontAttributes.Bold;
+        Button manual = Ui.Action("Добавить продукт вручную", () => ProductEditorPageAsync(profileId), true);
+        manual.AutomationId = "product-add-manual";
+        Button photo = Ui.Action("Фото этикетки", () => LabelSourcePageAsync(profileId), true);
+        photo.AutomationId = "product-add-photo";
+        Button barcode = Ui.Action("По штрихкоду", () => BarcodePageAsync(profileId), true);
+        barcode.AutomationId = "product-add-barcode";
+        Label online = Ui.Text("Для фото нужен личный Groq-ключ; поиск по штрихкоду требует интернета. Ручной ввод работает офлайн.", true);
+        online.FontSize = 12;
+        VerticalStackLayout addOptions = new() { Spacing = 10, IsVisible = false, AutomationId = "product-add-methods" };
+        addOptions.Children.Add(Ui.Card(addLabel, manual, Ui.Row(photo, barcode), online));
+        Button add = Ui.Action("Добавить продукт", () =>
+        {
+            addOptions.IsVisible = !addOptions.IsVisible;
+            return Task.CompletedTask;
+        }, true);
+        add.AutomationId = "product-add-options";
+        SemanticProperties.SetHint(add, "Показать или скрыть способы добавления: вручную, фото этикетки или штрихкод");
+        _body.Children.Add(add);
+        _body.Children.Add(addOptions);
         RenderProductList(results, profileId, await _client.SearchProductsAsync(profileId));
         _body.Children.Add(results);
     }
 
-    private void RenderProductList(VerticalStackLayout target, Guid profileId, IReadOnlyList<ProductResponse> products)
+    private void RenderProductList(VerticalStackLayout target, Guid profileId, IReadOnlyList<ProductResponse> products, string query = "")
     {
         target.Children.Clear();
+        Label count = Ui.Text($"Показано: {products.Count}", true);
+        count.AutomationId = "product-results-count";
+        count.FontSize = 12;
+        target.Children.Add(count);
         if (products.Count == 0)
         {
-            target.Children.Add(Ui.Text("Продуктов пока нет. Добавьте данные с упаковки или найдите продукт по штрихкоду.", true));
+            bool filtered = !string.IsNullOrWhiteSpace(query);
+            Label title = Ui.Title(filtered ? "Ничего не найдено" : "Каталог пока пуст");
+            title.FontSize = 20;
+            title.Margin = 0;
+            Border empty = Ui.Card(title, Ui.Text(filtered
+                ? "Попробуйте другое название или сбросьте поиск, чтобы увидеть сохранённые продукты."
+                : "Добавьте первый продукт вручную по упаковке. Он сохранится в выбранном локальном профиле.", true));
+            empty.AutomationId = filtered ? "product-search-empty" : "product-catalog-empty";
+            target.Children.Add(empty);
+            return;
         }
 
         foreach (ProductResponse product in products)
         {
-            target.Children.Add(Ui.Card(Ui.Text(product.Name), Ui.Text(Ui.Nutrition(product)),
-                Ui.Text($"{product.SourceName} · {Ui.Quality(product.DataQuality)}", true),
-                Ui.Text(product.Barcode is null ? $"Источник: {Ui.Source(product.SourceKind)}" : $"Штрихкод: {product.Barcode}", true),
-                Ui.Action("Добавить порцию в дневник", () => ProductPortionPageAsync(profileId, product), true)));
+            target.Children.Add(ProductCatalogCard(profileId, product));
         }
     }
 
