@@ -11,7 +11,7 @@ public partial class MainPage
     private async Task RenderDiaryAsync(Guid profileId)
     {
         DateOnly selectedDate = _date;
-        DailyProgressResponse progress = await Task.Run(() => _client.GetDailyProgressAsync(profileId, selectedDate));
+        DailyProgressResponse progress = await _client.GetDailyProgressAsync(profileId, selectedDate);
         _body.Children.Add(DiaryDateNavigation(profileId, selectedDate));
         _body.Children.Add(NutritionSummary(progress));
 
