@@ -39,12 +39,12 @@ public partial class MainPage
         dateRow.Add(dateLabel, 0);
         dateRow.Add(date, 1);
 
-        Editor editor = new()
+        Editor editor = new InputEditor()
         {
             AutomationId = "input-description",
             Text = _draftText,
-            AutoSize = EditorAutoSizeOption.TextChanges,
-            MinimumHeightRequest = 120,
+            AutoSize = EditorAutoSizeOption.Disabled,
+            HeightRequest = 120,
             MaxLength = 4000,
             FontSize = 16,
             BackgroundColor = Ui.Surface,
