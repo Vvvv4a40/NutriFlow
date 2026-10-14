@@ -36,3 +36,11 @@ test("offline core solution keeps its tests without requiring MAUI", () => {
         assert.doesNotMatch(xml, /<TargetFrameworks?>[^<]*(?:-android|-ios)/i);
     }
 });
+
+test("Android manifest keeps legacy Back compatibility for the pinned MAUI runtime", () => {
+    const manifest = readFileSync(new URL("mobile/NutriFlow.Mobile/Platforms/Android/AndroidManifest.xml", root), "utf8");
+    const application = /<application\b[^>]*>/.exec(manifest)?.[0];
+    assert.ok(application, "The Android application element is missing");
+    assert.match(application, /\bandroid:enableOnBackInvokedCallback="false"/);
+    assert.doesNotMatch(manifest, /<activity\b[^>]*\bandroid:enableOnBackInvokedCallback="true"/);
+});

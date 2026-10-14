@@ -25,13 +25,15 @@ function hierarchy(screen, diaryAddAction = node("Добавить еду", 'cli
         diary,
         "busy-diary": diary + node("Выполняется…"),
         "disabled-diary": diary.replaceAll('enabled="true"', 'enabled="false"'),
+        launcher: node("Launcher").replace(packageId, "com.android.launcher3"),
         splash: node("NutriFlow")
     };
     return `<?xml version="1.0"?><hierarchy rotation="0">${screens[screen]}</hierarchy>`;
 }
 
 function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
-    consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [], diaryAddAction } = {}) {
+    consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [], diaryAddAction,
+    formBack = "welcome", keyboardBack = "filled" } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -53,6 +55,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
     };
     let avdName;
     let screen = welcome;
+    let keyboardVisible = false;
     let launches = 0;
     let time = 0;
     function execute(command, args, options) {
@@ -87,12 +90,24 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                     }
                     else if (operation[1] === "input" && operation[2] === "tap") {
                         assert.deepEqual(operation.slice(3), ["160", "225"]);
-                        if (screen === "welcome") screen = "form";
-                        else if (screen === "filled") screen = "diary";
+                        if (screen === "welcome") {
+                            screen = "form";
+                            keyboardVisible = false;
+                        } else if (screen === "form") keyboardVisible = true;
+                        else if (screen === "filled") {
+                            screen = "diary";
+                            keyboardVisible = false;
+                        }
                     } else if (operation[1] === "input" && operation[2] === "text") {
                         assert.equal(screen, "form");
                         assert.equal(operation[3], "Smoke");
+                        assert.equal(keyboardVisible, true);
                         screen = "filled";
+                    } else if (operation[1] === "input" && operation[2] === "keyevent" && operation[3] === "4") {
+                        if (keyboardVisible) {
+                            keyboardVisible = false;
+                            screen = keyboardBack;
+                        } else if (screen === "form") screen = formBack;
                     }
                 }
             }
@@ -118,6 +133,7 @@ test("installs and launches the selected emulator, creates a profile by UI bound
     assert.equal(report.status, "passed");
     assert.equal(report.installation, "passed");
     assert.equal(report.launch, "passed");
+    assert.equal(report.backNavigation.form, "passed");
     assert.deepEqual(report.profile, { name: "Smoke", creation: "passed", persistence: "passed" });
     assert.match(report.apkSha256, /^[a-f0-9]{64}$/);
     assert.equal(report.cleanup, "passed");
@@ -130,9 +146,48 @@ test("installs and launches the selected emulator, creates a profile by UI bound
         assert.equal(call.options.shell, false);
         assert.ok(call.options.timeout > 0 && call.options.timeout <= 150_000);
     }
-    for (const file of ["welcome.png", "diary.png", "diary-after-restart.png", "diary-after-restart.xml", "logcat.log"]) {
+    const backCommands = sample.calls.filter(call => call.args.slice(2).join(" ") === "shell input keyevent 4");
+    assert.equal(backCommands.length, 2);
+    const inputIndex = sample.calls.findIndex(call => call.args.slice(2).join(" ") === "shell input text Smoke");
+    const formBackIndex = sample.calls.indexOf(backCommands[0]);
+    assert.ok(formBackIndex < inputIndex);
+    assert.ok(sample.calls.indexOf(backCommands[1]) > inputIndex);
+    const reopenIndex = sample.calls.findIndex((call, index) => index > formBackIndex && call.args.slice(2, 5).join(" ") === "shell input tap");
+    assert.ok(reopenIndex > formBackIndex && reopenIndex < inputIndex);
+    assert.equal(sample.calls.slice(formBackIndex + 1, reopenIndex)
+        .filter(call => call.args.slice(2, 4).join(" ") === "shell cat").length, 2);
+    for (const file of ["welcome.png", "profile-before-back.xml", "welcome-after-form-back.xml", "welcome-after-form-back.png",
+        "diary.png", "diary-after-restart.png", "diary-after-restart.xml", "logcat.log"]) {
         assert.ok(existsSync(join(sample.outputDirectory, file)));
     }
+});
+
+for (const [description, formBack] of [["opens the launcher while the app process stays alive", "launcher"],
+    ["leaves the form open", "form"]]) {
+    test(`rejects system Back from a form when it ${description}`, async context => {
+        const sample = fixture(context, { formBack });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*welcome-after-form-back.xml/);
+        const report = sample.report();
+        assert.equal(report.phase, "form-back");
+        assert.equal(report.backNavigation.form, "not-tested");
+        assert.equal(report.profile.creation, "not-tested");
+        assert.equal(report.pid, 5001);
+        if (formBack === "launcher") assert.match(readFileSync(join(sample.outputDirectory, "welcome-after-form-back.xml"), "utf8"), /com\.android\.launcher3/);
+        assert.ok(!sample.calls.some(call => call.args.slice(2).join(" ") === "shell input text Smoke"));
+        assert.ok(!existsSync(join(sample.outputDirectory, "welcome-after-form-back.png")));
+        assert.deepEqual(sample.child.signals, ["SIGTERM"]);
+    });
+}
+
+test("rejects keyboard Back when it pops the profile form instead of only dismissing the keyboard", async context => {
+    const sample = fixture(context, { keyboardBack: "welcome" });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*profile-filled.xml/);
+    const report = sample.report();
+    assert.equal(report.phase, "create-profile");
+    assert.equal(report.backNavigation.form, "passed");
+    assert.equal(report.profile.creation, "not-tested");
+    assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+    assert.deepEqual(sample.child.signals, ["SIGTERM"]);
 });
 
 test("accepts the diary icon-only add action through its accessible description after creation and restart", async context => {
