@@ -32,6 +32,9 @@ public partial class MainPage : ContentPage
         _client = client;
         Title = "NutriFlow";
         BackgroundColor = Ui.Background;
+#if ANDROID
+        SafeAreaEdges = SafeAreaEdges.All;
+#endif
         NavigationPage.SetHasNavigationBar(this, false);
         _profileButton = Ui.Action("Профиль", OpenProfilesAsync, true);
         _profileButton.FontSize = 13;
