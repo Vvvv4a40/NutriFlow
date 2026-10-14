@@ -41,6 +41,7 @@ export async function testAndroidEmulator({
         status: "running", startedAt: new Date().toISOString(), packageId, serial, avdName, systemImage,
         apkSha256: createHash("sha256").update(readFileSync(apkPath)).digest("hex"),
         profile: { name: "Smoke", creation: "not-tested", persistence: "not-tested" },
+        backNavigation: { form: "not-tested" },
         scope: "cloud emulator; no phone, Groq key or AI network requests"
     };
     const deadline = now() + 420_000;
@@ -205,11 +206,19 @@ export async function testAndroidEmulator({
         adb(["logcat", "-c"]);
         report.phase = "launch";
         launch("launch.log");
-        const welcome = await waitUi("welcome.xml", nodes => hasText(nodes, "Питание под вашим контролем") && enabledAction(nodes, "Создать профиль", false));
+        const welcomePredicate = nodes => hasText(nodes, "Питание под вашим контролем") && enabledAction(nodes, "Создать профиль", false);
+        const welcome = await waitUi("welcome.xml", welcomePredicate);
         screenshot("welcome.png");
         report.launch = "passed";
-        report.phase = "create-profile";
+        report.phase = "form-back";
         tap(welcome, node => node.text?.toLocaleLowerCase("ru") === "создать профиль" && node.clickable === "true");
+        await waitUi("profile-before-back.xml", nodes => hasText(nodes, "Локальный профиль") && enabledAction(nodes, "Создать", false));
+        adb(["shell", "input", "keyevent", "4"]);
+        const welcomeAfterBack = await waitUi("welcome-after-form-back.xml", welcomePredicate);
+        screenshot("welcome-after-form-back.png");
+        report.backNavigation.form = "passed";
+        report.phase = "create-profile";
+        tap(welcomeAfterBack, node => node.text?.toLocaleLowerCase("ru") === "создать профиль" && node.clickable === "true");
         const form = await waitUi("profile-form.xml", nodes => hasText(nodes, "Локальный профиль") && enabledAction(nodes, "Создать", false));
         tap(form, node => node.class === "android.widget.EditText");
         adb(["shell", "input", "text", "Smoke"]);
