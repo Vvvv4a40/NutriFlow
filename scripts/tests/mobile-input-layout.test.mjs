@@ -12,10 +12,19 @@ test("native input source configuration bounds the main editor and preserves its
     const height = /\bHeightRequest\s*=\s*(\d+(?:\.\d+)?)\s*,/.exec(editor)?.[1];
     assert.ok(height && Number.isFinite(Number(height)) && Number(height) > 0, "The editor needs a finite positive height");
     assert.equal(Number(height), 120);
-    assert.match(editor, /\bMaxLength\s*=\s*4000\b/);
+    assert.match(editor, /\bMaxLength\s*=\s*MealInputText\.MaximumLength\b/);
     assert.match(editor, /\bAutomationId\s*=\s*"input-description"/);
     assert.match(editor, /\bText\s*=\s*_draftText\b/);
     assert.match(input, /\bsubmit\.AutomationId\s*=\s*"input-submit"/);
+});
+
+test("native voice source configuration validates the combined draft before changing the page", () => {
+    const media = readFileSync(new URL("MainPage.Media.cs", mobile), "utf8");
+    const input = readFileSync(new URL("MainPage.Input.cs", mobile), "utf8");
+    assert.match(media, /Editor transcript\s*=\s*new\(\)\s*\{[^}]*MaxLength\s*=\s*MealInputText\.MaximumLength\b/);
+    assert.match(input, /count\.Text\s*=\s*\$"\{_draftText\.Length\}\/\{MealInputText\.MaximumLength\}"/);
+    assert.match(media, /_draftText\s*=\s*MealInputText\.AppendTranscript\(_draftText, transcript\.Text\);\s*_tab\s*=\s*"Ввод";\s*await Navigation\.PopAsync\(\);/);
+    assert.doesNotMatch(media, /_draftText\s*=\s*string\.IsNullOrWhiteSpace/);
 });
 
 test("native editor source configuration scopes touch arbitration and cleans up its handler", () => {

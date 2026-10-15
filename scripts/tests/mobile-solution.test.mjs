@@ -44,3 +44,11 @@ test("Android manifest keeps legacy Back compatibility for the pinned MAUI runti
     assert.match(application, /\bandroid:enableOnBackInvokedCallback="false"/);
     assert.doesNotMatch(manifest, /<activity\b[^>]*\bandroid:enableOnBackInvokedCallback="true"/);
 });
+
+test("local Android SDK example stays independently pinned from cloud CI", () => {
+    const sdk = JSON.parse(readFileSync(new URL("mobile/global.example.json", root), "utf8"));
+    const workflow = readFileSync(new URL(".github/workflows/android-apk.yml", root), "utf8");
+    assert.equal(sdk.sdk.version, "10.0.401");
+    assert.equal(sdk.sdk.rollForward, "disable");
+    assert.match(workflow, /dotnet-version:\s*'10\.0\.400'/);
+});

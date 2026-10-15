@@ -48,13 +48,13 @@
 
 ## Подготовка Android на Windows
 
-На текущем компьютере установлены .NET SDK 10.0.400 / 10.0.401, workload `maui-android` 10.0.0 и .NET Android tools 36.1.2. Пользователь самостоятельно установил Google Android SDK, JDK 21, расширение .NET MAUI и создал виртуальный телефон. Workload добавляет средства .NET, но не заменяет Google Android SDK и Java JDK. Приведённый ниже `InstallAndroidDependencies` агентом не запускался; лицензии Android агент не принимал.
+На текущем компьютере используется .NET SDK 10.0.401, workload `maui-android` 10.0.0 и .NET Android tools 36.1.2. При проверке 15 октября SDK 10.0.400 уже отсутствовал; новый SDK агент не устанавливал. Пользователь самостоятельно установил Google Android SDK, JDK 21, расширение .NET MAUI и создал виртуальный телефон. Workload добавляет средства .NET, но не заменяет Google Android SDK и Java JDK. Приведённый ниже `InstallAndroidDependencies` агентом не запускался; лицензии Android агент не принимал.
 
 ### SDK для локального запуска
 
-Windows Android lock-файл проверен с SDK **10.0.400** и его неявным `Microsoft.NET.ILLink.Tasks` **10.0.11**. Корневой `global.json` разрешает `latestPatch`, поэтому при наличии SDK 10.0.401 выбирает его и запрашивает ILLink 10.0.12. Не отключайте locked mode и не обновляйте только Windows lock ради локальной отладки: Linux Android CI использует SDK 10.0.400 и тот же граф версий.
+Windows Android lock-файл используется с SDK **10.0.401** и его неявным `Microsoft.NET.ILLink.Tasks` **10.0.12**. Это разрешённое пользователем точечное обновление инструмента сборки после удаления прежнего SDK, не обновление MAUI или SQLite. Linux Android CI отдельно закреплён на SDK **10.0.400** и `packages.android-ci.lock.json` с ILLink **10.0.11**; его граф не менялся. Не отключайте locked mode и не копируйте Windows lock поверх CI lock. Корневой `global.json` разрешает `latestPatch`; для воспроизводимого локального выбора используется файл ниже.
 
-Для личной Android-среды предусмотрен [пример локального выбора SDK](../mobile/global.example.json). На текущем компьютере его копия уже создана в `mobile/global.json`; этот файл игнорируется Git. На другом Windows-компьютере с установленным SDK 10.0.400 подготовьте её из корня репозитория:
+Для личной Android-среды предусмотрен [пример локального выбора SDK](../mobile/global.example.json). На текущем компьютере его копия уже создана в `mobile/global.json`; этот файл игнорируется Git. На другом Windows-компьютере с установленным SDK 10.0.401 подготовьте её из корня репозитория:
 
 ```powershell
 if (-not (Test-Path -LiteralPath 'mobile/global.json')) {
@@ -64,7 +64,7 @@ if (-not (Test-Path -LiteralPath 'mobile/global.json')) {
 
 Не перезаписывайте существующий личный файл без проверки. Эта настройка действует на всю локальную папку `mobile`, включая Mobile.Core и iOS; она предназначена для текущей Windows Android-отладки. Корневой SDK-конфиг и удалённые workflow она не меняет. Не переносите её вслепую в среду iOS с другой проверенной SDK-связкой.
 
-**Открывайте папку `mobile` в VS Code и выполняйте мобильные CLI-команды из неё.** `dotnet --version` должен показать `10.0.400`. Запуск `dotnet` из корня репозитория может выбрать другой SDK. После создания локального файла перезагрузите окно редактора, затем через `.NET: Switch Solution` выберите `NutriFlow.Mobile.slnx`, не `NutriFlow.Mobile.Core.slnx`. Команды `.NET MAUI: Select Startup Project` и `.NET MAUI: Select Android Device` позволяют выбрать `NutriFlow.Mobile` и эмулятор; F5 запускает отладку.
+**Открывайте папку `mobile` в VS Code и выполняйте мобильные CLI-команды из неё.** `dotnet --version` должен показать `10.0.401`. Запуск `dotnet` из корня репозитория может выбрать другой SDK. После создания или изменения локального файла перезагрузите окно редактора, затем через `.NET: Switch Solution` выберите `NutriFlow.Mobile.slnx`, не `NutriFlow.Mobile.Core.slnx`. Команды `.NET MAUI: Select Startup Project` и `.NET MAUI: Select Android Device` позволяют выбрать `NutriFlow.Mobile` и эмулятор; F5 запускает отладку.
 
 Если восстановление сообщает `NETSDK1147` / `wasm-tools`, сначала проверьте отсутствующий компонент:
 
@@ -76,7 +76,7 @@ dotnet msbuild NutriFlow.Mobile/NutriFlow.Mobile.csproj -getItem:MissingWorkload
 
 ### Установка инструментов на другом компьютере
 
-На другом компьютере сначала установите SDK из `global.json`, затем нужную нагрузку:
+На другом Windows-компьютере сначала установите SDK 10.0.401, указанный в `mobile/global.example.json`, подготовьте локальный `mobile/global.json` и выполняйте следующие команды из папки `mobile`:
 
 ```powershell
 dotnet workload install maui-android --skip-manifest-update --source https://api.nuget.org/v3/index.json
@@ -104,7 +104,7 @@ dotnet build NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 ## Проверка и пробное APK после установки
 
-Следующие команды выполняются из папки `mobile` с выбранным SDK 10.0.400. Переменные `androidSdkDirectory` / `javaSdkDirectory` должны указывать на реальные каталоги установленного SDK и JDK 21; не на старый Java 8 из PATH.
+Следующие команды выполняются из папки `mobile` с выбранным SDK 10.0.401. Переменные `androidSdkDirectory` / `javaSdkDirectory` должны указывать на реальные каталоги установленного SDK и JDK 21; не на старый Java 8 из PATH.
 
 На текущем компьютере реальные пути задаются так; на другом компьютере замените их своими:
 
@@ -145,7 +145,7 @@ dotnet build NutriFlow.Mobile/NutriFlow.Mobile.csproj `
 
 1. **Доступ к Mac** — своему или удалённому. Xcode и iOS SDK не устанавливаются как обычные Windows-инструменты; наличие iPhone этого требования не отменяет.
 2. **Совместимые macOS и Xcode**. Базовый iOS-манифест этой установки — `26.0.11017`, его проверяемая исходная связка — Xcode 26.0 на macOS Sequoia 15.6 или новее. Xcode доступен в [каталоге загрузок Apple](https://developer.apple.com/download/all/). Не выбирайте самую новую версию вслепую: сверяйте её с установленным .NET iOS workload. [Требования выпуска .NET 10 для Apple](https://github.com/dotnet/macios/wiki/.NET-10-release-notes), [таблица совместимости Xcode](https://developer.apple.com/xcode/system-requirements/).
-3. **.NET SDK 10.0.401 для macOS**, использованный успешной облачной сборкой, из [официальных загрузок .NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0): Arm64 для Apple Silicon, x64 для Intel. `global.json` задаёт `10.0.400` с `latestPatch`, поэтому допускает `10.0.401`; это не строгая фиксация всех инструментов. iOS lock содержит `Microsoft.NET.ILLink.Tasks` `10.0.12`, Android lock — `10.0.11` от локального SDK `10.0.400`. Другой SDK может потребовать пересмотра неявных зависимостей: проверяйте `dotnet --version` и не исправляйте lock вручную ради прохождения restore. [Выбор SDK](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json#rollforward).
+3. **.NET SDK 10.0.401 для macOS**, использованный успешной облачной сборкой, из [официальных загрузок .NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0): Arm64 для Apple Silicon, x64 для Intel. `global.json` задаёт `10.0.400` с `latestPatch`, поэтому допускает `10.0.401`; это не строгая фиксация всех инструментов. iOS lock и Windows Android lock содержат `Microsoft.NET.ILLink.Tasks` `10.0.12`; отдельный Linux Android CI lock — `10.0.11` от SDK `10.0.400`. Другой SDK может потребовать пересмотра неявных зависимостей: проверяйте `dotnet --version` и не исправляйте lock вручную ради прохождения restore. [Выбор SDK](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json#rollforward).
 4. **Нагрузка `maui-ios`** командой ниже. После первого запуска Xcode установите предлагаемые компоненты iOS / симулятора и ознакомьтесь с лицензиями. Нужные компоненты Apple и .NET workload — разные установки.
 5. Необязательно — VS Code с расширением `.NET MAUI` по ссылке выше. Для CLI-сборки расширение не требуется.
 
@@ -164,7 +164,7 @@ dotnet workload list
 dotnet workload --version
 ```
 
-Сопоставьте фактическую версию iOS workload с требованиями к Xcode, прежде чем собирать. `--version 10.0.100` закрепляет согласованный workload set: MAUI 10.0.0 / iOS 26.0.11017. Версия этого набора не обязана совпадать с выбранным SDK 10.0.400. `--skip-manifest-update` без явной версии сохранял бы уже имеющиеся манифесты машины, которые в облаке могут быть другими. Для защищённого каталога SDK на Mac команда установки требует `sudo`. [Workload sets](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-workload-sets).
+Сопоставьте фактическую версию iOS workload с требованиями к Xcode, прежде чем собирать. `--version 10.0.100` закрепляет согласованный workload set: MAUI 10.0.0 / iOS 26.0.11017. Версия этого набора не обязана совпадать с версией выбранного SDK. `--skip-manifest-update` без явной версии сохранял бы уже имеющиеся манифесты машины, которые в облаке могут быть другими. Для защищённого каталога SDK на Mac команда установки требует `sudo`. [Workload sets](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-workload-sets).
 
 Для Apple Silicon используйте уже сохранённый iOS lock-файл. Обычная проверка начинается сразу с locked restore; во всех командах указан один и тот же runtime identifier:
 
