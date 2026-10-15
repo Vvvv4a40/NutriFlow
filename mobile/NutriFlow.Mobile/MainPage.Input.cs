@@ -1,5 +1,6 @@
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Mobile.Core;
 
 namespace NutriFlow.Mobile;
 
@@ -45,7 +46,7 @@ public partial class MainPage
             Text = _draftText,
             AutoSize = EditorAutoSizeOption.Disabled,
             HeightRequest = 120,
-            MaxLength = 4000,
+            MaxLength = MealInputText.MaximumLength,
             FontSize = 16,
             BackgroundColor = Ui.Surface,
             TextColor = Ui.TextPrimary
@@ -77,14 +78,14 @@ public partial class MainPage
             submit.TextColor = hasText ? Ui.Background : Ui.Muted;
         }
         RefreshSubmit();
-        Label count = Ui.Text($"{_draftText.Length}/4000", true);
+        Label count = Ui.Text($"{_draftText.Length}/{MealInputText.MaximumLength}", true);
         count.FontSize = 11;
         count.HorizontalTextAlignment = TextAlignment.End;
         count.VerticalOptions = LayoutOptions.Center;
         editor.TextChanged += (_, _) =>
         {
             _draftText = editor.Text ?? "";
-            count.Text = $"{_draftText.Length}/4000";
+            count.Text = $"{_draftText.Length}/{MealInputText.MaximumLength}";
             RefreshSubmit();
         };
 

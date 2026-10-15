@@ -18,7 +18,7 @@ const publicCertificate = Buffer.from("synthetic DER public signing certificate"
 const signerSha256 = createHash("sha256").update(publicCertificate).digest("hex");
 const signature = `Verifies\nSigner #1 certificate DN: CN=NutriFlow Personal\nSigner #1 certificate SHA-256 digest: ${signerSha256}\n`;
 
-test("native Linux lock keeps the same versions and dependencies as the Windows graph", () => {
+test("native Linux lock differs only in SDK-pinned linker and platform-specific MAUI hashes", () => {
     const windows = JSON.parse(readFileSync(new URL("../../mobile/NutriFlow.Mobile/packages.android.lock.json", import.meta.url), "utf8"));
     const linux = JSON.parse(readFileSync(new URL("../../mobile/NutriFlow.Mobile/packages.android-ci.lock.json", import.meta.url), "utf8"));
     const hashes = [];
@@ -28,7 +28,12 @@ test("native Linux lock keeps the same versions and dependencies as the Windows 
             assert.ok(native, `${framework}: ${name}`);
             const { contentHash: windowsHash, ...windowsPackage } = entry;
             const { contentHash: linuxHash, ...linuxPackage } = native;
-            assert.deepEqual(linuxPackage, windowsPackage);
+            if (name === "Microsoft.NET.ILLink.Tasks") {
+                assert.deepEqual(windowsPackage, { type: "Direct", requested: "[10.0.12, )", resolved: "10.0.12" });
+                assert.deepEqual(linuxPackage, { type: "Direct", requested: "[10.0.11, )", resolved: "10.0.11" });
+            } else {
+                assert.deepEqual(linuxPackage, windowsPackage);
+            }
             if (linuxHash !== windowsHash) hashes.push(name);
         }
     }
@@ -36,7 +41,7 @@ test("native Linux lock keeps the same versions and dependencies as the Windows 
     for (const framework of Object.keys(windows.dependencies)) {
         assert.deepEqual(Object.keys(linux.dependencies[framework]).sort(), Object.keys(windows.dependencies[framework]).sort());
     }
-    assert.deepEqual(hashes.sort(), ["Microsoft.Maui.Controls.Build.Tasks", "Microsoft.Maui.Resizetizer"]);
+    assert.deepEqual(hashes.sort(), ["Microsoft.Maui.Controls.Build.Tasks", "Microsoft.Maui.Resizetizer", "Microsoft.NET.ILLink.Tasks"]);
 });
 
 test("permanent local signing material stays outside Git and the Docker context", () => {

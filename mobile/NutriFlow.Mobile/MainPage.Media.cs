@@ -61,7 +61,7 @@ public partial class MainPage
         int elapsedSeconds = 0;
         bool transcribing = false;
         Label recordingStatus = Ui.Text("", true);
-        Editor transcript = new() { Placeholder = "Здесь появится текст. Проверьте и исправьте его.", MinimumHeightRequest = 180, AutoSize = EditorAutoSizeOption.TextChanges, MaxLength = 4000, BackgroundColor = Ui.SurfaceRaised };
+        Editor transcript = new() { Placeholder = "Здесь появится текст. Проверьте и исправьте его.", MinimumHeightRequest = 180, AutoSize = EditorAutoSizeOption.TextChanges, MaxLength = MealInputText.MaximumLength, BackgroundColor = Ui.SurfaceRaised };
         page.Fields.Children.Add(Ui.Title("Описание еды голосом"));
         page.Fields.Children.Add(Ui.Text("Распознавание отправляет аудио в Groq. Полученный текст можно исправить перед разбором еды.", true));
         page.Fields.Children.Add(recordingStatus);
@@ -142,13 +142,7 @@ public partial class MainPage
                 throw new InvalidOperationException("Сначала остановите запись и дождитесь распознавания.");
             }
 
-            string text = (transcript.Text ?? "").Trim();
-            if (text.Length == 0)
-            {
-                throw new ArgumentException("Введите или распознайте текст описания.");
-            }
-
-            _draftText = string.IsNullOrWhiteSpace(_draftText) ? text : $"{_draftText}\n{text}";
+            _draftText = MealInputText.AppendTranscript(_draftText, transcript.Text);
             _tab = "Ввод";
             await Navigation.PopAsync();
         })));
