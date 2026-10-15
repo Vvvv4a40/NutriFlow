@@ -19,6 +19,7 @@
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
     <NuGetLockFilePath>packages.$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')).lock.json</NuGetLockFilePath>
     <NuGetLockFilePath Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and $([MSBuild]::IsOSPlatform('linux'))">packages.android-ci.lock.json</NuGetLockFilePath>
+    <UseInterpreter Condition="'$(Configuration)' == 'Debug' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">false</UseInterpreter>
   </PropertyGroup>
 
   <ItemGroup>
