@@ -61,7 +61,7 @@ public partial class MainPage
         int elapsedSeconds = 0;
         bool transcribing = false;
         Label recordingStatus = Ui.Text("", true);
-        Editor transcript = new() { Placeholder = "Здесь появится текст. Проверьте и исправьте его.", MinimumHeightRequest = 180, AutoSize = EditorAutoSizeOption.TextChanges, MaxLength = MealInputText.MaximumLength, BackgroundColor = Ui.SurfaceRaised };
+        Editor transcript = new InputEditor() { Placeholder = "Здесь появится текст. Проверьте и исправьте его.", MinimumHeightRequest = 180, AutoSize = EditorAutoSizeOption.TextChanges, MaxLength = MealInputText.MaximumLength, BackgroundColor = Ui.SurfaceRaised };
         page.Fields.Children.Add(Ui.Title("Описание еды голосом"));
         page.Fields.Children.Add(Ui.Text("Распознавание отправляет аудио в Groq. Полученный текст можно исправить перед разбором еды.", true));
         page.Fields.Children.Add(recordingStatus);

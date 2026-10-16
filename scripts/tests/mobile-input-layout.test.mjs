@@ -21,7 +21,7 @@ test("native input source configuration bounds the main editor and preserves its
 test("native voice source configuration validates the combined draft before changing the page", () => {
     const media = readFileSync(new URL("MainPage.Media.cs", mobile), "utf8");
     const input = readFileSync(new URL("MainPage.Input.cs", mobile), "utf8");
-    assert.match(media, /Editor transcript\s*=\s*new\(\)\s*\{[^}]*MaxLength\s*=\s*MealInputText\.MaximumLength\b/);
+    assert.match(media, /Editor transcript\s*=\s*new InputEditor\(\)\s*\{[^}]*MaxLength\s*=\s*MealInputText\.MaximumLength\b/);
     assert.match(input, /count\.Text\s*=\s*\$"\{_draftText\.Length\}\/\{MealInputText\.MaximumLength\}"/);
     assert.match(media, /_draftText\s*=\s*MealInputText\.AppendTranscript\(_draftText, transcript\.Text\);\s*_tab\s*=\s*"Ввод";\s*await Navigation\.PopAsync\(\);/);
     assert.doesNotMatch(media, /_draftText\s*=\s*string\.IsNullOrWhiteSpace/);
