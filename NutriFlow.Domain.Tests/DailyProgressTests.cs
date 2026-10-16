@@ -123,6 +123,38 @@ public sealed class DailyProgressTests
     }
 
     [Fact]
+    public void CalculateDifferences_WithScaledZeroMacrosAndNoEntries_ReturnsNonnegativeZeros()
+    {
+        DailyProgress progress = new DailyProgress(
+            new DailyGoal(new NutritionValues(1600m, 0.0m, 0.00m, 0.000m)),
+            Array.Empty<MealEntry>());
+
+        NutritionValues remaining = progress.CalculateRemainingNutrition();
+        NutritionValues exceeded = progress.CalculateExceededNutrition();
+
+        AssertNutrition(remaining, 1600m, 0m, 0m, 0m);
+        AssertNutrition(exceeded, 0m, 0m, 0m, 0m);
+        AssertNonnegativeZeroBits(remaining);
+        AssertNonnegativeZeroBits(exceeded);
+    }
+
+    [Fact]
+    public void CalculateDifferences_WithEqualFractionalAmountsAndDifferentScales_ReturnsNonnegativeZeros()
+    {
+        DailyProgress progress = new DailyProgress(
+            new DailyGoal(new NutritionValues(100.50m, 10.250m, 5.1250m, 20.06250m)),
+            new[] { CreateMealEntry("Meal", 100.500m, 10.25m, 5.125m, 20.0625m) });
+
+        NutritionValues remaining = progress.CalculateRemainingNutrition();
+        NutritionValues exceeded = progress.CalculateExceededNutrition();
+
+        AssertNutrition(remaining, 0m, 0m, 0m, 0m);
+        AssertNutrition(exceeded, 0m, 0m, 0m, 0m);
+        AssertNonnegativeZeroBits(remaining);
+        AssertNonnegativeZeroBits(exceeded);
+    }
+
+    [Fact]
     public void Constructor_WithNullGoal_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(
@@ -193,5 +225,16 @@ public sealed class DailyProgressTests
         Assert.Equal(proteinGrams, actual.ProteinGrams);
         Assert.Equal(fatGrams, actual.FatGrams);
         Assert.Equal(carbohydratesGrams, actual.CarbohydratesGrams);
+    }
+
+    private static void AssertNonnegativeZeroBits(NutritionValues nutrition)
+    {
+        foreach (decimal value in new[] { nutrition.Calories, nutrition.ProteinGrams, nutrition.FatGrams, nutrition.CarbohydratesGrams })
+        {
+            if (value == 0m)
+            {
+                Assert.False(decimal.IsNegative(value));
+            }
+        }
     }
 }

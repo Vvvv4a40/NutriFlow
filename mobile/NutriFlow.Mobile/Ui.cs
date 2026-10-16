@@ -5,16 +5,16 @@ namespace NutriFlow.Mobile;
 
 internal static class Ui
 {
-    public static readonly Color Background = Color.FromArgb("#0B1020");
-    public static readonly Color Surface = Color.FromArgb("#151D30");
-    public static readonly Color SurfaceRaised = Color.FromArgb("#1A2339");
-    public static readonly Color SurfacePressed = Color.FromArgb("#293650");
-    public static readonly Color TextPrimary = Color.FromArgb("#F4F6FF");
-    public static readonly Color Muted = Color.FromArgb("#AAB5CF");
-    public static readonly Color Accent = Color.FromArgb("#8290FF");
-    public static readonly Color AccentPressed = Color.FromArgb("#ADB7FF");
-    public static readonly Color FieldStroke = Color.FromArgb("#68799F");
-    public static readonly Color FieldFocus = Color.FromArgb("#ADB7FF");
+    public static readonly Color Background = Color.FromArgb("#08151D");
+    public static readonly Color Surface = Color.FromArgb("#112632");
+    public static readonly Color SurfaceRaised = Color.FromArgb("#17333F");
+    public static readonly Color SurfacePressed = Color.FromArgb("#214653");
+    public static readonly Color TextPrimary = Color.FromArgb("#ECF8FF");
+    public static readonly Color Muted = Color.FromArgb("#A7C2D0");
+    public static readonly Color Accent = Color.FromArgb("#62D5EF");
+    public static readonly Color AccentPressed = Color.FromArgb("#9AE8F8");
+    public static readonly Color FieldStroke = Color.FromArgb("#5F879A");
+    public static readonly Color FieldFocus = Color.FromArgb("#9AE8F8");
     public static readonly Color Protein = Color.FromArgb("#45A9F7");
     public static readonly Color Fat = Color.FromArgb("#F8C545");
     public static readonly Color Carbs = Color.FromArgb("#FF7184");

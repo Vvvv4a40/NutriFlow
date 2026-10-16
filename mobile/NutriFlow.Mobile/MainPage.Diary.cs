@@ -14,33 +14,16 @@ public partial class MainPage
         DailyProgressResponse progress = await _client.GetDailyProgressAsync(profileId, selectedDate);
         _body.Children.Add(DiaryDateNavigation(profileId, selectedDate));
         _body.Children.Add(NutritionSummary(progress));
+        _body.Children.Add(DiaryArcLegend(profileId, selectedDate, progress));
 
         Grid macros = new() { ColumnSpacing = 8, ColumnDefinitions = new ColumnDefinitionCollection { new(), new(), new() } };
         macros.Add(MacroTile("Белки", progress.Consumed.ProteinGrams, progress.Goal?.ProteinGrams, Ui.Protein), 0);
         macros.Add(MacroTile("Жиры", progress.Consumed.FatGrams, progress.Goal?.FatGrams, Ui.Fat), 1);
         macros.Add(MacroTile("Углеводы", progress.Consumed.CarbohydratesGrams, progress.Goal?.CarbohydratesGrams, Ui.Carbs), 2);
         _body.Children.Add(macros);
-        _body.Children.Add(DailyGoalCard(profileId, selectedDate, progress));
-
-        Grid listHeading = new() { ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } } };
-        Label mealsTitle = Ui.Title("Записи за день");
-        mealsTitle.FontSize = 21;
-        mealsTitle.Margin = 0;
-        Label count = Ui.Text($"{progress.Entries.Count}", true);
-        count.FontSize = 16;
-        count.VerticalOptions = LayoutOptions.Center;
-        listHeading.Add(mealsTitle, 0);
-        listHeading.Add(count, 1);
-        _body.Children.Add(listHeading);
 
         if (progress.Entries.Count == 0)
         {
-            Label emptyTitle = Ui.Title("Пока чистый лист");
-            emptyTitle.FontSize = 20;
-            Border empty = Ui.Card(emptyTitle,
-                Ui.Text("Добавьте первую порцию — здесь появится понятная картина вашего питания.", true),
-                Ui.Action("Добавить первую порцию", () => SelectTabAsync("Ввод"), true));
-            _body.Children.Add(empty);
             return;
         }
 
@@ -62,9 +45,6 @@ public partial class MainPage
             StrokeThickness = 0,
             StrokeShape = new RoundRectangle { CornerRadius = 24 }
         });
-        Label hint = Ui.Text("Нажмите на запись, чтобы изменить вес или удалить порцию.", true);
-        hint.FontSize = 12;
-        _body.Children.Add(hint);
     }
 
     private View DiaryDateNavigation(Guid profileId, DateOnly selectedDate)
@@ -83,6 +63,7 @@ public partial class MainPage
             ? $"Сегодня, {selectedDate.ToString("d MMM", DiaryCulture)}"
             : selectedDate.ToString("ddd, d MMM", DiaryCulture);
         Button chooseDate = Ui.Action(dateText, () => { picker.Unfocus(); picker.Focus(); return Task.CompletedTask; }, true);
+        chooseDate.AutomationId = "diary-date";
         chooseDate.BackgroundColor = Colors.Transparent;
         chooseDate.FontSize = 17;
         chooseDate.Padding = new Thickness(4, 8);
@@ -117,31 +98,47 @@ public partial class MainPage
             {
                 new() { Width = GridLength.Star }, new() { Width = new GridLength(3, GridUnitType.Star) }, new() { Width = GridLength.Star }
             },
-            RowDefinitions = new RowDefinitionCollection { new() { Height = 62 }, new() { Height = GridLength.Auto } }
+            RowDefinitions = new RowDefinitionCollection { new() { Height = GridLength.Star } },
+            HeightRequest = 210
         };
-        NutritionArcView arc = new(progress.Consumed, progress.Goal) { HeightRequest = 175, VerticalOptions = LayoutOptions.Start };
+        NutritionArcView arc = new(progress.Consumed, progress.Goal) { HeightRequest = 210 };
         hero.Add(arc, 0, 0);
         Grid.SetColumnSpan(arc, 3);
-        Grid.SetRowSpan(arc, 2);
         Label calories = Ui.Title(progress.Consumed.Calories.ToString("N0", DiaryCulture));
-        calories.FontSize = 46;
+        calories.AutomationId = "diary-calories";
+        calories.FontSize = 38;
         calories.CharacterSpacing = -1.5;
         calories.Margin = 0;
         calories.HorizontalTextAlignment = TextAlignment.Center;
         calories.TextColor = progress.Exceeded?.Calories > 0 ? Ui.Carbs : Ui.TextPrimary;
         SemanticProperties.SetDescription(calories, $"Съедено {Ui.Amount(progress.Consumed.Calories)} килокалорий");
-        Label consumed = Ui.Text("Съедено за день", true);
-        consumed.FontSize = 12;
-        consumed.HorizontalTextAlignment = TextAlignment.Center;
         Label target = Ui.Text(progress.Goal is null ? "ккал" : $"из {Ui.Amount(progress.Goal.Calories)} ккал", true);
-        target.FontSize = 14;
+        target.FontSize = 12;
         target.HorizontalTextAlignment = TextAlignment.Center;
-        VerticalStackLayout center = new() { Spacing = 2, VerticalOptions = LayoutOptions.End, Margin = new Thickness(0, 0, 0, 8) };
+        VerticalStackLayout center = new() { Spacing = 2, VerticalOptions = LayoutOptions.End, Margin = new Thickness(0, 0, 0, 4) };
         center.Children.Add(calories);
         center.Children.Add(target);
-        center.Children.Add(consumed);
-        hero.Add(center, 1, 1);
+        hero.Add(center, 1, 0);
         return hero;
+    }
+
+    private View DiaryArcLegend(Guid profileId, DateOnly date, DailyProgressResponse progress)
+    {
+        Button goal = Ui.Action("Цель · внешняя", () => EditGoalPageAsync(profileId, date, progress.Goal), true);
+        goal.AutomationId = "diary-goal";
+        goal.BackgroundColor = Colors.Transparent;
+        goal.FontSize = 12;
+        goal.Padding = new Thickness(4, 8);
+        SemanticProperties.SetDescription(goal, progress.Goal is null ? "Цель не задана. Задать цель" : "Внешняя дуга: цель. Изменить цель");
+        SemanticProperties.SetHint(goal, "Длины сегментов показывают доли БЖУ в граммах, не процент выполнения");
+        Label consumed = Ui.Text("Съедено · внутренняя", true);
+        consumed.FontSize = 12;
+        consumed.VerticalOptions = LayoutOptions.Center;
+        consumed.HorizontalTextAlignment = TextAlignment.End;
+        Grid legend = new() { ColumnSpacing = 8, ColumnDefinitions = new ColumnDefinitionCollection { new(), new() } };
+        legend.Add(goal, 0);
+        legend.Add(consumed, 1);
+        return legend;
     }
 
     private static View MacroTile(string name, decimal consumed, decimal? goal, Color color)
@@ -152,9 +149,11 @@ public partial class MainPage
         Label amount = Ui.Title($"{Ui.Amount(consumed)} г");
         amount.FontSize = 20;
         amount.Margin = new Thickness(0, 2, 0, 0);
-        Label target = Ui.Text(goal is null ? "без цели" : $"из {Ui.Amount(goal.Value)} г", true);
-        target.FontSize = 11;
-        VerticalStackLayout values = new() { Spacing = 5 };
+        Label target = Ui.Text(goal is null ? "цель —" : $"из {Ui.Amount(goal.Value)} г", true);
+        target.FontSize = 12;
+        SemanticProperties.SetDescription(amount, $"{name}: съедено {Ui.Amount(consumed)} граммов. " +
+            (goal is null ? "Цель не задана" : $"Цель {Ui.Amount(goal.Value)} граммов"));
+        VerticalStackLayout values = new() { Spacing = 4, Padding = new Thickness(4, 0) };
         values.Children.Add(label);
         values.Children.Add(amount);
         values.Children.Add(target);
@@ -166,37 +165,7 @@ public partial class MainPage
             values.Children.Add(excess);
         }
 
-        return new Border { Content = values, Padding = new Thickness(12, 14), StrokeThickness = 0, BackgroundColor = Ui.Surface, StrokeShape = new RoundRectangle { CornerRadius = 20 } };
-    }
-
-    private View DailyGoalCard(Guid profileId, DateOnly date, DailyProgressResponse progress)
-    {
-        string title = progress.Goal is null ? "Настройте цель на день"
-            : progress.Exceeded?.Calories > 0 ? $"Сверх цели: {Ui.Amount(progress.Exceeded.Calories)} ккал"
-            : progress.Remaining?.Calories > 0 ? $"Осталось {Ui.Amount(progress.Remaining.Calories)} ккал"
-            : "Дневная цель достигнута";
-        Label headline = Ui.Text(title);
-        headline.FontAttributes = FontAttributes.Bold;
-        Label detail = Ui.Text(progress.Goal is null ? "Прогресс появится после выбора КБЖУ" : "Цель можно изменить под свой день", true);
-        detail.FontSize = 12;
-        VerticalStackLayout copy = new() { Spacing = 4, VerticalOptions = LayoutOptions.Center, InputTransparent = true };
-        copy.Children.Add(headline);
-        if (progress.Goal is null)
-        {
-            copy.Children.Add(detail);
-        }
-        Button edit = Ui.Action("", () => EditGoalPageAsync(profileId, date, progress.Goal), true);
-        edit.BackgroundColor = Colors.Transparent;
-        edit.MinimumHeightRequest = 52;
-        SemanticProperties.SetDescription(edit, $"{title}. Настроить цель");
-        Grid content = new() { ColumnSpacing = 12, Padding = new Thickness(14, 12), InputTransparent = true, ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star } } };
-        content.Add(new AppIcon(AppIconKind.Target, Ui.Accent) { VerticalOptions = LayoutOptions.Center }, 0);
-        content.Add(copy, 1);
-        content.SetValue(AutomationProperties.ExcludedWithChildrenProperty, true);
-        Grid card = new();
-        card.Add(edit);
-        card.Add(content);
-        return new Border { Content = card, StrokeThickness = 0, BackgroundColor = Ui.Surface, StrokeShape = new RoundRectangle { CornerRadius = 20 } };
+        return values;
     }
 
     private View DiaryEntryRow(Guid profileId, MealEntryResponse entry)
@@ -210,22 +179,19 @@ public partial class MainPage
         nutrition.FormattedText.Spans.Add(new Span { Text = $"Ж {Ui.Amount(entry.Nutrition.FatGrams)}", TextColor = Ui.Fat });
         nutrition.FormattedText.Spans.Add(new Span { Text = "  ·  ", TextColor = Ui.Muted });
         nutrition.FormattedText.Spans.Add(new Span { Text = $"У {Ui.Amount(entry.Nutrition.CarbohydratesGrams)}", TextColor = Ui.Carbs });
-        Label quality = Ui.Text(Ui.Quality(entry.Quality), true);
-        quality.FontSize = 11;
         VerticalStackLayout left = new() { Spacing = 6 };
         left.Children.Add(name);
         left.Children.Add(nutrition);
-        left.Children.Add(quality);
         Label weight = Ui.Text($"{Ui.Amount(entry.WeightInGrams)} г");
         weight.FontSize = 15;
         weight.HorizontalTextAlignment = TextAlignment.End;
-        Label calories = Ui.Text($"{Ui.Amount(entry.Nutrition.Calories)} ккал", true);
+        string qualityMark = entry.Quality switch { "Estimated" => "≈ ", "Exact" or "Verified" => "", _ => "? " };
+        Label calories = Ui.Text($"{qualityMark}{Ui.Amount(entry.Nutrition.Calories)} ккал", true);
         calories.FontSize = 12;
         calories.HorizontalTextAlignment = TextAlignment.End;
         VerticalStackLayout right = new() { Spacing = 6, MaximumWidthRequest = 100 };
         right.Children.Add(weight);
         right.Children.Add(calories);
-        right.Children.Add(new AppIcon(AppIconKind.More, Ui.Muted, 20) { HorizontalOptions = LayoutOptions.End });
         Grid content = new() { Padding = new Thickness(16, 18), ColumnSpacing = 14, InputTransparent = true, ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } } };
         content.Add(left, 0);
         content.Add(right, 1);
@@ -233,7 +199,7 @@ public partial class MainPage
         Button action = Ui.Action("", () => EntryActionsAsync(profileId, entry), true);
         action.BackgroundColor = Colors.Transparent;
         action.CornerRadius = 0;
-        action.MinimumHeightRequest = 96;
+        action.MinimumHeightRequest = 80;
         SemanticProperties.SetDescription(action, $"{entry.Name}. {Ui.Amount(entry.WeightInGrams)} граммов. {Ui.Nutrition(entry.Nutrition)}. {Ui.Quality(entry.Quality)}");
         SemanticProperties.SetHint(action, "Изменить вес или удалить запись");
         Grid row = new();
@@ -249,7 +215,7 @@ public partial class MainPage
             return;
         }
 
-        string? action = await DisplayActionSheetAsync(entry.Name, "Отмена", "Удалить", "Изменить вес");
+        string? action = await DisplayActionSheetAsync($"{entry.Name}\n{Ui.Quality(entry.Quality)}", "Отмена", "Удалить", "Изменить вес");
         if (_profile?.Id != profileId)
         {
             return;

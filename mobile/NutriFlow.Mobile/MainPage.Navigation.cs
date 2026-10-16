@@ -9,7 +9,6 @@ public partial class MainPage
         _navigation.Children.Clear();
         _navigation.IsVisible = _profile is not null;
         _navigation.BackgroundColor = Ui.Background;
-        _sectionLabel.Text = _profile is null ? "Питание в твоём ритме" : _tab == "Дневник" ? "Дневник питания" : _tab == "Ввод" ? "Добавить еду" : _tab;
         AddNavigationTab("Дневник", AppIconKind.Diary, 0);
         AddNavigationTab("Продукты", AppIconKind.Products, 1);
         AddNavigationTab("Блюда", AppIconKind.Dishes, 3);

@@ -24,10 +24,14 @@ function formNodes(value = "Имя") {
     return node("Начало") + node("Твоё имя") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
         identifiedNode(value, "profile-name").replace("android.widget.TextView", "android.widget.EditText");
 }
-function hierarchy(screen, diaryAddAction = node("Добавить еду", 'clickable="true"'), screenOverrides = {}) {
-    const diary = node("Дневник питания") + node("Съедено за день") +
+function diaryNodes(diaryAddAction = identifiedNode("Добавить еду", "add-food", 'clickable="true"')) {
+    return identifiedNode("0", "diary-calories") + node("ккал") + node("Белки") + node("Жиры") + node("Углеводы") +
+        node("Цель · внешняя") + node("Съедено · внутренняя") +
         node("Smoke", 'clickable="true"').replace("android.widget.TextView", "android.widget.EditText") +
         diaryAddAction;
+}
+function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
+    const diary = diaryNodes(diaryAddAction);
     const screens = {
         welcome: welcomeNodes(),
         form: formNodes(),
@@ -176,7 +180,8 @@ test("installs and launches the selected emulator, creates a profile by UI bound
 test("accepts package-qualified automation resource IDs while retaining the expected visible text", async context => {
     const qualify = xml => xml.replaceAll(/resource-id="([^"]+)"/g, `resource-id="${packageId}:id/$1"`);
     const sample = fixture(context, { screenOverrides: {
-        welcome: qualify(welcomeNodes()), form: qualify(formNodes()), filled: qualify(formNodes("Smoke"))
+        welcome: qualify(welcomeNodes()), form: qualify(formNodes()), filled: qualify(formNodes("Smoke")),
+        diary: qualify(diaryNodes())
     } });
     const report = await sample.run();
     assert.equal(report.status, "passed");
@@ -282,7 +287,7 @@ test("rejects keyboard Back when it pops the profile form instead of only dismis
 });
 
 test("accepts the diary icon-only add action through its accessible description after creation and restart", async context => {
-    const sample = fixture(context, { diaryAddAction: node("+", 'content-desc="Добавить еду" clickable="true"') });
+    const sample = fixture(context, { diaryAddAction: identifiedNode("+", "add-food", 'content-desc="Добавить еду" clickable="true"') });
     const report = await sample.run();
     assert.equal(report.status, "passed");
     assert.deepEqual(report.profile, { name: "Smoke", creation: "passed", persistence: "passed" });
@@ -290,15 +295,53 @@ test("accepts the diary icon-only add action through its accessible description 
 });
 
 for (const [description, action] of [
-    ["missing accessible description", node("+", 'clickable="true"')],
-    ["wrong accessible description", node("+", 'content-desc="Другая команда" clickable="true"')],
-    ["disabled accessible action", node("+", 'content-desc="Добавить еду" clickable="true"').replace('enabled="true"', 'enabled="false"')],
-    ["nonclickable accessible action", node("+", 'content-desc="Добавить еду" clickable="false"')]
+    ["missing accessible description", identifiedNode("+", "add-food", 'clickable="true"')],
+    ["wrong accessible description", identifiedNode("+", "add-food", 'content-desc="Другая команда" clickable="true"')],
+    ["missing automation ID", node("+", 'content-desc="Добавить еду" clickable="true"')],
+    ["wrong automation ID", identifiedNode("+", "another-action", 'content-desc="Добавить еду" clickable="true"')],
+    ["disabled accessible action", identifiedNode("+", "add-food", 'content-desc="Добавить еду" clickable="true"').replace('enabled="true"', 'enabled="false"')],
+    ["nonclickable accessible action", identifiedNode("+", "add-food", 'content-desc="Добавить еду" clickable="false"')]
 ]) {
     test(`rejects an icon-only diary add action with ${description}`, async context => {
         const sample = fixture(context, { diaryAddAction: action });
         await assert.rejects(sample.run(), /expected NutriFlow screen.*diary.xml/);
         assert.equal(sample.report().profile.creation, "not-tested");
+        assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+        assert.deepEqual(sample.child.signals, ["SIGTERM"]);
+    });
+}
+
+test("accepts the compact diary without an accessible summary container or legacy headings", async context => {
+    const diary = diaryNodes();
+    assert.ok(!diary.includes("diary-summary"));
+    assert.ok(!diary.includes("Дневник питания") && !diary.includes("Съедено за день"));
+    const sample = fixture(context, { screenOverrides: { diary } });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.profile.persistence, "passed");
+});
+
+for (const [description, diary] of [
+    ["only legacy headings", node("Дневник питания") + node("Съедено за день") +
+        node("Smoke", 'clickable="true"') + identifiedNode("Добавить еду", "add-food", 'clickable="true"')],
+    ["missing calorie value", diaryNodes().replace(identifiedNode("0", "diary-calories"), "")],
+    ["missing calorie ID", diaryNodes().replace('resource-id="diary-calories"', "")],
+    ["wrong calorie ID", diaryNodes().replace('resource-id="diary-calories"', 'resource-id="another-calorie"')],
+    ["nonempty initial calorie value", diaryNodes().replace('text="0"', 'text="1982"')],
+    ["a nonlabel calorie value", diaryNodes().replace(identifiedNode("0", "diary-calories"),
+        identifiedNode("0", "diary-calories").replace("android.widget.TextView", "android.widget.EditText"))],
+    ["a calorie value in another package", diaryNodes().replace(identifiedNode("0", "diary-calories"),
+        identifiedNode("0", "diary-calories").replace(packageId, "com.example.other"))],
+    ...["ккал", "Белки", "Жиры", "Углеводы", "Цель · внешняя", "Съедено · внутренняя"].map(text =>
+        [`missing ${JSON.stringify(text)}`, diaryNodes().replace(node(text), "")]),
+    ["an add action ID without its expected text or description", diaryNodes(identifiedNode("+", "add-food", 'clickable="true"'))],
+    ["a visible add action without its ID", diaryNodes(node("Добавить еду", 'clickable="true"'))]
+]) {
+    test(`rejects a compact diary with ${description}`, async context => {
+        const sample = fixture(context, { screenOverrides: { diary } });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*diary.xml/);
+        assert.equal(sample.report().profile.creation, "not-tested");
+        assert.equal(sample.report().profile.persistence, "not-tested");
         assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
         assert.deepEqual(sample.child.signals, ["SIGTERM"]);
     });

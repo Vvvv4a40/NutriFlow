@@ -83,6 +83,13 @@ test("selected palette has readable text and distinguishable field boundaries", 
     }
 });
 
+test("Ink and Azure is the selected palette", () => {
+    const ui = source("Ui.cs");
+    assert.match(ui, /Color Background = Color\.FromArgb\("#08151D"\)/);
+    assert.match(ui, /Color Surface = Color\.FromArgb\("#112632"\)/);
+    assert.match(ui, /Color Accent = Color\.FromArgb\("#62D5EF"\)/);
+});
+
 test("launcher and splash source share the chosen background and contain no old green mark", () => {
     const uiBackground = /Color Background = Color\.FromArgb\("([^"]+)"\)/.exec(source("Ui.cs"))[1];
     const project = source("NutriFlow.Mobile.csproj");
@@ -91,6 +98,7 @@ test("launcher and splash source share the chosen background and contain no old 
     }
     for (const file of ["Resources/AppIcon/appicon.svg", "Resources/Splash/splash.svg"]) {
         assert.doesNotMatch(source(file), /#185b45|#97c95c/i);
-        assert.match(source(file), /#8290FF/);
+        const accent = /Color Accent = Color\.FromArgb\("([^"]+)"\)/.exec(source("Ui.cs"))[1];
+        assert.ok(source(file).includes(accent));
     }
 });
