@@ -104,6 +104,11 @@ export async function testAndroidEmulator({
         return hasAutomationId(node, id) && node.text?.toLocaleLowerCase("ru") === text.toLocaleLowerCase("ru") &&
             node.enabled === "true" && node.clickable === "true";
     }
+    function identifiedAccessibleAction(node, id, text) {
+        const expected = text.toLocaleLowerCase("ru");
+        return hasAutomationId(node, id) && node.enabled === "true" && node.clickable === "true" &&
+            (node.text?.toLocaleLowerCase("ru") === expected || node["content-desc"]?.toLocaleLowerCase("ru") === expected);
+    }
     function profileNameField(node) {
         return hasAutomationId(node, "profile-name") && node.class === "android.widget.EditText" && node.enabled === "true";
     }
@@ -239,8 +244,10 @@ export async function testAndroidEmulator({
         const filled = await waitUi("profile-filled.xml", nodes => profileFormPredicate(nodes) &&
             nodes.some(node => profileNameField(node) && (node.text === "Smoke" || node.text === "Твоё имя, Smoke")));
         tap(filled, node => identifiedAction(node, "profile-create", "Продолжить"));
-        const diaryPredicate = nodes => hasText(nodes, "Дневник питания") && hasText(nodes, "Съедено за день") &&
-            enabledAction(nodes, "Smoke") && enabledAction(nodes, "Добавить еду");
+        const diaryPredicate = nodes => nodes.some(node => hasAutomationId(node, "diary-calories") &&
+            node.class === "android.widget.TextView" && node.text === "0") &&
+            ["ккал", "Белки", "Жиры", "Углеводы", "Цель · внешняя", "Съедено · внутренняя"].every(text => hasText(nodes, text)) &&
+            enabledAction(nodes, "Smoke") && nodes.some(node => identifiedAccessibleAction(node, "add-food", "Добавить еду"));
         await waitUi("diary.xml", diaryPredicate);
         screenshot("diary.png");
         report.profile.creation = "passed";

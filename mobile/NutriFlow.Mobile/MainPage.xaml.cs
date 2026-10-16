@@ -11,7 +11,6 @@ public partial class MainPage : ContentPage
     private readonly LocalMealClient _client;
     private readonly Button _profileButton;
     private readonly VerticalStackLayout _body = new() { Padding = new Thickness(20, 0, 20, 28), Spacing = 16 };
-    private readonly Label _sectionLabel = Ui.Text("Питание в твоём ритме", true);
     private readonly Grid _navigation = new() { ColumnSpacing = 4, Padding = new Thickness(8, 8, 8, 12) };
     private readonly ScrollView _scroll;
     private readonly VerticalStackLayout _top = new() { Spacing = 0 };
@@ -44,21 +43,18 @@ public partial class MainPage : ContentPage
         _profileButton.LineBreakMode = LineBreakMode.TailTruncation;
         _profileButton.AutomationId = "profile-switcher";
 
-        Label brand = Ui.Title("nutriflow");
+        Label brand = Ui.Title("NutriFlow");
         brand.FontSize = 25;
         brand.Margin = 0;
         brand.CharacterSpacing = -0.8;
-        _sectionLabel.FontSize = 12;
-        VerticalStackLayout wordmark = new() { Spacing = 2, VerticalOptions = LayoutOptions.Center };
-        wordmark.Children.Add(brand);
-        wordmark.Children.Add(_sectionLabel);
+        brand.VerticalOptions = LayoutOptions.Center;
         Grid header = new()
         {
             ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } },
             ColumnSpacing = 12,
             Padding = new Thickness(22, 14, 20, 16)
         };
-        header.Add(wordmark, 0);
+        header.Add(brand, 0);
         header.Add(_profileButton, 1);
         _status.IsVisible = false;
         _status.FontSize = 12;

@@ -69,13 +69,11 @@ public sealed class DailyProgress
         NutritionValues subtrahend)
     {
         return new NutritionValues(
-            calories: Math.Max(minuend.Calories - subtrahend.Calories, 0m),
-            proteinGrams: Math.Max(
-                minuend.ProteinGrams - subtrahend.ProteinGrams,
-                0m),
-            fatGrams: Math.Max(minuend.FatGrams - subtrahend.FatGrams, 0m),
-            carbohydratesGrams: Math.Max(
-                minuend.CarbohydratesGrams - subtrahend.CarbohydratesGrams,
-                0m));
+            calories: PositiveDifference(minuend.Calories, subtrahend.Calories),
+            proteinGrams: PositiveDifference(minuend.ProteinGrams, subtrahend.ProteinGrams),
+            fatGrams: PositiveDifference(minuend.FatGrams, subtrahend.FatGrams),
+            carbohydratesGrams: PositiveDifference(minuend.CarbohydratesGrams, subtrahend.CarbohydratesGrams));
     }
+
+    private static decimal PositiveDifference(decimal left, decimal right) => left > right ? left - right : 0m;
 }

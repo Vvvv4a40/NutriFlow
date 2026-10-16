@@ -2,7 +2,7 @@
   <rect width="1240" height="900" fill="#080B12"/>
   <g font-family="Segoe UI, Arial, sans-serif">
     <text x="44" y="54" fill="#F4F6FF" font-size="26" font-weight="650">NutriFlow / цветовые направления</text>
-    <text x="44" y="84" fill="#AAB5CF" font-size="14">Эскизы палитр, не скриншоты приложения. Предварительный вариант — 01.</text>
+    <text x="44" y="84" fill="#AAB5CF" font-size="14">Эскизы палитр, не скриншоты приложения. Выбран вариант — 03.</text>
     <g transform="translate(44 118)">
       <text y="22" fill="#F4F6FF" font-size="18" font-weight="600">01 / Midnight + Ultramarine</text>
       <rect y="44" width="356" height="650" rx="28" fill="#0B1020" stroke="#68799F"/>
