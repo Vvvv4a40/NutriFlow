@@ -14,26 +14,37 @@ const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 function node(text, extra = "") {
     return `<node text="${text}" package="${packageId}" class="android.widget.TextView" enabled="true" bounds="[20,200][300,250]" ${extra} />`;
 }
-function hierarchy(screen, diaryAddAction = node("Добавить еду", 'clickable="true"')) {
+function identifiedNode(text, id, extra = "") {
+    return node(text, `resource-id="${id}" ${extra}`);
+}
+function welcomeNodes() {
+    return identifiedNode("NutriFlow", "welcome-title") + identifiedNode("НАЧАТЬ", "create-profile", 'clickable="true"');
+}
+function formNodes(value = "Имя") {
+    return node("Начало") + node("Твоё имя") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
+        identifiedNode(value, "profile-name").replace("android.widget.TextView", "android.widget.EditText");
+}
+function hierarchy(screen, diaryAddAction = node("Добавить еду", 'clickable="true"'), screenOverrides = {}) {
     const diary = node("Дневник питания") + node("Съедено за день") +
         node("Smoke", 'clickable="true"').replace("android.widget.TextView", "android.widget.EditText") +
         diaryAddAction;
     const screens = {
-        welcome: node("Питание под вашим контролем") + node("СОЗДАТЬ ПРОФИЛЬ", 'clickable="true"'),
-        form: node("Локальный профиль") + node("Создать", 'clickable="true"') + node("Имя профиля").replace("android.widget.TextView", "android.widget.EditText"),
-        filled: node("Локальный профиль") + node("Создать", 'clickable="true"') + node("Smoke").replace("android.widget.TextView", "android.widget.EditText"),
+        welcome: welcomeNodes(),
+        form: formNodes(),
+        filled: formNodes("Smoke"),
         diary,
         "busy-diary": diary + node("Выполняется…"),
         "disabled-diary": diary.replaceAll('enabled="true"', 'enabled="false"'),
         launcher: node("Launcher").replace(packageId, "com.android.launcher3"),
-        splash: node("NutriFlow")
+        splash: node("NutriFlow"),
+        ...screenOverrides
     };
     return `<?xml version="1.0"?><hierarchy rotation="0">${screens[screen]}</hierarchy>`;
 }
 
 function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
     consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [], diaryAddAction,
-    formBack = "welcome", keyboardBack = "filled" } = {}) {
+    formBack = "welcome", keyboardBack = "filled", screenOverrides = {} } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -86,7 +97,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                     } else if (operation[1] === "cat") {
                         const snapshot = screen === "diary" ? diarySequence.shift() ?? diaryScreen : screen;
                         if (screen === "diary") diarySnapshots.push(snapshot);
-                        stdout = hierarchy(snapshot, diaryAddAction);
+                        stdout = hierarchy(snapshot, diaryAddAction, screenOverrides);
                     }
                     else if (operation[1] === "input" && operation[2] === "tap") {
                         assert.deepEqual(operation.slice(3), ["160", "225"]);
@@ -161,6 +172,86 @@ test("installs and launches the selected emulator, creates a profile by UI bound
         assert.ok(existsSync(join(sample.outputDirectory, file)));
     }
 });
+
+test("accepts package-qualified automation resource IDs while retaining the expected visible text", async context => {
+    const qualify = xml => xml.replaceAll(/resource-id="([^"]+)"/g, `resource-id="${packageId}:id/$1"`);
+    const sample = fixture(context, { screenOverrides: {
+        welcome: qualify(welcomeNodes()), form: qualify(formNodes()), filled: qualify(formNodes("Smoke"))
+    } });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.profile.persistence, "passed");
+});
+
+for (const [description, welcome] of [
+    ["missing title ID", welcomeNodes().replace('resource-id="welcome-title"', '')],
+    ["wrong title text", welcomeNodes().replace('text="NutriFlow"', 'text="Splash"')],
+    ["missing start ID", welcomeNodes().replace('resource-id="create-profile"', '')],
+    ["wrong start ID", welcomeNodes().replace('resource-id="create-profile"', 'resource-id="another-action"')],
+    ["wrong start text", welcomeNodes().replace('text="НАЧАТЬ"', 'text="Другая команда"')],
+    ["nonclickable start action", welcomeNodes().replace('clickable="true"', 'clickable="false"')],
+    ["disabled start action", identifiedNode("NutriFlow", "welcome-title") +
+        identifiedNode("Начать", "create-profile", 'clickable="true"').replace('enabled="true"', 'enabled="false"')]
+]) {
+    test(`rejects welcome with ${description} even when the app process is alive`, async context => {
+        const sample = fixture(context, { screenOverrides: { welcome } });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*welcome.xml/);
+        assert.equal(sample.report().profile.creation, "not-tested");
+        assert.ok(!sample.calls.some(call => call.args.slice(2, 5).join(" ") === "shell input tap"));
+        assert.ok(!existsSync(join(sample.outputDirectory, "welcome.png")));
+    });
+}
+
+for (const [description, form] of [
+    ["wrong heading", formNodes().replace('text="Твоё имя"', 'text="Другой экран"')],
+    ["missing name field ID", formNodes().replace('resource-id="profile-name"', '')],
+    ["noneditable name field", formNodes().replace('class="android.widget.EditText"', 'class="android.widget.TextView"')],
+    ["missing submit ID", formNodes().replace('resource-id="profile-create"', '')],
+    ["wrong submit text", formNodes().replace('text="Продолжить"', 'text="Другая команда"')],
+    ["nonclickable submit action", formNodes().replace('clickable="true"', 'clickable="false"')],
+    ["disabled submit action", node("Начало") + node("Твоё имя") +
+        identifiedNode("Продолжить", "profile-create", 'clickable="true"').replace('enabled="true"', 'enabled="false"') +
+        identifiedNode("Имя", "profile-name").replace('class="android.widget.TextView"', 'class="android.widget.EditText"')],
+    ["disabled name field", node("Начало") + node("Твоё имя") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
+        identifiedNode("Имя", "profile-name").replace('class="android.widget.TextView"', 'class="android.widget.EditText"')
+            .replace('enabled="true"', 'enabled="false"')]
+]) {
+    test(`rejects the profile form with ${description} before entering text`, async context => {
+        const sample = fixture(context, { screenOverrides: { form } });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*profile-before-back.xml/);
+        assert.equal(sample.report().backNavigation.form, "not-tested");
+        assert.equal(sample.report().profile.creation, "not-tested");
+        assert.ok(!sample.calls.some(call => call.args.slice(2).join(" ") === "shell input text Smoke"));
+    });
+}
+
+test("rejects a filled form when the entered text belongs to a different field", async context => {
+    const sample = fixture(context, { screenOverrides: {
+        filled: formNodes("Smoke").replace('resource-id="profile-name"', 'resource-id="another-field"')
+    } });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*profile-filled.xml/);
+    assert.equal(sample.report().profile.creation, "not-tested");
+    assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+});
+
+test("accepts the exact entered profile name with its native semantic description prefix", async context => {
+    const sample = fixture(context, { screenOverrides: {
+        filled: formNodes("Твоё имя, Smoke").replace('resource-id="profile-name"', 'resource-id="profile-name" hint="Имя"')
+    } });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.equal(report.profile.creation, "passed");
+    assert.equal(report.profile.persistence, "passed");
+});
+
+for (const value of ["Другое имя, Smoke", "Твоё имя, Smoke extra", "Твоё имя, Other", "Smoke extra"]) {
+    test(`rejects a filled form with a different exact native value ${JSON.stringify(value)}`, async context => {
+        const sample = fixture(context, { screenOverrides: { filled: formNodes(value) } });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*profile-filled.xml/);
+        assert.equal(sample.report().profile.creation, "not-tested");
+        assert.ok(!existsSync(join(sample.outputDirectory, "diary.png")));
+    });
+}
 
 for (const [description, formBack] of [["opens the launcher while the app process stays alive", "launcher"],
     ["leaves the form open", "form"]]) {

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="900" viewBox="0 0 1240 900">
+  <rect width="1240" height="900" fill="#080B12"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="44" y="54" fill="#F4F6FF" font-size="26" font-weight="650">NutriFlow / цветовые направления</text>
+    <text x="44" y="84" fill="#AAB5CF" font-size="14">Эскизы палитр, не скриншоты приложения. Предварительный вариант — 01.</text>
+    <g transform="translate(44 118)">
+      <text y="22" fill="#F4F6FF" font-size="18" font-weight="600">01 / Midnight + Ultramarine</text>
+      <rect y="44" width="356" height="650" rx="28" fill="#0B1020" stroke="#68799F"/>
+      <text x="178" y="328" text-anchor="middle" fill="#F4F6FF" font-size="39" font-weight="650" letter-spacing="-1.4">NutriFlow</text>
+      <rect x="24" y="612" width="308" height="56" rx="16" fill="#8290FF"/>
+      <text x="178" y="647" text-anchor="middle" fill="#0B1020" font-size="16" font-weight="650">Начать</text>
+      <circle cx="12" cy="730" r="9" fill="#0B1020" stroke="#68799F"/>
+      <text x="30" y="735" fill="#AAB5CF" font-size="13">#0B1020</text>
+      <circle cx="133" cy="730" r="9" fill="#151D30" stroke="#68799F"/>
+      <text x="151" y="735" fill="#AAB5CF" font-size="13">#151D30</text>
+      <circle cx="254" cy="730" r="9" fill="#8290FF"/>
+      <text x="272" y="735" fill="#AAB5CF" font-size="13">#8290FF</text>
+    </g>
+    <g transform="translate(442 118)">
+      <text y="22" fill="#F4F6FF" font-size="18" font-weight="600">02 / Graphite + Violet</text>
+      <rect y="44" width="356" height="650" rx="28" fill="#101016" stroke="#80738F"/>
+      <text x="178" y="328" text-anchor="middle" fill="#F5F1FF" font-size="39" font-weight="650" letter-spacing="-1.4">NutriFlow</text>
+      <rect x="24" y="612" width="308" height="56" rx="16" fill="#B29AFF"/>
+      <text x="178" y="647" text-anchor="middle" fill="#101016" font-size="16" font-weight="650">Начать</text>
+      <circle cx="12" cy="730" r="9" fill="#101016" stroke="#80738F"/>
+      <text x="30" y="735" fill="#BEB2CF" font-size="13">#101016</text>
+      <circle cx="133" cy="730" r="9" fill="#1D1B2A" stroke="#80738F"/>
+      <text x="151" y="735" fill="#BEB2CF" font-size="13">#1D1B2A</text>
+      <circle cx="254" cy="730" r="9" fill="#B29AFF"/>
+      <text x="272" y="735" fill="#BEB2CF" font-size="13">#B29AFF</text>
+    </g>
+    <g transform="translate(840 118)">
+      <text y="22" fill="#F4F6FF" font-size="18" font-weight="600">03 / Ink + Azure</text>
+      <rect y="44" width="356" height="650" rx="28" fill="#08151D" stroke="#5F879A"/>
+      <text x="178" y="328" text-anchor="middle" fill="#ECF8FF" font-size="39" font-weight="650" letter-spacing="-1.4">NutriFlow</text>
+      <rect x="24" y="612" width="308" height="56" rx="16" fill="#62D5EF"/>
+      <text x="178" y="647" text-anchor="middle" fill="#08151D" font-size="16" font-weight="650">Начать</text>
+      <circle cx="12" cy="730" r="9" fill="#08151D" stroke="#5F879A"/>
+      <text x="30" y="735" fill="#A7C2D0" font-size="13">#08151D</text>
+      <circle cx="133" cy="730" r="9" fill="#112632" stroke="#5F879A"/>
+      <text x="151" y="735" fill="#A7C2D0" font-size="13">#112632</text>
+      <circle cx="254" cy="730" r="9" fill="#62D5EF"/>
+      <text x="272" y="735" fill="#A7C2D0" font-size="13">#62D5EF</text>
+    </g>
+  </g>
+</svg>

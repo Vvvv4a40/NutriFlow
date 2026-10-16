@@ -2,10 +2,20 @@ namespace NutriFlow.Mobile;
 
 internal sealed class InputEditor : Editor
 {
+    protected override void OnPropertyChanged(string? propertyName = null)
+    {
+        base.OnPropertyChanged(propertyName);
+        if (propertyName is nameof(Background) or nameof(BackgroundColor))
+        {
+            FieldBorder.Apply(this);
+        }
+    }
+
 #if ANDROID
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
+        FieldBorder.Apply(this);
         if (Handler?.PlatformView is Android.Widget.EditText nativeEditor)
         {
             nativeEditor.Touch -= OnNativeTouch;

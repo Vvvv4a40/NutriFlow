@@ -23,8 +23,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <MauiIcon Include="Resources/AppIcon/appicon.svg" Color="#185B45" />
-    <MauiSplashScreen Include="Resources/Splash/splash.svg" Color="#185B45" BaseSize="128,128" />
+    <MauiIcon Include="Resources/AppIcon/appicon.svg" Color="#0B1020" />
+    <MauiSplashScreen Include="Resources/Splash/splash.svg" Color="#0B1020" BaseSize="128,128" />
     <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
     <ProjectReference Include="../NutriFlow.Mobile.Core/NutriFlow.Mobile.Core.csproj" GlobalPropertiesToRemove="TargetFramework;RuntimeIdentifier;RuntimeIdentifiers" />
   </ItemGroup>

@@ -120,29 +120,27 @@ public partial class MainPage
 
     private void RenderWelcome()
     {
-        Label eyebrow = Ui.Text("МЕНЬШЕ РУТИНЫ. БОЛЬШЕ ЯСНОСТИ.", true);
-        eyebrow.FontSize = 11;
-        eyebrow.CharacterSpacing = 1.2;
-        eyebrow.Margin = new Thickness(0, 28, 0, 0);
-        Label title = Ui.Title("Питание под вашим контролем");
-        title.FontSize = 36;
-        title.CharacterSpacing = -1;
-        title.Margin = new Thickness(0, 0, 12, 0);
-        _body.Children.Add(eyebrow);
-        _body.Children.Add(title);
-        _body.Children.Add(Ui.Text("Расскажите, что приготовили. NutriFlow поможет собрать состав, а вы проверите результат перед записью.", true));
-
-        Border welcome = Ui.Card(
-            Ui.Title("Ваш день. Ваши данные."),
-            Ui.Text("Дневник, продукты и блюда сохраняются на телефоне. Ручной ввод работает даже без интернета.", true));
-        welcome.Margin = new Thickness(0, 8, 0, 8);
-        _body.Children.Add(welcome);
-        Button create = Ui.Action("Создать профиль", CreateProfilePageAsync);
+        Label title = Ui.Title("NutriFlow");
+        title.AutomationId = "welcome-title";
+        title.FontSize = 44;
+        title.CharacterSpacing = -1.4;
+        title.HorizontalOptions = LayoutOptions.Center;
+        title.Margin = 0;
+        Button create = Ui.Action("Начать", () => RunAsync(CreateProfilePageAsync));
         create.AutomationId = "create-profile";
-        _body.Children.Add(create);
-        Label note = Ui.Text("Для текста, голоса и фото этикеток можно подключить личный Groq-ключ в настройках.", true);
-        note.FontSize = 12;
-        _body.Children.Add(note);
+        create.MinimumHeightRequest = 56;
+        Grid welcome = new()
+        {
+            Padding = new Thickness(28, 24, 28, 28),
+            RowDefinitions = new RowDefinitionCollection
+            {
+                new() { Height = GridLength.Star }, new() { Height = GridLength.Auto },
+                new() { Height = GridLength.Star }, new() { Height = GridLength.Auto }
+            }
+        };
+        welcome.Add(title, 0, 1);
+        welcome.Add(create, 0, 3);
+        _welcome.Content = welcome;
     }
 
     private static Grid IconAction(AppIconKind icon, string description, Func<Task> action)

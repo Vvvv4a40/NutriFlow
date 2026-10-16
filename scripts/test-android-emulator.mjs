@@ -97,6 +97,16 @@ export async function testAndroidEmulator({
             allowDescription && node["content-desc"]?.toLocaleLowerCase("ru") === expected) &&
             node.enabled === "true" && node.clickable === "true");
     }
+    function hasAutomationId(node, id) {
+        return node["resource-id"] === id || node["resource-id"] === `${packageId}:id/${id}`;
+    }
+    function identifiedAction(node, id, text) {
+        return hasAutomationId(node, id) && node.text?.toLocaleLowerCase("ru") === text.toLocaleLowerCase("ru") &&
+            node.enabled === "true" && node.clickable === "true";
+    }
+    function profileNameField(node) {
+        return hasAutomationId(node, "profile-name") && node.class === "android.widget.EditText" && node.enabled === "true";
+    }
     async function waitUi(file, predicate) {
         const expires = Math.min(deadline, now() + 60_000);
         let readySnapshots = 0;
@@ -206,25 +216,29 @@ export async function testAndroidEmulator({
         adb(["logcat", "-c"]);
         report.phase = "launch";
         launch("launch.log");
-        const welcomePredicate = nodes => hasText(nodes, "Питание под вашим контролем") && enabledAction(nodes, "Создать профиль", false);
+        const welcomePredicate = nodes => nodes.some(node => hasAutomationId(node, "welcome-title") && node.text === "NutriFlow") &&
+            nodes.some(node => identifiedAction(node, "create-profile", "Начать"));
+        const profileFormPredicate = nodes => hasText(nodes, "Твоё имя") && nodes.some(profileNameField) &&
+            nodes.some(node => identifiedAction(node, "profile-create", "Продолжить"));
         const welcome = await waitUi("welcome.xml", welcomePredicate);
         screenshot("welcome.png");
         report.launch = "passed";
         report.phase = "form-back";
-        tap(welcome, node => node.text?.toLocaleLowerCase("ru") === "создать профиль" && node.clickable === "true");
-        await waitUi("profile-before-back.xml", nodes => hasText(nodes, "Локальный профиль") && enabledAction(nodes, "Создать", false));
+        tap(welcome, node => identifiedAction(node, "create-profile", "Начать"));
+        await waitUi("profile-before-back.xml", profileFormPredicate);
         adb(["shell", "input", "keyevent", "4"]);
         const welcomeAfterBack = await waitUi("welcome-after-form-back.xml", welcomePredicate);
         screenshot("welcome-after-form-back.png");
         report.backNavigation.form = "passed";
         report.phase = "create-profile";
-        tap(welcomeAfterBack, node => node.text?.toLocaleLowerCase("ru") === "создать профиль" && node.clickable === "true");
-        const form = await waitUi("profile-form.xml", nodes => hasText(nodes, "Локальный профиль") && enabledAction(nodes, "Создать", false));
-        tap(form, node => node.class === "android.widget.EditText");
+        tap(welcomeAfterBack, node => identifiedAction(node, "create-profile", "Начать"));
+        const form = await waitUi("profile-form.xml", profileFormPredicate);
+        tap(form, profileNameField);
         adb(["shell", "input", "text", "Smoke"]);
         adb(["shell", "input", "keyevent", "4"]);
-        const filled = await waitUi("profile-filled.xml", nodes => nodes.some(node => node.class === "android.widget.EditText" && node.text === "Smoke") && enabledAction(nodes, "Создать", false));
-        tap(filled, node => node.text?.toLocaleLowerCase("ru") === "создать" && node.clickable === "true");
+        const filled = await waitUi("profile-filled.xml", nodes => profileFormPredicate(nodes) &&
+            nodes.some(node => profileNameField(node) && (node.text === "Smoke" || node.text === "Твоё имя, Smoke")));
+        tap(filled, node => identifiedAction(node, "profile-create", "Продолжить"));
         const diaryPredicate = nodes => hasText(nodes, "Дневник питания") && hasText(nodes, "Съедено за день") &&
             enabledAction(nodes, "Smoke") && enabledAction(nodes, "Добавить еду");
         await waitUi("diary.xml", diaryPredicate);

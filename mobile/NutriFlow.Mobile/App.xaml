@@ -14,7 +14,7 @@
                 <Setter Property="FontAutoScalingEnabled" Value="True" />
                 <Setter Property="LineBreakMode" Value="WordWrap" />
             </Style>
-            <Style TargetType="Entry">
+            <Style TargetType="Entry" ApplyToDerivedTypes="True">
                 <Setter Property="BackgroundColor" Value="{x:Static local:Ui.SurfaceRaised}" />
                 <Setter Property="TextColor" Value="{x:Static local:Ui.TextPrimary}" />
                 <Setter Property="PlaceholderColor" Value="{x:Static local:Ui.Muted}" />
@@ -22,7 +22,7 @@
                 <Setter Property="FontAutoScalingEnabled" Value="True" />
                 <Setter Property="MinimumHeightRequest" Value="48" />
             </Style>
-            <Style TargetType="Editor">
+            <Style TargetType="Editor" ApplyToDerivedTypes="True">
                 <Setter Property="BackgroundColor" Value="{x:Static local:Ui.SurfaceRaised}" />
                 <Setter Property="TextColor" Value="{x:Static local:Ui.TextPrimary}" />
                 <Setter Property="PlaceholderColor" Value="{x:Static local:Ui.Muted}" />
