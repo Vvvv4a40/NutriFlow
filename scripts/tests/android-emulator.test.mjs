@@ -24,11 +24,35 @@ function formNodes(value = "Имя") {
     return node("Начало") + node("Твоё имя") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
         identifiedNode(value, "profile-name").replace("android.widget.TextView", "android.widget.EditText");
 }
-function diaryNodes(diaryAddAction = identifiedNode("Добавить еду", "add-food", 'clickable="true"')) {
+function addAction() {
+    return identifiedNode("+", "add-food", 'content-desc="Добавить еду" clickable="true"');
+}
+function diaryNodes(diaryAddAction = addAction()) {
     return identifiedNode("0", "diary-calories") + node("ккал") + node("Белки") + node("Жиры") + node("Углеводы") +
         node("Цель · внешняя") + node("Съедено · внутренняя") +
         node("Smoke", 'clickable="true"').replace("android.widget.TextView", "android.widget.EditText") +
         diaryAddAction;
+}
+function destinationNodes(destination) {
+    const screens = {
+        products: node("Ваши продукты") + identifiedNode("Например, овсянка", "product-search")
+            .replace("android.widget.TextView", "android.widget.EditText") +
+            identifiedNode("Найти", "product-search-submit", 'clickable="true"'),
+        dishes: node("Ваши блюда") + identifiedNode("Собрать блюдо вручную", "dish-create-manual", 'clickable="true"') +
+            identifiedNode("Показано: 0", "dish-results-count"),
+        input: identifiedNode("", "input-description").replace("android.widget.TextView", "android.widget.EditText") +
+            identifiedNode("В дневник", "input-purpose-diary", 'clickable="true"') +
+            identifiedNode("Создать блюдо", "input-purpose-dish", 'clickable="true"') +
+            identifiedNode("Разобрать описание", "input-submit", 'clickable="true"').replace('enabled="true"', 'enabled="false"')
+    };
+    return screens[destination] + addAction();
+}
+function menuNodes(content = diaryNodes()) {
+    return content.replace('text="+"', 'text="×"').replace('content-desc="Добавить еду"', 'content-desc="Закрыть меню добавления"') +
+        identifiedNode("", "add-menu").replace('bounds="[20,200][300,250]"', 'bounds="[20,280][300,550]"') +
+        [["Записать еду", "input", 300], ["Продукты", "products", 400], ["Мои блюда", "dishes", 500]]
+            .map(([text, id, top]) => identifiedNode(text, `add-menu-${id}`, 'clickable="true"')
+                .replace('bounds="[20,200][300,250]"', `bounds="[20,${top}][300,${top + 50}]"`)).join("");
 }
 function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
     const diary = diaryNodes(diaryAddAction);
@@ -37,6 +61,12 @@ function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
         form: formNodes(),
         filled: formNodes("Smoke"),
         diary,
+        products: destinationNodes("products"),
+        dishes: destinationNodes("dishes"),
+        input: destinationNodes("input"),
+        "menu-diary": menuNodes(diary),
+        ...Object.fromEntries(["products", "dishes", "input"].map(destination =>
+            [`menu-${destination}`, menuNodes(destinationNodes(destination))])),
         "busy-diary": diary + node("Выполняется…"),
         "disabled-diary": diary.replaceAll('enabled="true"', 'enabled="false"'),
         launcher: node("Launcher").replace(packageId, "com.android.launcher3"),
@@ -48,7 +78,7 @@ function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
 
 function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
     consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [], diaryAddAction,
-    formBack = "welcome", keyboardBack = "filled", screenOverrides = {} } = {}) {
+    formBack = "welcome", keyboardBack = "filled", menuBack, menuDestinations = {}, destinationBack = "diary", screenOverrides = {} } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -104,7 +134,15 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                         stdout = hierarchy(snapshot, diaryAddAction, screenOverrides);
                     }
                     else if (operation[1] === "input" && operation[2] === "tap") {
-                        assert.deepEqual(operation.slice(3), ["160", "225"]);
+                        const coordinates = operation.slice(3);
+                        if (screen.startsWith("menu-")) {
+                            assert.equal(coordinates[0], "160");
+                            const destination = { 325: "input", 425: "products", 525: "dishes" }[coordinates[1]];
+                            assert.ok(destination || coordinates[1] === "225");
+                            screen = destination ? menuDestinations[destination] ?? destination : screen.slice(5);
+                            return { status: 0, stdout, stderr: "" };
+                        }
+                        assert.deepEqual(coordinates, ["160", "225"]);
                         if (screen === "welcome") {
                             screen = "form";
                             keyboardVisible = false;
@@ -112,7 +150,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                         else if (screen === "filled") {
                             screen = "diary";
                             keyboardVisible = false;
-                        }
+                        } else if (["diary", "products", "dishes", "input"].includes(screen)) screen = `menu-${screen}`;
                     } else if (operation[1] === "input" && operation[2] === "text") {
                         assert.equal(screen, "form");
                         assert.equal(operation[3], "Smoke");
@@ -123,6 +161,8 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                             keyboardVisible = false;
                             screen = keyboardBack;
                         } else if (screen === "form") screen = formBack;
+                        else if (screen.startsWith("menu-")) screen = menuBack ?? screen.slice(5);
+                        else if (["products", "dishes", "input"].includes(screen)) screen = destinationBack;
                     }
                 }
             }
@@ -162,7 +202,7 @@ test("installs and launches the selected emulator, creates a profile by UI bound
         assert.ok(call.options.timeout > 0 && call.options.timeout <= 150_000);
     }
     const backCommands = sample.calls.filter(call => call.args.slice(2).join(" ") === "shell input keyevent 4");
-    assert.equal(backCommands.length, 2);
+    assert.equal(backCommands.length, 9);
     const inputIndex = sample.calls.findIndex(call => call.args.slice(2).join(" ") === "shell input text Smoke");
     const formBackIndex = sample.calls.indexOf(backCommands[0]);
     assert.ok(formBackIndex < inputIndex);
@@ -181,7 +221,11 @@ test("accepts package-qualified automation resource IDs while retaining the expe
     const qualify = xml => xml.replaceAll(/resource-id="([^"]+)"/g, `resource-id="${packageId}:id/$1"`);
     const sample = fixture(context, { screenOverrides: {
         welcome: qualify(welcomeNodes()), form: qualify(formNodes()), filled: qualify(formNodes("Smoke")),
-        diary: qualify(diaryNodes())
+        diary: qualify(diaryNodes()), "menu-diary": qualify(menuNodes()),
+        ...Object.fromEntries(["products", "dishes", "input"].flatMap(destination => [
+            [destination, qualify(destinationNodes(destination))],
+            [`menu-${destination}`, qualify(menuNodes(destinationNodes(destination)))]
+        ]))
     } });
     const report = await sample.run();
     assert.equal(report.status, "passed");
@@ -294,7 +338,100 @@ test("accepts the diary icon-only add action through its accessible description 
     assert.ok(existsSync(join(sample.outputDirectory, "diary-after-restart.png")));
 });
 
+test("verifies add-menu toggling and Back dismissal before visiting every destination and returning to Diary", async context => {
+    const sample = fixture(context);
+    const report = await sample.run();
+    assert.deepEqual(report.addMenu, {
+        toggle: "passed", back: "passed", products: "passed", dishes: "passed", input: "passed"
+    });
+    for (const file of ["menu-open.xml", "add-menu.png", "diary-after-menu-toggle.xml", "diary-after-menu-back.xml",
+        ...["products", "dishes", "input"].flatMap(destination => [`${destination}.xml`, `${destination}.png`,
+            `menu-on-${destination}.xml`, `${destination}-after-menu-back.xml`, `diary-after-${destination}-back.xml`])]) {
+        assert.ok(existsSync(join(sample.outputDirectory, file)), file);
+    }
+});
+
+test("accepts a docked add menu while underlying destination controls are outside the visible hierarchy", async context => {
+    const sample = fixture(context, { screenOverrides: Object.fromEntries(["products", "dishes", "input"]
+        .map(destination => [`menu-${destination}`, menuNodes(addAction())])) });
+    const report = await sample.run();
+    assert.equal(report.status, "passed");
+    assert.deepEqual(report.addMenu, {
+        toggle: "passed", back: "passed", products: "passed", dishes: "passed", input: "passed"
+    });
+});
+
+for (const [description, menu] of [
+    ["missing panel ID", menuNodes().replace('resource-id="add-menu"', '')],
+    ["a panel from another package", menuNodes().replace(identifiedNode("", "add-menu")
+        .replace('bounds="[20,200][300,250]"', 'bounds="[20,280][300,550]"'),
+        identifiedNode("", "add-menu").replace(packageId, "com.example.other"))],
+    ["a disabled panel", menuNodes().replace(identifiedNode("", "add-menu")
+        .replace('bounds="[20,200][300,250]"', 'bounds="[20,280][300,550]"'),
+        identifiedNode("", "add-menu").replace('enabled="true"', 'enabled="false"'))],
+    ["a panel without usable bounds", menuNodes().replace('bounds="[20,280][300,550]"', 'bounds="[0,0][0,0]"')],
+    ["a stale plus icon", menuNodes().replace('text="×"', 'text="+"')],
+    ["the closed accessible description", menuNodes().replace('content-desc="Закрыть меню добавления"', 'content-desc="Добавить еду"')],
+    ...["input", "products", "dishes"].flatMap(destination => {
+        const menu = menuNodes();
+        const action = menu.match(new RegExp(`<node[^>]+resource-id="add-menu-${destination}"[^>]+>`))[0];
+        return [
+            [`missing ${destination} action ID`, menu.replace(`resource-id="add-menu-${destination}"`, '')],
+            [`wrong ${destination} action text`, menu.replace(action, action.replace(/text="[^"]*"/, 'text="Другое действие"'))],
+            [`a ${destination} action from another package`, menu.replace(action, action.replace(packageId, "com.example.other"))],
+            [`a disabled ${destination} action`, menu.replace(action, action.replace('enabled="true"', 'enabled="false"'))],
+            [`a nonclickable ${destination} action`, menu.replace(action, action.replace('clickable="true"', 'clickable="false"'))],
+            [`a ${destination} action without usable bounds`, menu.replace(action, action.replace(/bounds="[^"]*"/, 'bounds="[0,0][0,0]"'))]
+        ];
+    })
+]) {
+    test(`rejects the add menu with ${description}`, async context => {
+        const sample = fixture(context, { screenOverrides: { "menu-diary": menu } });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*menu-open.xml/);
+        assert.equal(sample.report().addMenu.toggle, "not-tested");
+        assert.ok(!existsSync(join(sample.outputDirectory, "add-menu.png")));
+        assert.deepEqual(sample.child.signals, ["SIGTERM"]);
+    });
+}
+
+for (const menuBack of ["launcher", "menu-diary"]) {
+    test(`rejects menu Back that leaves ${menuBack} visible instead of the unchanged Diary`, async context => {
+        const sample = fixture(context, { menuBack });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*diary-after-menu-back.xml/);
+        assert.equal(sample.report().addMenu.toggle, "passed");
+        assert.equal(sample.report().addMenu.back, "not-tested");
+    });
+}
+
+for (const destination of ["products", "dishes", "input"]) {
+    test(`rejects the ${destination} menu action opening another destination`, async context => {
+        const sample = fixture(context, { menuDestinations: { [destination]: destination === "products" ? "input" : "products" } });
+        await assert.rejects(sample.run(), new RegExp(`expected NutriFlow screen.*${destination}\\.xml`));
+        assert.equal(sample.report().addMenu[destination], "not-tested");
+    });
+    test(`rejects a lingering add menu on the ${destination} destination`, async context => {
+        const lingering = menuNodes(destinationNodes(destination)).replace('text="×"', 'text="+"')
+            .replace('content-desc="Закрыть меню добавления"', 'content-desc="Добавить еду"');
+        const sample = fixture(context, { screenOverrides: { [destination]: lingering } });
+        await assert.rejects(sample.run(), new RegExp(`expected NutriFlow screen.*${destination}\\.xml`));
+        assert.equal(sample.report().addMenu[destination], "not-tested");
+    });
+}
+
+test("rejects menu Back from a catalog that changes the current destination", async context => {
+    const sample = fixture(context, { menuBack: "diary" });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*products-after-menu-back.xml/);
+    assert.equal(sample.report().addMenu.products, "not-tested");
+});
+
+test("rejects a second Back from a destination that leaves the app on the launcher", async context => {
+    const sample = fixture(context, { destinationBack: "launcher" });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*diary-after-products-back.xml/);
+    assert.equal(sample.report().addMenu.products, "not-tested");
+});
+
 for (const [description, action] of [
+    ["wrong closed icon", identifiedNode("×", "add-food", 'content-desc="Добавить еду" clickable="true"')],
     ["missing accessible description", identifiedNode("+", "add-food", 'clickable="true"')],
     ["wrong accessible description", identifiedNode("+", "add-food", 'content-desc="Другая команда" clickable="true"')],
     ["missing automation ID", node("+", 'content-desc="Добавить еду" clickable="true"')],
@@ -408,11 +545,11 @@ test("waits through a brief ready-to-busy transition and captures PNG only after
     const sample = fixture(context, { diarySequence: ["busy-diary", "diary", "busy-diary", "diary", "diary"] });
     const report = await sample.run();
     assert.equal(report.status, "passed");
-    assert.deepEqual(sample.diarySnapshots, ["busy-diary", "diary", "busy-diary", "diary", "diary", "diary", "diary"]);
-    assert.deepEqual(sample.screenshots.filter(item => item.screen === "diary").map(item => item.diarySnapshots), [
-        ["busy-diary", "diary", "busy-diary", "diary", "diary"],
-        ["busy-diary", "diary", "busy-diary", "diary", "diary", "diary", "diary"]
-    ]);
+    assert.deepEqual(sample.diarySnapshots.slice(0, 5), ["busy-diary", "diary", "busy-diary", "diary", "diary"]);
+    assert.ok(sample.diarySnapshots.slice(5).every(screen => screen === "diary"));
+    const captured = sample.screenshots.filter(item => item.screen === "diary");
+    assert.deepEqual(captured[0].diarySnapshots, ["busy-diary", "diary", "busy-diary", "diary", "diary"]);
+    assert.deepEqual(captured.at(-1).diarySnapshots, sample.diarySnapshots);
 });
 
 test("does not reuse or send device commands to an existing selected serial", async context => {
