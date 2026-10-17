@@ -1,3 +1,4 @@
+using Microsoft.Maui.Controls.Shapes;
 using NutriFlow.Mobile.Core;
 
 namespace NutriFlow.Mobile;
@@ -10,14 +11,22 @@ public partial class MainPage
         _navigation.IsVisible = _profile is not null;
         _navigation.BackgroundColor = Ui.Background;
         AddNavigationTab("Дневник", AppIconKind.Diary, 0);
-        AddNavigationTab("Продукты", AppIconKind.Products, 1);
-        AddNavigationTab("Блюда", AppIconKind.Dishes, 3);
-        AddNavigationTab("Настройки", AppIconKind.Settings, 4);
+        AddNavigationTab("Настройки", AppIconKind.Settings, 2);
+        _navigation.Add(_addButton, 1);
+        SetAddMenuOpen(false);
+    }
 
-        Button add = Ui.Action("+", () => SelectTabAsync("Ввод"));
+    private Button CreateAddButton()
+    {
+        Button add = Ui.Action("+", () =>
+        {
+            if (!_busy && _profile is not null)
+            {
+                SetAddMenuOpen(!_addMenu.IsVisible);
+            }
+            return Task.CompletedTask;
+        });
         add.AutomationId = "add-food";
-        SemanticProperties.SetDescription(add, "Добавить еду");
-        SemanticProperties.SetHint(add, "Открыть ввод еды: текст, голос или вручную");
         add.FontSize = 32;
         add.FontAttributes = FontAttributes.None;
         add.Padding = 0;
@@ -27,7 +36,41 @@ public partial class MainPage
         add.HorizontalOptions = LayoutOptions.Center;
         add.VerticalOptions = LayoutOptions.Center;
         add.Shadow = new Shadow { Brush = new SolidColorBrush(Ui.Accent), Offset = new Point(0, 4), Radius = 14, Opacity = 0.22f };
-        _navigation.Add(add, 2);
+        return add;
+    }
+
+    private View CreateAddMenu()
+    {
+        VerticalStackLayout actions = new() { Spacing = 4 };
+        AddAction("Записать еду", "add-menu-input", "Ввод");
+        AddAction("Продукты", "add-menu-products", "Продукты");
+        AddAction("Мои блюда", "add-menu-dishes", "Блюда");
+        return new Border
+        {
+            Content = new ScrollView { Content = actions, MaximumHeightRequest = 280 },
+            BackgroundColor = Ui.Surface,
+            Padding = 8,
+            StrokeThickness = 0,
+            StrokeShape = new RoundRectangle { CornerRadius = 24 }
+        };
+
+        void AddAction(string title, string automationId, string tab)
+        {
+            Button button = Ui.Action(title, () => SelectTabAsync(tab), true);
+            button.AutomationId = automationId;
+            button.MinimumHeightRequest = 56;
+            button.BackgroundColor = Ui.Surface;
+            SemanticProperties.SetDescription(button, title);
+            actions.Children.Add(button);
+        }
+    }
+
+    private void SetAddMenuOpen(bool open)
+    {
+        _addMenu.IsVisible = open;
+        _addButton.Text = open ? "×" : "+";
+        SemanticProperties.SetDescription(_addButton, open ? "Закрыть меню добавления" : "Добавить еду");
+        SemanticProperties.SetHint(_addButton, open ? "Скрыть способы добавления" : "Открыть меню: записать еду, продукты или мои блюда");
     }
 
     private void AddNavigationTab(string tab, AppIconKind icon, int column)
@@ -105,6 +148,12 @@ public partial class MainPage
     {
         if (_busy)
         {
+            return true;
+        }
+
+        if (_addMenu.IsVisible)
+        {
+            SetAddMenuOpen(false);
             return true;
         }
 

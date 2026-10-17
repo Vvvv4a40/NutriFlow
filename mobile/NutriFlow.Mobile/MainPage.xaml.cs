@@ -10,8 +10,10 @@ public partial class MainPage : ContentPage
     private readonly LocalProfileStore _profiles;
     private readonly LocalMealClient _client;
     private readonly Button _profileButton;
+    private readonly Button _addButton;
     private readonly VerticalStackLayout _body = new() { Padding = new Thickness(20, 0, 20, 28), Spacing = 16 };
     private readonly Grid _navigation = new() { ColumnSpacing = 4, Padding = new Thickness(8, 8, 8, 12) };
+    private readonly ContentView _addMenu = new() { IsVisible = false, AutomationId = "add-menu", Margin = new Thickness(20, 0, 20, 4) };
     private readonly ScrollView _scroll;
     private readonly VerticalStackLayout _top = new() { Spacing = 0 };
     private readonly ContentView _welcome = new() { IsVisible = false };
@@ -42,6 +44,8 @@ public partial class MainPage : ContentPage
         _profileButton.MaximumWidthRequest = 140;
         _profileButton.LineBreakMode = LineBreakMode.TailTruncation;
         _profileButton.AutomationId = "profile-switcher";
+        _addButton = CreateAddButton();
+        _addMenu.Content = CreateAddMenu();
 
         Label brand = Ui.Title("NutriFlow");
         brand.FontSize = 25;
@@ -64,12 +68,15 @@ public partial class MainPage : ContentPage
         _top.Children.Add(header);
         _top.Children.Add(feedback);
 
-        for (int index = 0; index < 5; index++)
+        for (int index = 0; index < 3; index++)
         {
             _navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
         }
 
         _scroll = new ScrollView { Content = _body };
+        VerticalStackLayout bottom = new() { Spacing = 0 };
+        bottom.Children.Add(_addMenu);
+        bottom.Children.Add(_navigation);
         Grid layout = new()
         {
             RowDefinitions = new RowDefinitionCollection
@@ -79,7 +86,7 @@ public partial class MainPage : ContentPage
         };
         layout.Add(_top, 0, 0);
         layout.Add(_scroll, 0, 1);
-        layout.Add(_navigation, 0, 2);
+        layout.Add(bottom, 0, 2);
         layout.Add(_welcome, 0, 0);
         Grid.SetRowSpan(_welcome, 3);
         Content = layout;
@@ -148,8 +155,10 @@ public partial class MainPage : ContentPage
         }
 
         _busy = true;
+        SetAddMenuOpen(false);
         _profileButton.IsEnabled = false;
         _navigation.IsEnabled = false;
+        _addMenu.IsEnabled = false;
         _body.IsEnabled = false;
         _welcome.IsEnabled = false;
         _activity.IsRunning = true;
@@ -173,6 +182,7 @@ public partial class MainPage : ContentPage
             _activity.IsVisible = false;
             _profileButton.IsEnabled = true;
             _navigation.IsEnabled = true;
+            _addMenu.IsEnabled = true;
             _body.IsEnabled = true;
             _welcome.IsEnabled = true;
             _busy = false;
