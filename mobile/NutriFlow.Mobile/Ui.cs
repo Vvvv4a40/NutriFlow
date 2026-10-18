@@ -168,11 +168,13 @@ internal static class Ui
 
     public static string Amount(decimal value) => value.ToString("0.##", CultureInfo.CurrentCulture);
 
+    public static string MacroAmount(decimal value) => value.ToString("0", CultureInfo.CurrentCulture);
+
     public static string Nutrition(NutritionResponse value) =>
-        $"{Amount(value.Calories)} ккал · Б {Amount(value.ProteinGrams)} · Ж {Amount(value.FatGrams)} · У {Amount(value.CarbohydratesGrams)} г";
+        $"{Amount(value.Calories)} ккал · Б {MacroAmount(value.ProteinGrams)} · Ж {MacroAmount(value.FatGrams)} · У {MacroAmount(value.CarbohydratesGrams)} г";
 
     public static string Nutrition(ProductResponse value) =>
-        $"{Amount(value.Calories)} ккал · Б {Amount(value.ProteinGrams)} · Ж {Amount(value.FatGrams)} · У {Amount(value.CarbohydratesGrams)} г";
+        $"{Amount(value.Calories)} ккал · Б {MacroAmount(value.ProteinGrams)} · Ж {MacroAmount(value.FatGrams)} · У {MacroAmount(value.CarbohydratesGrams)} г";
 
     public static string Quality(string? value) => value switch
     {

@@ -24,7 +24,7 @@ test("welcome source contains only the brand and one enabled start action", () =
 });
 
 test("short onboarding preserves local profile creation without suggesting implemented cloud login", () => {
-    const form = source("MainPage.xaml.cs").split("private Task CreateProfilePageAsync()")[1].split("private Task EditGoalPageAsync")[0];
+    const form = source("MainPage.xaml.cs").split("private Task CreateProfilePageAsync()")[1].split("private Task EditEntryPageAsync")[0];
     assert.match(form, /Ui\.Title\("Твоё имя"\)/);
     assert.match(form, /Ui\.Field\("Имя"\)/);
     assert.match(form, /AutomationId = "profile-name"/);

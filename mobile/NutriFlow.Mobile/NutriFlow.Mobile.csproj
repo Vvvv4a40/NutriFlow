@@ -22,6 +22,11 @@
     <UseInterpreter Condition="'$(Configuration)' == 'Debug' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">false</UseInterpreter>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(AndroidKeyStore)' != 'true' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <ApplicationTitle>NutriFlow Dev</ApplicationTitle>
+    <ApplicationId>com.nutriflow.dev</ApplicationId>
+  </PropertyGroup>
+
   <ItemGroup>
     <MauiIcon Include="Resources/AppIcon/appicon.svg" Color="#08151D" />
     <MauiSplashScreen Include="Resources/Splash/splash.svg" Color="#08151D" BaseSize="128,128" />

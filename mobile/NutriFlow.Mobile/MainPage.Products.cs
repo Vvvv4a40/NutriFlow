@@ -92,12 +92,11 @@ public partial class MainPage
 
     private Task ProductPortionPageAsync(Guid profileId, ProductResponse product)
     {
+        DateOnly mealDate = _date;
         FormPage page = new("Добавить продукт");
         page.Fields.Children.Add(Ui.Title(product.Name));
         page.Fields.Children.Add(Ui.Text($"На 100 г: {Ui.Nutrition(product)}"));
         Entry grams = AddNumber(page, "Вес порции, г");
-        DatePicker date = new() { Date = _date.ToDateTime(TimeOnly.MinValue), Format = "dd.MM.yyyy" };
-        page.Fields.Children.Add(date);
         Switch estimated = new();
         page.Fields.Children.Add(Ui.Row(estimated, Ui.Text("Вес указан примерно")));
         page.Fields.Children.Add(Ui.Action("Посмотреть расчёт", () => page.RunAsync(async () =>
@@ -107,7 +106,7 @@ public partial class MainPage
                 return;
             }
 
-            SetSession(profileId, await _client.CreateManualMealAsync(profileId, product, Ui.Number(grams, "Вес", true), DateOnly.FromDateTime(date.Date ?? DateTime.Today), estimated.IsToggled ? NutriFlow.Domain.DataQuality.Estimated : NutriFlow.Domain.DataQuality.Exact));
+            SetSession(profileId, await _client.CreateManualMealAsync(profileId, product, Ui.Number(grams, "Вес", true), mealDate, estimated.IsToggled ? NutriFlow.Domain.DataQuality.Estimated : NutriFlow.Domain.DataQuality.Exact));
             await Navigation.PopAsync();
         })));
         return Navigation.PushAsync(page);

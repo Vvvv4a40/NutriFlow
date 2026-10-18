@@ -107,11 +107,11 @@ public partial class MainPage
             Label macros = Ui.Text("");
             macros.FontSize = 13;
             macros.FormattedText = new FormattedString();
-            macros.FormattedText.Spans.Add(new Span { Text = $"Белки {Ui.Amount(nutrition.ProteinGrams)} г", TextColor = Ui.Protein });
+            macros.FormattedText.Spans.Add(new Span { Text = $"Белки {Ui.MacroAmount(nutrition.ProteinGrams)} г", TextColor = Ui.Protein });
             macros.FormattedText.Spans.Add(new Span { Text = " · ", TextColor = Ui.Muted });
-            macros.FormattedText.Spans.Add(new Span { Text = $"Жиры {Ui.Amount(nutrition.FatGrams)} г", TextColor = Ui.Fat });
+            macros.FormattedText.Spans.Add(new Span { Text = $"Жиры {Ui.MacroAmount(nutrition.FatGrams)} г", TextColor = Ui.Fat });
             macros.FormattedText.Spans.Add(new Span { Text = " · ", TextColor = Ui.Muted });
-            macros.FormattedText.Spans.Add(new Span { Text = $"Углеводы {Ui.Amount(nutrition.CarbohydratesGrams)} г", TextColor = Ui.Carbs });
+            macros.FormattedText.Spans.Add(new Span { Text = $"Углеводы {Ui.MacroAmount(nutrition.CarbohydratesGrams)} г", TextColor = Ui.Carbs });
             content.Children.Add(macros);
         }
         else

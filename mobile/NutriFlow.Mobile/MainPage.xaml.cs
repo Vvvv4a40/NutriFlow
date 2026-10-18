@@ -242,22 +242,6 @@ public partial class MainPage : ContentPage
         return Navigation.PushAsync(page);
     }
 
-    private Task EditGoalPageAsync(Guid profileId, DateOnly date, NutritionResponse? goal)
-    {
-        FormPage page = new("Цель на день");
-        page.Fields.Children.Add(Ui.Text(date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)));
-        Entry calories = AddNumber(page, "Калории, ккал", goal?.Calories);
-        Entry protein = AddNumber(page, "Белки, г", goal?.ProteinGrams);
-        Entry fat = AddNumber(page, "Жиры, г", goal?.FatGrams);
-        Entry carbs = AddNumber(page, "Углеводы, г", goal?.CarbohydratesGrams);
-        page.Fields.Children.Add(Ui.Action("Сохранить цель", () => page.RunAsync(async () =>
-        {
-            await _client.SetDailyGoalAsync(profileId, date, new NutritionResponse(Ui.Number(calories, "Калории"), Ui.Number(protein, "Белки"), Ui.Number(fat, "Жиры"), Ui.Number(carbs, "Углеводы")));
-            await Navigation.PopAsync();
-        })));
-        return Navigation.PushAsync(page);
-    }
-
     private Task EditEntryPageAsync(Guid profileId, MealEntryResponse entry)
     {
         FormPage page = new("Изменить запись");
@@ -277,7 +261,7 @@ public partial class MainPage : ContentPage
     private static Entry AddNumber(FormPage page, string label, decimal? value = null)
     {
         page.Fields.Children.Add(Ui.Text(label));
-        Entry field = Ui.Field(label, value?.ToString(CultureInfo.CurrentCulture), true);
+        Entry field = Ui.Field("", value?.ToString(CultureInfo.CurrentCulture), true);
         page.Fields.Children.Add(field);
         return field;
     }

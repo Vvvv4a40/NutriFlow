@@ -146,23 +146,27 @@ public partial class MainPage
         Label label = Ui.Text(name);
         label.FontSize = 12;
         label.TextColor = color;
-        Label amount = Ui.Title($"{Ui.Amount(consumed)} г");
+        Label amount = Ui.Title($"{Ui.MacroAmount(consumed)} г");
         amount.FontSize = 20;
         amount.Margin = new Thickness(0, 2, 0, 0);
-        Label target = Ui.Text(goal is null ? "цель —" : $"из {Ui.Amount(goal.Value)} г", true);
+        Label target = Ui.Text(goal is null ? "цель —" : $"из {Ui.MacroAmount(goal.Value)} г", true);
         target.FontSize = 12;
-        SemanticProperties.SetDescription(amount, $"{name}: съедено {Ui.Amount(consumed)} граммов. " +
-            (goal is null ? "Цель не задана" : $"Цель {Ui.Amount(goal.Value)} граммов"));
+        SemanticProperties.SetDescription(amount, $"{name}: съедено {Ui.MacroAmount(consumed)} граммов. " +
+            (goal is null ? "Цель не задана" : $"Цель {Ui.MacroAmount(goal.Value)} граммов"));
         VerticalStackLayout values = new() { Spacing = 4, Padding = new Thickness(4, 0) };
         values.Children.Add(label);
         values.Children.Add(amount);
         values.Children.Add(target);
         if (goal is not null && consumed > goal.Value)
         {
-            Label excess = Ui.Text($"+{Ui.Amount(consumed - goal.Value)} г", true);
-            excess.FontSize = 11;
-            SemanticProperties.SetDescription(excess, $"Превышение цели по {name.ToLower(DiaryCulture)}: {Ui.Amount(consumed - goal.Value)} граммов");
-            values.Children.Add(excess);
+            string excessAmount = Ui.MacroAmount(consumed - goal.Value);
+            if (excessAmount != "0")
+            {
+                Label excess = Ui.Text($"+{excessAmount} г", true);
+                excess.FontSize = 11;
+                SemanticProperties.SetDescription(excess, $"Превышение цели по {name.ToLower(DiaryCulture)}: {excessAmount} граммов");
+                values.Children.Add(excess);
+            }
         }
 
         return values;
@@ -174,11 +178,11 @@ public partial class MainPage
         name.FontSize = 16;
         name.FontAttributes = FontAttributes.Bold;
         Label nutrition = new() { FontSize = 12, FormattedText = new FormattedString() };
-        nutrition.FormattedText.Spans.Add(new Span { Text = $"Б {Ui.Amount(entry.Nutrition.ProteinGrams)}", TextColor = Ui.Protein });
+        nutrition.FormattedText.Spans.Add(new Span { Text = $"Б {Ui.MacroAmount(entry.Nutrition.ProteinGrams)}", TextColor = Ui.Protein });
         nutrition.FormattedText.Spans.Add(new Span { Text = "  ·  ", TextColor = Ui.Muted });
-        nutrition.FormattedText.Spans.Add(new Span { Text = $"Ж {Ui.Amount(entry.Nutrition.FatGrams)}", TextColor = Ui.Fat });
+        nutrition.FormattedText.Spans.Add(new Span { Text = $"Ж {Ui.MacroAmount(entry.Nutrition.FatGrams)}", TextColor = Ui.Fat });
         nutrition.FormattedText.Spans.Add(new Span { Text = "  ·  ", TextColor = Ui.Muted });
-        nutrition.FormattedText.Spans.Add(new Span { Text = $"У {Ui.Amount(entry.Nutrition.CarbohydratesGrams)}", TextColor = Ui.Carbs });
+        nutrition.FormattedText.Spans.Add(new Span { Text = $"У {Ui.MacroAmount(entry.Nutrition.CarbohydratesGrams)}", TextColor = Ui.Carbs });
         VerticalStackLayout left = new() { Spacing = 6 };
         left.Children.Add(name);
         left.Children.Add(nutrition);

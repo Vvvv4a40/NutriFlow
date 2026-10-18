@@ -48,6 +48,7 @@ public partial class MainPage
         {
             SavedDishDetailResponse detail = await _client.FindSavedDishAsync(profileId, savedDish.Id)
                 ?? throw new InvalidOperationException("Блюдо не найдено.");
+            DateOnly mealDate = _date;
             FormPage page = new(savedDish.Name);
             page.Fields.Children.Add(Ui.Title(savedDish.Name));
             page.Fields.Children.Add(Ui.Text($"На 100 г: {Ui.Nutrition(savedDish.NutritionPer100Grams)}"));
@@ -66,8 +67,6 @@ public partial class MainPage
             }
 
             Entry grams = AddNumber(page, "Съеденная порция, г");
-            DatePicker date = new() { Date = _date.ToDateTime(TimeOnly.MinValue), Format = "dd.MM.yyyy" };
-            page.Fields.Children.Add(date);
             Switch estimated = new();
             page.Fields.Children.Add(Ui.Row(estimated, Ui.Text("Вес указан примерно")));
             page.Fields.Children.Add(Ui.Action("Посмотреть расчёт порции", () => page.RunAsync(async () =>
@@ -77,7 +76,7 @@ public partial class MainPage
                     return;
                 }
 
-                SetSession(profileId, await _client.CreateSavedDishMealAsync(profileId, savedDish.Id, Ui.Number(grams, "Вес порции", true), DateOnly.FromDateTime(date.Date ?? DateTime.Today), estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
+                SetSession(profileId, await _client.CreateSavedDishMealAsync(profileId, savedDish.Id, Ui.Number(grams, "Вес порции", true), mealDate, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
                 await Navigation.PopAsync();
             })));
             await Navigation.PushAsync(page);
@@ -106,7 +105,7 @@ public partial class MainPage
             Entry name = Ui.Field("Название блюда");
             page.Fields.Children.Add(name);
             Entry finalWeight = AddNumber(page, "Готовый вес блюда, г");
-            Picker product = new() { Title = "Ингредиент", ItemsSource = products.ToList(), ItemDisplayBinding = new Binding(nameof(ProductResponse.Name)), SelectedIndex = 0 };
+            Picker product = new InputPicker() { Title = "Ингредиент", ItemsSource = products.ToList(), ItemDisplayBinding = new Binding(nameof(ProductResponse.Name)), SelectedIndex = 0 };
             page.Fields.Children.Add(product);
             Entry weight = AddNumber(page, "Вес ингредиента до приготовления, г");
             Entry removed = AddNumber(page, "Убрано / не попало в блюдо, г", 0m);

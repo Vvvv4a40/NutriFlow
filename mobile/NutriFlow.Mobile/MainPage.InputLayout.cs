@@ -22,6 +22,10 @@ public partial class MainPage
             button.BorderWidth = 1;
             button.IsEnabled = _session is null;
             SemanticProperties.SetDescription(button, selected ? $"{button.Text}. Выбрано" : button.Text);
+            if (_session is not null)
+            {
+                SemanticProperties.SetHint(button, "Режим черновика зафиксирован. Для изменения начните новую запись.");
+            }
         }
 
         void Select(MealSessionPurpose purpose)
@@ -93,13 +97,10 @@ public partial class MainPage
         };
         actions.Add(voiceControl, 0);
         actions.Add(submit, 1);
-        Label provider = Ui.Text("Текст и голос используют личный Groq-ключ.", true);
-        provider.FontSize = 11;
         VerticalStackLayout composer = new() { Spacing = 12 };
         composer.Children.Add(heading);
         composer.Children.Add(editor);
         composer.Children.Add(actions);
-        composer.Children.Add(provider);
         return new Border
         {
             Content = composer,
@@ -119,38 +120,30 @@ public partial class MainPage
             return;
         }
 
-        Label title = Ui.Title("Без AI");
-        title.FontSize = 19;
-        title.Margin = new Thickness(0, 4, 0, 0);
-        alternatives.Children.Add(title);
         if (_purpose == MealSessionPurpose.CreateDish)
         {
-            alternatives.Children.Add(InputShortcut("Блюдо из ингредиентов", "Собрать состав из своего каталога", AppIconKind.Dishes,
+            alternatives.Children.Add(InputShortcut("Из ингредиентов", AppIconKind.Dishes,
                 "input-manual-dish", () => ManualDishPageAsync(profileId)));
         }
         else
         {
-            alternatives.Children.Add(InputShortcut("Продукт вручную", "Выбрать продукт и указать вес", AppIconKind.Products,
+            alternatives.Children.Add(InputShortcut("Продукт", AppIconKind.Products,
                 "input-manual-product", () => ChooseManualMealPageAsync(profileId)));
-            alternatives.Children.Add(InputShortcut("Мои блюда", "Добавить порцию сохранённого блюда", AppIconKind.Dishes,
+            alternatives.Children.Add(InputShortcut("Мои блюда", AppIconKind.Dishes,
                 "input-saved-dishes", () => SelectTabAsync("Блюда")));
         }
     }
 
-    private static View InputShortcut(string title, string description, AppIconKind icon, string automationId, Func<Task> action)
+    private static View InputShortcut(string title, AppIconKind icon, string automationId, Func<Task> action)
     {
         Button button = Ui.Action("", action, true);
         button.AutomationId = automationId;
         button.BackgroundColor = Colors.Transparent;
-        button.MinimumHeightRequest = 80;
-        SemanticProperties.SetDescription(button, $"{title}. {description}");
+        button.MinimumHeightRequest = 56;
+        SemanticProperties.SetDescription(button, title);
         Label name = Ui.Text(title);
         name.FontAttributes = FontAttributes.Bold;
-        Label hint = Ui.Text(description, true);
-        hint.FontSize = 12;
-        VerticalStackLayout copy = new() { Spacing = 5, VerticalOptions = LayoutOptions.Center };
-        copy.Children.Add(name);
-        copy.Children.Add(hint);
+        name.VerticalOptions = LayoutOptions.Center;
         Grid content = new()
         {
             Padding = new Thickness(16, 14),
@@ -159,7 +152,7 @@ public partial class MainPage
             ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } }
         };
         content.Add(new AppIcon(icon, Ui.Accent) { VerticalOptions = LayoutOptions.Center }, 0);
-        content.Add(copy, 1);
+        content.Add(name, 1);
         content.Add(new AppIcon(AppIconKind.Next, Ui.Muted, 18) { VerticalOptions = LayoutOptions.Center }, 2);
         content.SetValue(AutomationProperties.ExcludedWithChildrenProperty, true);
         Grid row = new();
