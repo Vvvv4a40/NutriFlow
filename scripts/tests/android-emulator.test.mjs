@@ -38,8 +38,8 @@ function destinationNodes(destination) {
         products: node("Продукты") + identifiedNode("Название продукта", "product-search")
             .replace("android.widget.TextView", "android.widget.EditText") +
             identifiedNode("Найти", "product-search-submit", 'clickable="true"'),
-        dishes: node("Ваши блюда") + identifiedNode("Собрать блюдо вручную", "dish-create-manual", 'clickable="true"') +
-            identifiedNode("Показано: 0", "dish-results-count"),
+        dishes: node("Блюда") + identifiedNode("Собрать блюдо", "dish-create-manual", 'clickable="true"') +
+            identifiedNode("Нет блюд", "dish-catalog-empty"),
         input: identifiedNode("", "input-description").replace("android.widget.TextView", "android.widget.EditText") +
             identifiedNode("В дневник", "input-purpose-diary", 'clickable="true"') +
             identifiedNode("Создать блюдо", "input-purpose-dish", 'clickable="true"') +
@@ -423,6 +423,25 @@ test("rejects menu Back from a catalog that changes the current destination", as
     await assert.rejects(sample.run(), /expected NutriFlow screen.*products-after-menu-back.xml/);
     assert.equal(sample.report().addMenu.products, "not-tested");
 });
+
+for (const [description, dishes] of [
+    ["the legacy heading", destinationNodes("dishes").replace('text="Блюда"', 'text="Ваши блюда"')],
+    ["the legacy manual action text", destinationNodes("dishes").replace('text="Собрать блюдо"', 'text="Собрать блюдо вручную"')],
+    ["a missing manual action ID", destinationNodes("dishes").replace('resource-id="dish-create-manual"', '')],
+    ["a missing empty-state marker", destinationNodes("dishes").replace('resource-id="dish-catalog-empty"', '')],
+    ["a disabled empty-state marker", destinationNodes("dishes").replace(identifiedNode("Нет блюд", "dish-catalog-empty"),
+        identifiedNode("Нет блюд", "dish-catalog-empty").replace('enabled="true"', 'enabled="false"'))],
+    ["an empty-state marker without usable bounds", destinationNodes("dishes").replace(identifiedNode("Нет блюд", "dish-catalog-empty"),
+        identifiedNode("Нет блюд", "dish-catalog-empty").replace('bounds="[20,200][300,250]"', 'bounds="[0,0][0,0]"'))]
+]) {
+    test(`rejects the dish catalog with ${description}`, async context => {
+        const sample = fixture(context, { screenOverrides: { dishes } });
+        await assert.rejects(sample.run(), /expected NutriFlow screen.*dishes\.xml/);
+        assert.equal(sample.report().addMenu.dishes, "not-tested");
+        assert.ok(!existsSync(join(sample.outputDirectory, "dishes.png")));
+        assert.deepEqual(sample.child.signals, ["SIGTERM"]);
+    });
+}
 
 test("rejects a second Back from a destination that leaves the app on the launcher", async context => {
     const sample = fixture(context, { destinationBack: "launcher" });

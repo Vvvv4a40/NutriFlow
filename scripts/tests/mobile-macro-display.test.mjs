@@ -47,7 +47,8 @@ test("editable nutrition and portion masses retain their original decimal values
     }
     assert.match(source("MainPage.xaml.cs"), /Ui\.Field\("", value\?\.ToString\(CultureInfo\.CurrentCulture\), true\)/);
     assert.match(source("MainPage.Diary.cs"), /Ui\.Amount\(entry\.WeightInGrams\)/);
-    assert.match(source("MainPage.DishCards.cs"), /Ui\.Amount\(dish\.FinalWeightInGrams\)/);
+    const dishDetail = source("MainPage.Dishes.cs").split("private async Task DishDetailPageAsync(")[1].split("private async Task ManualDishPageAsync")[0];
+    assert.match(dishDetail, /Ui\.Amount\(savedDish\.FinalWeightInGrams\)/);
     assert.match(source("MainPage.PreviewCards.cs"), /PreviewWeight\(decimal\? weight\)[^\n]+Ui\.Amount\(grams\)/);
     assert.doesNotMatch(products, /Ui\.MacroAmount\(/);
 });

@@ -11,16 +11,10 @@ public partial class MainPage
         name.Margin = 0;
         name.LineBreakMode = LineBreakMode.WordWrap;
         SemanticProperties.SetHeadingLevel(name, SemanticHeadingLevel.Level2);
-        Label weight = SavedDishDetail($"Вес при сохранении: {Ui.Amount(dish.FinalWeightInGrams)} г");
-        VerticalStackLayout identity = new() { Spacing = 8 };
-        identity.Children.Add(name);
-        identity.Children.Add(weight);
-
         NutritionResponse values = dish.NutritionPer100Grams;
-        VerticalStackLayout nutrition = new() { Spacing = 8 };
-        nutrition.Children.Add(SavedDishDetail("Пищевая ценность на 100 г"));
-        Label calories = Ui.Title($"{Ui.Amount(values.Calories)} ккал");
-        calories.FontSize = 25;
+        VerticalStackLayout nutrition = new() { Spacing = 6 };
+        Label calories = Ui.Title($"{Ui.Amount(values.Calories)} ккал · на 100 г");
+        calories.FontSize = 20;
         calories.Margin = 0;
         nutrition.Children.Add(calories);
         Label macros = Ui.Text("");
@@ -32,12 +26,12 @@ public partial class MainPage
         macros.FormattedText.Spans.Add(new Span { Text = " · ", TextColor = Ui.Muted });
         macros.FormattedText.Spans.Add(new Span { Text = $"Углеводы {Ui.MacroAmount(values.CarbohydratesGrams)} г", TextColor = Ui.Carbs });
         nutrition.Children.Add(macros);
-        nutrition.Children.Add(SavedDishDetail($"Качество КБЖУ: {Ui.Quality(dish.NutritionQuality)}"));
+        nutrition.Children.Add(SavedDishDetail(Ui.Quality(dish.NutritionQuality)));
 
         Button open = Ui.Action("Состав и порция", () => DishDetailPageAsync(profileId, dish), true);
         open.AutomationId = $"saved-dish-{dish.Id:N}-open";
         SemanticProperties.SetDescription(open, $"Состав и порция блюда «{dish.Name}»");
-        Border card = Ui.Card(identity, nutrition, open);
+        Border card = Ui.Card(name, nutrition, open);
         card.AutomationId = $"saved-dish-{dish.Id:N}";
         return card;
     }

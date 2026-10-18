@@ -281,9 +281,10 @@ export async function testAndroidEmulator({
                 nodes.some(node => hasAutomationId(node, "product-search") && node.class === "android.widget.EditText" &&
                     node.enabled === "true" && uiBounds(node)) &&
                 nodes.some(node => identifiedAction(node, "product-search-submit", "Найти") && uiBounds(node))],
-            ["dishes", "Мои блюда", nodes => hasText(nodes, "Ваши блюда") &&
-                nodes.some(node => identifiedAction(node, "dish-create-manual", "Собрать блюдо вручную") && uiBounds(node)) &&
-                nodes.some(node => hasAutomationId(node, "dish-results-count") && node.text === "Показано: 0")],
+            ["dishes", "Мои блюда", nodes => hasText(nodes, "Блюда") &&
+                nodes.some(node => identifiedAction(node, "dish-create-manual", "Собрать блюдо") && uiBounds(node)) &&
+                hasText(nodes, "Нет блюд") && nodes.some(node => hasAutomationId(node, "dish-catalog-empty") &&
+                    node.enabled === "true" && uiBounds(node))],
             ["input", "Записать еду", nodes => nodes.some(node => hasAutomationId(node, "input-description") &&
                 node.class === "android.widget.EditText" && node.enabled === "true" && uiBounds(node)) &&
                 nodes.some(node => identifiedAction(node, "input-purpose-diary", "В дневник") && uiBounds(node)) &&
