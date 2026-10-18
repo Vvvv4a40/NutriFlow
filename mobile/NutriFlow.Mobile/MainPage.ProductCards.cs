@@ -6,7 +6,7 @@ public partial class MainPage
 {
     private View ProductCatalogCard(Guid profileId, ProductResponse product)
     {
-        VerticalStackLayout content = new() { Spacing = 10 };
+        VerticalStackLayout content = new() { Spacing = 8 };
         Label name = Ui.Title(product.Name);
         name.FontSize = 20;
         name.Margin = 0;
@@ -14,10 +14,9 @@ public partial class MainPage
         SemanticProperties.SetHeadingLevel(name, SemanticHeadingLevel.Level2);
         content.Children.Add(name);
 
-        VerticalStackLayout nutrition = new() { Spacing = 8 };
-        nutrition.Children.Add(ProductCatalogDetail("Пищевая ценность на 100 г"));
-        Label calories = Ui.Title($"{Ui.Amount(product.Calories)} ккал");
-        calories.FontSize = 25;
+        VerticalStackLayout nutrition = new() { Spacing = 6 };
+        Label calories = Ui.Title($"{Ui.Amount(product.Calories)} ккал · на 100 г");
+        calories.FontSize = 20;
         calories.Margin = 0;
         nutrition.Children.Add(calories);
         Label macros = Ui.Text("");
@@ -33,8 +32,8 @@ public partial class MainPage
 
         string sourceKind = string.IsNullOrWhiteSpace(product.SourceKind) ? "тип неизвестен" : Ui.Source(product.SourceKind);
         string sourceName = string.IsNullOrWhiteSpace(product.SourceName) ? "название неизвестно" : product.SourceName;
-        VerticalStackLayout provenance = new() { Spacing = 8 };
-        provenance.Children.Add(ProductCatalogDetail($"Качество КБЖУ: {Ui.Quality(product.DataQuality)}"));
+        content.Children.Add(ProductCatalogDetail($"{Ui.Quality(product.DataQuality)} · {sourceKind}"));
+        VerticalStackLayout provenance = new() { Spacing = 8, IsVisible = false };
         provenance.Children.Add(ProductCatalogDetail($"Источник: {sourceKind} · {sourceName}"));
         if (!string.IsNullOrWhiteSpace(product.Barcode))
         {
@@ -49,11 +48,17 @@ public partial class MainPage
             reference.LineBreakMode = LineBreakMode.CharacterWrap;
             provenance.Children.Add(reference);
         }
-        content.Children.Add(provenance);
-
+        Button source = Ui.Action("Источник", () =>
+        {
+            provenance.IsVisible = !provenance.IsVisible;
+            return Task.CompletedTask;
+        }, true);
+        SemanticProperties.SetDescription(source, $"Источник продукта «{product.Name}»");
+        SemanticProperties.SetHint(source, "Показать или скрыть подробности источника, штрихкод и ссылку");
         Button add = Ui.Action("Добавить порцию", () => ProductPortionPageAsync(profileId, product), true);
         SemanticProperties.SetDescription(add, $"Добавить порцию продукта «{product.Name}» в дневник");
-        content.Children.Add(add);
+        content.Children.Add(Ui.Row(source, add));
+        content.Children.Add(provenance);
         return Ui.Card(content);
     }
 

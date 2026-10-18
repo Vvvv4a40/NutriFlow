@@ -35,7 +35,7 @@ function diaryNodes(diaryAddAction = addAction()) {
 }
 function destinationNodes(destination) {
     const screens = {
-        products: node("Ваши продукты") + identifiedNode("Например, овсянка", "product-search")
+        products: node("Продукты") + identifiedNode("Название продукта", "product-search")
             .replace("android.widget.TextView", "android.widget.EditText") +
             identifiedNode("Найти", "product-search-submit", 'clickable="true"'),
         dishes: node("Ваши блюда") + identifiedNode("Собрать блюдо вручную", "dish-create-manual", 'clickable="true"') +

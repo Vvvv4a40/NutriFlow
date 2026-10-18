@@ -277,7 +277,7 @@ export async function testAndroidEmulator({
         diary = await waitUi("diary-after-menu-back.xml", diaryPredicate);
         report.addMenu.back = "passed";
         const destinations = [
-            ["products", "Продукты", nodes => hasText(nodes, "Ваши продукты") &&
+            ["products", "Продукты", nodes => hasText(nodes, "Продукты") &&
                 nodes.some(node => hasAutomationId(node, "product-search") && node.class === "android.widget.EditText" &&
                     node.enabled === "true" && uiBounds(node)) &&
                 nodes.some(node => identifiedAction(node, "product-search-submit", "Найти") && uiBounds(node))],

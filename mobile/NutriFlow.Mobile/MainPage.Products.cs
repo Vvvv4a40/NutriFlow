@@ -6,16 +6,14 @@ public partial class MainPage
 {
     private async Task RenderProductsAsync(Guid profileId)
     {
-        Label title = Ui.Title("Ваши продукты");
+        Label title = Ui.Title("Продукты");
         title.FontSize = 28;
         title.Margin = 0;
         SemanticProperties.SetHeadingLevel(title, SemanticHeadingLevel.Level1);
         _body.Children.Add(title);
-        _body.Children.Add(Ui.Text("Сохранённая пищевая ценность для быстрых записей. Все значения — на 100 г.", true));
-
-        Label searchLabel = Ui.Text("Поиск по названию");
+        Label searchLabel = Ui.Text("Поиск");
         searchLabel.FontSize = 13;
-        Entry search = Ui.Field("Например, овсянка");
+        Entry search = Ui.Field("Название продукта");
         search.AutomationId = "product-search";
         search.ReturnType = ReturnType.Search;
         search.MaxLength = 200;
@@ -34,22 +32,16 @@ public partial class MainPage
         }, true);
         clear.AutomationId = "product-search-clear";
         search.Completed += async (_, _) => await FindProductsAsync();
-        Label localSearch = Ui.Text("Поиск среди сохранённых продуктов — без интернета.", true);
-        localSearch.FontSize = 12;
-        _body.Children.Add(Ui.Card(searchLabel, search, Ui.Row(find, clear), localSearch));
+        _body.Children.Add(Ui.Card(searchLabel, search, Ui.Row(find, clear)));
 
-        Label addLabel = Ui.Text("Пополнить каталог");
-        addLabel.FontAttributes = FontAttributes.Bold;
-        Button manual = Ui.Action("Добавить продукт вручную", () => ProductEditorPageAsync(profileId), true);
+        Button manual = Ui.Action("Вручную", () => ProductEditorPageAsync(profileId), true);
         manual.AutomationId = "product-add-manual";
         Button photo = Ui.Action("Фото этикетки", () => LabelSourcePageAsync(profileId), true);
         photo.AutomationId = "product-add-photo";
-        Button barcode = Ui.Action("По штрихкоду", () => BarcodePageAsync(profileId), true);
+        Button barcode = Ui.Action("Штрихкод", () => BarcodePageAsync(profileId), true);
         barcode.AutomationId = "product-add-barcode";
-        Label online = Ui.Text("Для фото нужен личный Groq-ключ; поиск по штрихкоду требует интернета. Ручной ввод работает офлайн.", true);
-        online.FontSize = 12;
         VerticalStackLayout addOptions = new() { Spacing = 10, IsVisible = false, AutomationId = "product-add-methods" };
-        addOptions.Children.Add(Ui.Card(addLabel, manual, Ui.Row(photo, barcode), online));
+        addOptions.Children.Add(Ui.Card(manual, photo, barcode));
         Button add = Ui.Action("Добавить продукт", () =>
         {
             addOptions.IsVisible = !addOptions.IsVisible;
@@ -66,24 +58,22 @@ public partial class MainPage
     private void RenderProductList(VerticalStackLayout target, Guid profileId, IReadOnlyList<ProductResponse> products, string query = "")
     {
         target.Children.Clear();
-        Label count = Ui.Text($"Показано: {products.Count}", true);
-        count.AutomationId = "product-results-count";
-        count.FontSize = 12;
-        target.Children.Add(count);
         if (products.Count == 0)
         {
             bool filtered = !string.IsNullOrWhiteSpace(query);
-            Label title = Ui.Title(filtered ? "Ничего не найдено" : "Каталог пока пуст");
+            Label title = Ui.Title(filtered ? "Ничего не найдено" : "Нет продуктов");
             title.FontSize = 20;
             title.Margin = 0;
-            Border empty = Ui.Card(title, Ui.Text(filtered
-                ? "Попробуйте другое название или сбросьте поиск, чтобы увидеть сохранённые продукты."
-                : "Добавьте первый продукт вручную по упаковке. Он сохранится в выбранном локальном профиле.", true));
+            Border empty = Ui.Card(title);
             empty.AutomationId = filtered ? "product-search-empty" : "product-catalog-empty";
             target.Children.Add(empty);
             return;
         }
 
+        Label count = Ui.Text($"Показано: {products.Count}", true);
+        count.AutomationId = "product-results-count";
+        count.FontSize = 12;
+        target.Children.Add(count);
         foreach (ProductResponse product in products)
         {
             target.Children.Add(ProductCatalogCard(profileId, product));
