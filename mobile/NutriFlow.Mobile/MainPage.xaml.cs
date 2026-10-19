@@ -249,10 +249,17 @@ public partial class MainPage : ContentPage
         page.Fields.Children.Add(Ui.Text("КБЖУ пересчитаются по сохранённому составу."));
         Entry grams = AddNumber(page, "Вес порции, г", entry.WeightInGrams);
         Switch estimated = new();
-        page.Fields.Children.Add(Ui.Row(estimated, Ui.Text("Вес указан примерно")));
+        bool qualityChanged = false;
+        estimated.Toggled += (_, _) => qualityChanged = true;
+        page.Fields.Children.Add(Ui.Row(estimated, Ui.Text("Новый вес указан примерно")));
         page.Fields.Children.Add(Ui.Action("Сохранить", () => page.RunAsync(async () =>
         {
-            await _client.UpdateEntryAsync(profileId, entry.Id, entry.Revision, Ui.Number(grams, "Вес", true), estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact);
+            decimal newWeight = Ui.Number(grams, "Вес", true);
+            if (newWeight != entry.WeightInGrams || qualityChanged)
+            {
+                await _client.UpdateEntryAsync(profileId, entry.Id, entry.Revision, newWeight, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact);
+            }
+
             await Navigation.PopAsync();
         })));
         return Navigation.PushAsync(page);

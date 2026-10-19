@@ -159,6 +159,39 @@ public sealed class LocalMobileTests : IDisposable
     }
 
     [Fact]
+    public async Task ExactPortionEditPreservesEstimatedProductAndDailyTotalsAfterRestart()
+    {
+        (_, LocalProfile profile, LocalMealClient client) = await CreateClientAsync();
+        ProductResponse product = new("Synthetic nutrition", 100m, 0m, 0m, 25m,
+            "ManualInput", "Estimated", "Synthetic test source", null, null);
+        await client.AddProductAsync(profile.Id, product);
+        MealSessionResponse draft = await client.CreateManualMealAsync(profile.Id, product, 125m, _date);
+        Assert.Empty((await client.GetDailyProgressAsync(profile.Id, _date)).Entries);
+
+        MealEntryResponse entry = Assert.Single((await client.ConfirmAsync(profile.Id, draft.Id, draft.PreviewToken))!.Entries);
+        Assert.Equal(new NutritionResponse(125m, 0m, 0m, 31.25m), entry.Nutrition);
+        Assert.Equal("Estimated", entry.Quality);
+        MealEntryResponse updated = await client.UpdateEntryAsync(profile.Id, entry.Id, entry.Revision, 50m,
+            DataQuality.Exact);
+
+        LocalMealClient restarted = new(new LocalProfileStore(_root));
+        DailyProgressResponse progress = await restarted.GetDailyProgressAsync(profile.Id, _date);
+        MealEntryResponse persisted = Assert.Single(progress.Entries);
+        Assert.Equal(updated, persisted);
+        Assert.Equal(50m, persisted.WeightInGrams);
+        Assert.Equal("Estimated", persisted.Quality);
+        Assert.Equal(new NutritionResponse(50m, 0m, 0m, 12.5m), persisted.Nutrition);
+        Assert.Equal(persisted.Nutrition, progress.Consumed);
+
+        await restarted.DeleteEntryAsync(profile.Id, persisted.Id, persisted.Revision);
+        LocalMealClient afterDeletion = new(new LocalProfileStore(_root));
+        DailyProgressResponse empty = await afterDeletion.GetDailyProgressAsync(profile.Id, _date);
+        Assert.Empty(empty.Entries);
+        Assert.Equal(new NutritionResponse(0m, 0m, 0m, 0m), empty.Consumed);
+        Assert.Equal(product, Assert.Single(await afterDeletion.SearchProductsAsync(profile.Id)));
+    }
+
+    [Fact]
     public async Task ManualNutritionCannotClaimUnownedPhotoOrVerifiedSource()
     {
         (_, LocalProfile profile, LocalMealClient client) = await CreateClientAsync();
