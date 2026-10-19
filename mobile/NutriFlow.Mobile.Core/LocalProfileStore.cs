@@ -1,18 +1,21 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace NutriFlow.Mobile.Core;
 
 public sealed class LocalProfileStore
 {
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _gate;
     private readonly string _rootDirectory;
     private readonly string _catalogPath;
 
     public LocalProfileStore(string rootDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
-        _rootDirectory = Path.GetFullPath(rootDirectory);
+        _rootDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDirectory));
         _catalogPath = Path.Combine(_rootDirectory, "profiles.json");
+        _gate = Gates.GetOrAdd(_rootDirectory, _ => new SemaphoreSlim(1, 1));
     }
 
     public async Task<IReadOnlyList<LocalProfile>> ListAsync(CancellationToken cancellationToken = default)
@@ -105,6 +108,64 @@ public sealed class LocalProfileStore
     internal string GetDatabasePath(Guid id) => Path.Combine(GetProfileDirectory(id), "nutriflow.db");
 
     internal string GetPhotoDirectory(Guid id) => Path.Combine(GetProfileDirectory(id), "label-photos");
+
+    internal string CreateBackupWorkingDirectory()
+    {
+        string path = Path.Combine(_rootDirectory, $".profile-backup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    internal async Task<LocalProfile> PublishRestoredAsync(
+        Guid id, string name, string preparedDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        name = name.Trim().Normalize();
+        if (name.Length > 80 || name.Any(char.IsControl))
+        {
+            throw new ArgumentException("Название профиля должно содержать от 1 до 80 обычных символов.", nameof(name));
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        string destination = GetProfileDirectory(id);
+        bool moved = false;
+        try
+        {
+            ProfileCatalog catalog = await ReadAsync(cancellationToken);
+            if (catalog.Profiles.Any(profile => profile.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException("Профиль с таким названием уже существует.", nameof(name));
+            }
+            if (catalog.Profiles.Count >= 30)
+            {
+                throw new InvalidOperationException("На этом устройстве уже создано 30 профилей.");
+            }
+            if (catalog.Profiles.Any(profile => profile.Id == id) || Directory.Exists(destination) || File.Exists(destination))
+            {
+                throw new IOException("Каталог восстановленного профиля уже существует.");
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            Directory.Move(preparedDirectory, destination);
+            moved = true;
+            LocalProfile profile = new(id, name);
+            await SaveAsync(catalog with { Profiles = [.. catalog.Profiles, profile] }, cancellationToken);
+            return profile;
+        }
+        catch
+        {
+            if (moved)
+            {
+                Directory.Move(destination, preparedDirectory);
+            }
+            throw;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
     private string GetProfileDirectory(Guid id)
     {

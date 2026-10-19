@@ -99,8 +99,14 @@ public partial class MainPage
         storage.FontSize = 20;
         storage.Margin = 0;
         SemanticProperties.SetHeadingLevel(storage, SemanticHeadingLevel.Level2);
-        Label storageNote = Ui.Text("Без синхронизации. При удалении приложения дневник, продукты и блюда будут потеряны.", true);
+        Label storageNote = Ui.Text("Без синхронизации. При удалении приложения дневник, продукты и блюда будут потеряны без сохранённой копии.", true);
         storageNote.AutomationId = "settings-storage-note";
-        _body.Children.Add(Ui.Card(storage, storageNote));
+        Button export = Ui.Action("Сохранить копию", () => ExportBackupAsync(profileId), true);
+        export.AutomationId = "settings-backup-export";
+        Button restore = Ui.Action("Восстановить копию", RestoreBackupPageAsync, true);
+        restore.AutomationId = "settings-backup-restore";
+        _body.Children.Add(Ui.Card(storage, storageNote,
+            Ui.Text("Копия содержит личные данные и фото, но не ключ Groq. Архив не зашифрован.", true),
+            export, restore));
     }
 }

@@ -177,6 +177,11 @@ public partial class MainPage
         Button create = Ui.Action("Начать", () => RunAsync(CreateProfilePageAsync));
         create.AutomationId = "create-profile";
         create.MinimumHeightRequest = 56;
+        Button restore = Ui.Action("Восстановить копию", () => RunAsync(RestoreBackupPageAsync), true);
+        restore.AutomationId = "welcome-backup-restore";
+        VerticalStackLayout actions = new() { Spacing = 10 };
+        actions.Children.Add(create);
+        actions.Children.Add(restore);
         Grid welcome = new()
         {
             Padding = new Thickness(28, 24, 28, 28),
@@ -187,7 +192,7 @@ public partial class MainPage
             }
         };
         welcome.Add(title, 0, 1);
-        welcome.Add(create, 0, 3);
+        welcome.Add(actions, 0, 3);
         _welcome.Content = welcome;
     }
 

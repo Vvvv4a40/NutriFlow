@@ -5,13 +5,14 @@ import { test } from "node:test";
 const mobile = new URL("../../mobile/NutriFlow.Mobile/", import.meta.url);
 const source = name => readFileSync(new URL(name, mobile), "utf8");
 
-test("welcome source contains only the brand and one enabled start action", () => {
+test("welcome source keeps a primary start action and a separate backup recovery path", () => {
     const welcome = source("MainPage.Navigation.cs").split("private void RenderWelcome()")[1].split("private static Grid IconAction")[0];
     assert.match(welcome, /Ui\.Title\("NutriFlow"\)/);
     assert.match(welcome, /Ui\.Action\("Начать", \(\) => RunAsync\(CreateProfilePageAsync\)\)/);
     assert.match(welcome, /AutomationId = "welcome-title"/);
     assert.match(welcome, /AutomationId = "create-profile"/);
-    assert.equal([...welcome.matchAll(/\bUi\.Action\(/g)].length, 1);
+    assert.equal([...welcome.matchAll(/\bUi\.Action\(/g)].length, 2);
+    assert.match(welcome, /"welcome-backup-restore"/);
     assert.doesNotMatch(welcome, /Ui\.Text\(|Ui\.Card\(|Groq|Google|Apple|LocalProfile|Профиль/);
     assert.match(welcome, /_welcome\.Content = welcome/);
     const page = source("MainPage.xaml.cs");
