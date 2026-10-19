@@ -192,6 +192,68 @@ public sealed class LocalMobileTests : IDisposable
     }
 
     [Fact]
+    public async Task SavedDishPortionEditsAndDeletionLeaveStoredCompositionUnchangedAfterRestart()
+    {
+        (_, LocalProfile profile, LocalMealClient client) = await CreateClientAsync();
+        ProductResponse product = new("Synthetic ingredient", 100m, 0m, 0m, 25m,
+            "ManualInput", "Estimated", "Synthetic test source", null, null);
+        await client.AddProductAsync(profile.Id, product);
+        MealSessionResponse dish = await client.CreateManualDishAsync(profile.Id, "Synthetic dish",
+            new ManualIngredient[] { new(product, 300m, RemovedWeightInGrams: 100m) }, 400m, _date);
+        SavedDishResponse saved = (await client.ConfirmAsync(profile.Id, dish.Id, dish.PreviewToken))!.SavedDish!;
+        SavedDishDetailResponse before = (await client.FindSavedDishAsync(profile.Id, saved.Id))!;
+        Assert.Equal(saved, before.SavedDish);
+        Assert.Equal(400m, saved.FinalWeightInGrams);
+        Assert.Equal(new NutritionResponse(50m, 0m, 0m, 12.5m), saved.NutritionPer100Grams);
+        IngredientPreviewResponse ingredient = Assert.Single(before.Dish.Ingredients);
+        Assert.Equal(product, ingredient.ResolvedProduct);
+        Assert.Equal(300m, ingredient.WeightInGrams);
+        Assert.Equal(100m, ingredient.RemovedWeightInGrams);
+        Assert.Equal(200m, ingredient.IncludedWeightInGrams);
+
+        MealSessionResponse portion = await client.CreateSavedDishMealAsync(profile.Id, saved.Id, 250m, _date);
+        Assert.Empty((await client.GetDailyProgressAsync(profile.Id, _date)).Entries);
+        MealEntryResponse entry = Assert.Single((await client.ConfirmAsync(profile.Id, portion.Id, portion.PreviewToken))!.Entries);
+        Assert.Equal(new NutritionResponse(125m, 0m, 0m, 31.25m), entry.Nutrition);
+        MealEntryResponse updated = await client.UpdateEntryAsync(profile.Id, entry.Id, entry.Revision, 100m,
+            DataQuality.Exact);
+
+        LocalMealClient restarted = new(new LocalProfileStore(_root));
+        DailyProgressResponse progress = await restarted.GetDailyProgressAsync(profile.Id, _date);
+        MealEntryResponse persisted = Assert.Single(progress.Entries);
+        Assert.Equal(updated, persisted);
+        Assert.Equal(saved.Name, persisted.Name);
+        Assert.Equal(100m, persisted.WeightInGrams);
+        Assert.Equal("Estimated", persisted.Quality);
+        Assert.Equal(new NutritionResponse(50m, 0m, 0m, 12.5m), persisted.Nutrition);
+        Assert.Equal(persisted.Nutrition, progress.Consumed);
+        SavedDishDetailResponse afterEdit = (await restarted.FindSavedDishAsync(profile.Id, saved.Id))!;
+
+        await restarted.DeleteEntryAsync(profile.Id, persisted.Id, persisted.Revision);
+        LocalMealClient afterDeletion = new(new LocalProfileStore(_root));
+        DailyProgressResponse empty = await afterDeletion.GetDailyProgressAsync(profile.Id, _date);
+        Assert.Empty(empty.Entries);
+        Assert.Equal(new NutritionResponse(0m, 0m, 0m, 0m), empty.Consumed);
+        Assert.Equal(saved, Assert.Single(await afterDeletion.GetSavedDishesAsync(profile.Id)));
+        Assert.Equal(product, Assert.Single(await afterDeletion.SearchProductsAsync(profile.Id)));
+        SavedDishDetailResponse afterDelete = (await afterDeletion.FindSavedDishAsync(profile.Id, saved.Id))!;
+
+        foreach (SavedDishDetailResponse snapshot in new[] { afterEdit, afterDelete })
+        {
+            Assert.Equal(before.SavedDish, snapshot.SavedDish);
+            Assert.Equal(before.Dish.Name, snapshot.Dish.Name);
+            Assert.Equal(before.Dish.FinalWeightInGrams, snapshot.Dish.FinalWeightInGrams);
+            Assert.Equal(before.Dish.FinalWeightQuality, snapshot.Dish.FinalWeightQuality);
+            Assert.Equal(before.Dish.TotalNutrition, snapshot.Dish.TotalNutrition);
+            Assert.Equal(before.Dish.TotalNutritionQuality, snapshot.Dish.TotalNutritionQuality);
+            Assert.Equal(before.Dish.NutritionPer100Grams, snapshot.Dish.NutritionPer100Grams);
+            Assert.Equal(before.Dish.NutritionPer100GramsQuality, snapshot.Dish.NutritionPer100GramsQuality);
+            Assert.Equal(before.Dish.Ingredients.ToArray(), snapshot.Dish.Ingredients.ToArray());
+            Assert.Equal(before.Dish.Portions.ToArray(), snapshot.Dish.Portions.ToArray());
+        }
+    }
+
+    [Fact]
     public async Task ManualNutritionCannotClaimUnownedPhotoOrVerifiedSource()
     {
         (_, LocalProfile profile, LocalMealClient client) = await CreateClientAsync();
