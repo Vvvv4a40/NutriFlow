@@ -25,6 +25,9 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(AndroidKeyStore)' != 'true' and $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
     <ApplicationTitle>NutriFlow Dev</ApplicationTitle>
     <ApplicationId>com.nutriflow.dev</ApplicationId>
+    <!-- the installed dev app was signed with this debug key; another key cannot update it without wiping data -->
+    <NutriFlowDevKeyStore>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../.private/android-dev-signing/debug.keystore'))</NutriFlowDevKeyStore>
+    <_ApkDebugKeyStore Condition="Exists('$(NutriFlowDevKeyStore)')">$(NutriFlowDevKeyStore)</_ApkDebugKeyStore>
   </PropertyGroup>
 
   <ItemGroup>

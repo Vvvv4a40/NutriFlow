@@ -47,7 +47,7 @@ test("native Linux lock differs only in SDK-pinned linker and platform-specific 
 test("permanent local signing material stays outside Git and the Docker context", () => {
     const gitIgnore = readFileSync(new URL("../../.gitignore", import.meta.url), "utf8");
     const dockerIgnore = readFileSync(new URL("../../.dockerignore", import.meta.url), "utf8");
-    assert.match(gitIgnore, /^\/\.private\/android-signing\/$/m);
+    assert.match(gitIgnore, /^\/\.private\/$/m);
     assert.match(dockerIgnore, /^\.private\/$/m);
 });
 
