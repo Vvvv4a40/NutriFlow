@@ -61,3 +61,12 @@ test("Android Debug source configuration uses JIT without changing iOS or Releas
     assert.match(settings[0][1], /'\$\(Configuration\)' == 'Debug'/);
     assert.match(settings[0][1], /GetTargetPlatformIdentifier\('\$\(TargetFramework\)'\)\) == 'android'/);
 });
+
+test("Android Release trimming keeps the locked Android runtime list", () => {
+    const project = readFileSync(new URL("mobile/NutriFlow.Mobile/NutriFlow.Mobile.csproj", root), "utf8");
+    const settings = [...project.matchAll(/<UseDefaultPublishRuntimeIdentifier\b([^>]*)>([^<]*)<\/UseDefaultPublishRuntimeIdentifier>/g)];
+    assert.equal(settings.length, 1);
+    assert.equal(settings[0][2].trim(), "false");
+    assert.match(settings[0][1], /GetTargetPlatformIdentifier\('\$\(TargetFramework\)'\)\) == 'android'/);
+    assert.match(project, /<RuntimeIdentifiers\b[^>]*>android-arm;android-arm64;android-x64<\/RuntimeIdentifiers>/);
+});
