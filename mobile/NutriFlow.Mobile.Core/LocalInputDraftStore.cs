@@ -25,13 +25,14 @@ public sealed class LocalInputDraftStore
         {
             await ReadFileAsync(path, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
+            string directory = Path.GetDirectoryName(path)!;
+            DeleteInterruptedWrites(directory);
             if (string.IsNullOrWhiteSpace(draft.Text))
             {
                 File.Delete(path);
                 return true;
             }
 
-            string directory = Path.GetDirectoryName(path)!;
             Directory.CreateDirectory(directory);
             string temporaryPath = Path.Combine(directory, $"input-draft.{Guid.NewGuid():N}.tmp");
             try
@@ -123,6 +124,20 @@ public sealed class LocalInputDraftStore
         catch (Exception exception) when (exception is JsonException or ArgumentException)
         {
             throw new InvalidDataException("Не удалось прочитать сохранённый ввод. Исходный файл не изменён.", exception);
+        }
+    }
+
+    // a process killed between writing and renaming leaves its temporary file behind
+    private static void DeleteInterruptedWrites(string directory)
+    {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (string temporaryPath in Directory.EnumerateFiles(directory, "input-draft.*.tmp"))
+        {
+            File.Delete(temporaryPath);
         }
     }
 

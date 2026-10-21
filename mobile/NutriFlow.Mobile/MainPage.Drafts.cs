@@ -13,6 +13,8 @@ public partial class MainPage
     private string? _draftReadError;
     private string _draftSaveMessage = "";
     private int _draftSaveVersion;
+    private CancellationTokenSource? _draftSaveDelay;
+    private Guid _delayedDraftProfileId;
     private Editor? _inputEditor;
     private Label? _inputSaveStatus;
     private Button? _inputSaveRetry;
@@ -22,8 +24,59 @@ public partial class MainPage
     private LocalInputDraft CaptureInputDraft(string? text = null) =>
         new(text ?? _draftText, _session?.MealDate ?? _date, _purpose, _session?.Id);
 
+    // typing writes one snapshot after a short pause instead of a file per key;
+    // every context change flushes it first, so at most the last pause can be lost on a hard kill
+    private void ScheduleInputDraftSave(Guid profileId)
+    {
+        CancelDelayedInputDraftSave();
+        CancellationTokenSource delay = new();
+        _draftSaveDelay = delay;
+        _delayedDraftProfileId = profileId;
+        SetInputSaveStatus("Сохраняется…");
+        _ = SaveAfterDelayAsync(delay);
+    }
+
+    private async Task SaveAfterDelayAsync(CancellationTokenSource delay)
+    {
+        try
+        {
+            await Task.Delay(400, delay.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_draftSaveDelay, delay))
+        {
+            SaveDelayedInputDraftNow();
+        }
+    }
+
+    internal void SaveDelayedInputDraftNow()
+    {
+        if (_draftSaveDelay is null)
+        {
+            return;
+        }
+
+        CancelDelayedInputDraftSave();
+        if (_profile?.Id == _delayedDraftProfileId && !InputDraftBlocked)
+        {
+            _ = QueueInputDraftSave(_delayedDraftProfileId, CaptureInputDraft());
+        }
+    }
+
+    private void CancelDelayedInputDraftSave()
+    {
+        _draftSaveDelay?.Cancel();
+        _draftSaveDelay?.Dispose();
+        _draftSaveDelay = null;
+    }
+
     private Task QueueInputDraftSave(Guid profileId, LocalInputDraft draft)
     {
+        CancelDelayedInputDraftSave();
         int version = ++_draftSaveVersion;
         SetInputSaveStatus("Сохраняется…");
         _draftSaveTask = PersistInputDraftAsync(profileId, draft, version);
@@ -53,6 +106,7 @@ public partial class MainPage
 
     private async Task FlushInputDraftAsync()
     {
+        SaveDelayedInputDraftNow();
         Task pending;
         do
         {
@@ -202,6 +256,7 @@ public partial class MainPage
                 }
 
                 await _inputDrafts.DiscardAsync(profileId);
+                CancelDelayedInputDraftSave();
                 ++_draftSaveVersion;
                 _pendingInputDraft = null;
                 _draftReadError = null;
@@ -225,6 +280,7 @@ public partial class MainPage
             _draftText = "";
             _pendingInputDraft = null;
             _draftReadError = null;
+            CancelDelayedInputDraftSave();
             ++_draftSaveVersion;
         }
 

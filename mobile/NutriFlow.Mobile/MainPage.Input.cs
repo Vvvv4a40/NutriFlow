@@ -86,7 +86,7 @@ public partial class MainPage
             _draftText = editor.Text ?? "";
             count.Text = $"{_draftText.Length}/{MealInputText.MaximumLength}";
             RefreshSubmit();
-            _ = QueueInputDraftSave(profileId, CaptureInputDraft());
+            ScheduleInputDraftSave(profileId);
         };
 
         VerticalStackLayout alternatives = new() { Spacing = 10 };

@@ -13,10 +13,13 @@ public partial class App : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
-        return new Window(new NavigationPage(_mainPage)
+        Window window = new(new NavigationPage(_mainPage)
         {
             BarBackgroundColor = Ui.Background,
             BarTextColor = Ui.TextPrimary
         });
+        // a backgrounded app may be killed without warning, so pending typed text is written on the first pause
+        window.Deactivated += (_, _) => _mainPage.SaveDelayedInputDraftNow();
+        return window;
     }
 }

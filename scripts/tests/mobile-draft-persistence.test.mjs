@@ -8,19 +8,33 @@ const drafts = source("MainPage.Drafts.cs");
 const input = source("MainPage.Input.cs");
 const page = source("MainPage.xaml.cs");
 
-test("unsubmitted input stores each current editor snapshot without a debounce or network request", () => {
+test("typing schedules one snapshot after a short pause without a network request", () => {
     const changed = input.split("editor.TextChanged +=")[1].split("VerticalStackLayout alternatives")[0];
     assert.match(changed, /ReferenceEquals\(_inputEditor, editor\)/);
     assert.match(changed, /_profile\?\.Id != profileId/);
     assert.match(changed, /_session\?\.Id != inputSessionId/);
     assert.match(changed, /InputDraftBlocked/);
     assert.match(changed, /_draftText = editor\.Text \?\? ""/);
-    assert.match(changed, /QueueInputDraftSave\(profileId, CaptureInputDraft\(\)\)/);
-    assert.doesNotMatch(changed, /Task\.Delay|Timer|CreateSessionAsync|AddMessageAsync/);
+    assert.match(changed, /ScheduleInputDraftSave\(profileId\)/);
+    assert.doesNotMatch(changed, /QueueInputDraftSave|CreateSessionAsync|AddMessageAsync/);
+    assert.match(drafts, /await Task\.Delay\(400, delay\.Token\)/);
+    assert.match(drafts, /private Task QueueInputDraftSave\(Guid profileId, LocalInputDraft draft\)\s*\{\s*CancelDelayedInputDraftSave\(\);/);
     assert.match(page, /_inputDrafts = new LocalInputDraftStore\(profiles\)/);
     assert.match(drafts, /_draftSaveTask = PersistInputDraftAsync\(profileId, draft, version\)/);
     assert.match(drafts, /ReferenceEquals\(pending, _draftSaveTask\)/);
     assert.match(drafts, /if \(_draftSaveError is not null\)[\s\S]*throw new InvalidOperationException/);
+});
+
+test("a pending typing pause is written before any context change and when the app leaves the screen", () => {
+    assert.match(drafts, /private async Task FlushInputDraftAsync\(\)\s*\{\s*SaveDelayedInputDraftNow\(\);/);
+    const now = drafts.split("internal void SaveDelayedInputDraftNow()")[1].split("private void CancelDelayedInputDraftSave()")[0];
+    assert.match(now, /_profile\?\.Id == _delayedDraftProfileId && !InputDraftBlocked/);
+    assert.match(now, /QueueInputDraftSave\(_delayedDraftProfileId, CaptureInputDraft\(\)\)/);
+    for (const cleanup of [drafts.split("Button discard =")[1].split("return Ui.Card(recovery)")[0],
+        drafts.split("private async Task ClearSubmittedInputAsync")[1].split("try")[0]]) {
+        assert.match(cleanup, /CancelDelayedInputDraftSave\(\);\s*\+\+_draftSaveVersion;/);
+    }
+    assert.match(source("App.xaml.cs"), /window\.Deactivated \+= \(_, _\) => _mainPage\.SaveDelayedInputDraftNow\(\)/);
 });
 
 test("saving has visible status and retry while invalid stored input cannot abort the root screen", () => {

@@ -71,6 +71,27 @@ public sealed class LocalInputDraftStoreTests : IDisposable
         Assert.Null(await new LocalInputDraftStore(profiles).ReadAsync(profile.Id));
     }
 
+    [Theory]
+    [InlineData("Новое описание")]
+    [InlineData("")]
+    public async Task NextSaveRemovesTemporaryFilesOfInterruptedWrites(string text)
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile profile = await profiles.CreateAsync("Первый");
+        LocalInputDraftStore drafts = new(profiles);
+        await drafts.SaveAsync(profile.Id, new LocalInputDraft("Описание", _date, MealSessionPurpose.Diary));
+        string interrupted = Path.Combine(ProfileDirectory(profile.Id), $"input-draft.{Guid.NewGuid():N}.tmp");
+        string unrelated = Path.Combine(ProfileDirectory(profile.Id), "other.tmp");
+        await File.WriteAllTextAsync(interrupted, "{\"Version\":1");
+        await File.WriteAllTextAsync(unrelated, "keep");
+
+        await drafts.SaveAsync(profile.Id, new LocalInputDraft(text, _date, MealSessionPurpose.Diary));
+
+        Assert.False(File.Exists(interrupted));
+        Assert.True(File.Exists(unrelated));
+        Assert.Equal(text.Length == 0 ? null : text, (await drafts.ReadAsync(profile.Id))?.Text);
+    }
+
     [Fact]
     public async Task FourThousandUtf16CharactersArePreservedWithoutTruncation()
     {
