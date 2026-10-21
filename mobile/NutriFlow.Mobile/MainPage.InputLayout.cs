@@ -20,7 +20,7 @@ public partial class MainPage
             button.TextColor = selected ? Ui.Background : Ui.Muted;
             button.BorderColor = selected ? Ui.Accent : Colors.Transparent;
             button.BorderWidth = 1;
-            button.IsEnabled = _session is null;
+            button.IsEnabled = _session is null && !InputDraftBlocked;
             SemanticProperties.SetDescription(button, selected ? $"{button.Text}. Выбрано" : button.Text);
             if (_session is not null)
             {
@@ -30,12 +30,13 @@ public partial class MainPage
 
         void Select(MealSessionPurpose purpose)
         {
-            if (_busy || _session is not null || _purpose == purpose)
+            if (_busy || _session is not null || _purpose == purpose || InputDraftBlocked)
             {
                 return;
             }
 
             _purpose = purpose;
+            _ = QueueInputDraftSave(CurrentProfileId(), CaptureInputDraft());
             Refresh(diary, MealSessionPurpose.Diary);
             Refresh(dish, MealSessionPurpose.CreateDish);
             changed();
@@ -76,6 +77,7 @@ public partial class MainPage
 
         Button voice = Ui.Action("", () => AudioPageAsync(profileId), true);
         voice.AutomationId = "input-voice";
+        voice.IsEnabled = !InputDraftBlocked;
         voice.Padding = 0;
         voice.MinimumHeightRequest = 56;
         SemanticProperties.SetDescription(voice, "Голос или аудиофайл");
@@ -114,8 +116,8 @@ public partial class MainPage
     private void RenderInputAlternatives(Guid profileId, VerticalStackLayout alternatives)
     {
         alternatives.Children.Clear();
-        alternatives.IsVisible = _session is null;
-        if (_session is not null)
+        alternatives.IsVisible = _session is null && !InputDraftBlocked;
+        if (_session is not null || InputDraftBlocked)
         {
             return;
         }

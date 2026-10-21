@@ -142,7 +142,15 @@ public partial class MainPage
                 throw new InvalidOperationException("Сначала остановите запись и дождитесь распознавания.");
             }
 
-            _draftText = MealInputText.AppendTranscript(_draftText, transcript.Text);
+            if (InputDraftBlocked || _profile?.Id != profileId)
+            {
+                throw new InvalidOperationException("Сначала восстановите или удалите сохранённый ввод.");
+            }
+
+            string combinedText = MealInputText.AppendTranscript(_draftText, transcript.Text);
+            await QueueInputDraftSave(profileId, CaptureInputDraft(combinedText));
+            await FlushInputDraftAsync();
+            _draftText = combinedText;
             _tab = "Ввод";
             await Navigation.PopAsync();
         })));

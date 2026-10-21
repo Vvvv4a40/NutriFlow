@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,8 @@ public sealed class LocalProfileBackup
     private const long MaximumExpandedBytes = 512L * 1024 * 1024;
     private const int MaximumEntries = 4096;
     private const string ProfileManifestName = "profile.json";
+    private const string InputDraftName = "input-draft.json";
+    private const int MaximumInputDraftBytes = 128 * 1024;
     private static readonly string[] OwnerTables =
         ["Products", "ProductAliases", "MealSessions", "DailyGoals", "SavedDishes", "LabelPhotos"];
     private readonly LocalProfileStore _profiles;
@@ -62,6 +65,14 @@ public sealed class LocalProfileBackup
         string archivePath = Path.Combine(working, "backup.zip");
         try
         {
+            LocalInputDraft? inputDraft = await new LocalInputDraftStore(_profiles).ReadAsync(profileId, cancellationToken);
+            BackupFile? inputDraftFile = null;
+            string inputDraftPath = Path.Combine(working, InputDraftName);
+            if (inputDraft is not null)
+            {
+                await WriteJsonAsync(inputDraftPath, new { Version = 1, Draft = inputDraft }, cancellationToken);
+                inputDraftFile = await DescribeInputDraftAsync(inputDraftPath, cancellationToken);
+            }
             string snapshotDirectory = Path.Combine(working, "snapshot");
             Directory.CreateDirectory(snapshotDirectory);
             string snapshotPath = Path.Combine(snapshotDirectory, "nutriflow.db");
@@ -97,7 +108,7 @@ public sealed class LocalProfileBackup
                 foreach (string photo in Directory.EnumerateFileSystemEntries(photosDirectory))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (++photoCount > MaximumEntries - 3)
+                    if (++photoCount > MaximumEntries - 3 - (inputDraftFile is null ? 0 : 1))
                     {
                         throw new InvalidDataException("Слишком много фотографий для одной резервной копии.");
                     }
@@ -118,15 +129,21 @@ public sealed class LocalProfileBackup
             }
 
             await ValidateDatabaseAsync(snapshotPath, profileId, activeSessionId, cancellationToken);
+            await ValidateDraftContextAsync(snapshotPath, profileId, inputDraft, cancellationToken);
             string dataDirectory = Path.Combine(working, "data");
             await DataBackup.CreateAsync(snapshotPath, snapshotPhotos, dataDirectory, cancellationToken);
-            ProfileManifest manifest = new(1, profile.Id, profile.Name, DateTimeOffset.UtcNow, activeSessionId);
+            ProfileManifest manifest = new(inputDraftFile is null ? 1 : 2, profile.Id, profile.Name,
+                DateTimeOffset.UtcNow, activeSessionId, inputDraftFile);
             await WriteJsonAsync(Path.Combine(working, ProfileManifestName), manifest, cancellationToken);
             using (FileStream output = new(archivePath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             using (ZipArchive archive = new(output, ZipArchiveMode.Create))
             {
                 string[] paths = Directory.GetFiles(dataDirectory, "*", SearchOption.AllDirectories)
                     .Prepend(Path.Combine(working, ProfileManifestName)).ToArray();
+                if (inputDraftFile is not null)
+                {
+                    paths = [.. paths, inputDraftPath];
+                }
                 if (paths.Length > MaximumEntries)
                 {
                     throw new InvalidDataException("Слишком много файлов для одной резервной копии.");
@@ -192,6 +209,7 @@ public sealed class LocalProfileBackup
                     long entryLimit = name switch
                     {
                         ProfileManifestName => 16 * 1024,
+                        InputDraftName => MaximumInputDraftBytes,
                         "data/manifest.json" => 2 * 1024 * 1024,
                         "data/nutriflow.db" => MaximumExpandedBytes,
                         _ => LabelPhotoValidator.MaximumFileSizeInBytes
@@ -217,15 +235,21 @@ public sealed class LocalProfileBackup
             }
 
             ProfileManifest manifest = await ReadManifestAsync(Path.Combine(extracted, ProfileManifestName), cancellationToken);
+            LocalInputDraft? inputDraft = await ReadInputDraftAsync(extracted, manifest, cancellationToken);
             string dataDirectory = Path.Combine(extracted, "data");
             Directory.CreateDirectory(Path.Combine(dataDirectory, "label-photos"));
             string databasePath = Path.Combine(dataDirectory, "nutriflow.db");
             await ValidateDatabaseAsync(databasePath, manifest.ProfileId, manifest.ActiveSessionId, cancellationToken);
+            await ValidateDraftContextAsync(databasePath, manifest.ProfileId, inputDraft, cancellationToken);
             await DataBackup.VerifyAsync(dataDirectory, cancellationToken);
             Guid restoredId = Guid.NewGuid();
             await RemapOwnerAsync(databasePath, manifest.ProfileId, restoredId, cancellationToken);
             await ValidateDatabaseAsync(databasePath, restoredId, manifest.ActiveSessionId, cancellationToken);
             File.Delete(Path.Combine(dataDirectory, "manifest.json"));
+            if (inputDraft is not null)
+            {
+                File.Move(Path.Combine(extracted, InputDraftName), Path.Combine(dataDirectory, InputDraftName));
+            }
             LocalProfile profile = await _profiles.PublishRestoredAsync(restoredId, restoredName, dataDirectory, cancellationToken);
             return new LocalProfileBackupResult(profile, manifest.ActiveSessionId);
         }
@@ -372,7 +396,7 @@ public sealed class LocalProfileBackup
 
     private static void ValidateArchiveName(string name)
     {
-        if (name is ProfileManifestName or "data/manifest.json" or "data/nutriflow.db")
+        if (name is ProfileManifestName or InputDraftName or "data/manifest.json" or "data/nutriflow.db")
         {
             return;
         }
@@ -400,14 +424,80 @@ public sealed class LocalProfileBackup
         await using FileStream input = File.OpenRead(path);
         ProfileManifest manifest = await JsonSerializer.DeserializeAsync<ProfileManifest>(input, cancellationToken: cancellationToken)
             ?? throw new InvalidDataException("Описание резервной копии отсутствует.");
-        if (manifest.FormatVersion != 1 || manifest.ProfileId == Guid.Empty ||
+        if (manifest.FormatVersion is not (1 or 2) || manifest.ProfileId == Guid.Empty ||
             string.IsNullOrWhiteSpace(manifest.ProfileName) || manifest.ProfileName.Length > 80 ||
             manifest.ProfileName.Any(char.IsControl) || manifest.CreatedAtUtc == default ||
-            manifest.CreatedAtUtc.Offset != TimeSpan.Zero || manifest.ActiveSessionId == Guid.Empty)
+            manifest.CreatedAtUtc.Offset != TimeSpan.Zero || manifest.ActiveSessionId == Guid.Empty ||
+            (manifest.FormatVersion == 1 && manifest.InputDraft is not null) ||
+            (manifest.FormatVersion == 2 && manifest.InputDraft is null))
         {
             throw new InvalidDataException("Версия или описание резервной копии не поддерживаются.");
         }
+        if (manifest.InputDraft is { } draft &&
+            (draft.Path != InputDraftName || draft.Length is <= 0 or > MaximumInputDraftBytes ||
+                draft.Sha256 is not { Length: 64 } || !draft.Sha256.All(Uri.IsHexDigit)))
+        {
+            throw new InvalidDataException("Описание сохранённого ввода повреждено.");
+        }
         return manifest;
+    }
+
+    private static async Task<LocalInputDraft?> ReadInputDraftAsync(string directory, ProfileManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        string path = Path.Combine(directory, InputDraftName);
+        if (manifest.InputDraft is null)
+        {
+            if (File.Exists(path))
+            {
+                throw new InvalidDataException("Сохранённый ввод отсутствует в описании резервной копии.");
+            }
+            return null;
+        }
+        if (!File.Exists(path))
+        {
+            throw new InvalidDataException("Файл сохранённого ввода отсутствует в резервной копии.");
+        }
+        BackupFile actual = await DescribeInputDraftAsync(path, cancellationToken);
+        if (actual.Length != manifest.InputDraft.Length ||
+            !actual.Sha256.Equals(manifest.InputDraft.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("Сохранённый ввод не прошёл проверку длины и SHA-256.");
+        }
+        return await LocalInputDraftStore.ReadFileAsync(path, cancellationToken)
+            ?? throw new InvalidDataException("Сохранённый ввод пуст.");
+    }
+
+    private static async Task<BackupFile> DescribeInputDraftAsync(string path, CancellationToken cancellationToken)
+    {
+        await using FileStream input = File.OpenRead(path);
+        if (input.Length is <= 0 or > MaximumInputDraftBytes)
+        {
+            throw new InvalidDataException("Файл сохранённого ввода превышает допустимый размер.");
+        }
+        byte[] hash = await SHA256.HashDataAsync(input, cancellationToken);
+        return new BackupFile(InputDraftName, input.Length, Convert.ToHexString(hash));
+    }
+
+    private static async Task ValidateDraftContextAsync(string databasePath, Guid profileId, LocalInputDraft? draft,
+        CancellationToken cancellationToken)
+    {
+        if (draft?.SessionId is null)
+        {
+            return;
+        }
+        await using SqliteConnection database = OpenDatabase(databasePath, SqliteOpenMode.ReadOnly);
+        await database.OpenAsync(cancellationToken);
+        using SqliteCommand command = database.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM MealSessions WHERE Id = $session AND UserId = $owner AND MealDate = $date AND Purpose = $purpose;";
+        command.Parameters.AddWithValue("$session", draft.SessionId.Value);
+        command.Parameters.AddWithValue("$owner", profileId);
+        command.Parameters.AddWithValue("$date", draft.MealDate);
+        command.Parameters.AddWithValue("$purpose", (int)draft.Purpose);
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 1)
+        {
+            throw new InvalidDataException("Сохранённый ввод ссылается на отсутствующую сессию или другой контекст.");
+        }
     }
 
     private static async Task WriteJsonAsync<T>(string path, T value, CancellationToken cancellationToken)
@@ -492,7 +582,7 @@ public sealed class LocalProfileBackup
     }
 
     private sealed record ProfileManifest(int FormatVersion, Guid ProfileId, string ProfileName,
-        DateTimeOffset CreatedAtUtc, Guid? ActiveSessionId);
+        DateTimeOffset CreatedAtUtc, Guid? ActiveSessionId, BackupFile? InputDraft = null);
 }
 
 public sealed record LocalProfileBackupResult(LocalProfile Profile, Guid? ActiveSessionId);

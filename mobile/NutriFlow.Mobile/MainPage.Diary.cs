@@ -85,6 +85,12 @@ public partial class MainPage
             return;
         }
 
+        if (!InputDraftBlocked && !string.IsNullOrWhiteSpace(_draftText) && _session is null)
+        {
+            await QueueInputDraftSave(profileId, CaptureInputDraft() with { MealDate = date });
+            await FlushInputDraftAsync();
+        }
+
         _date = date;
         await RenderAsync();
     });

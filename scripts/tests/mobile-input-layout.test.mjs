@@ -23,7 +23,7 @@ test("native voice source configuration validates the combined draft before chan
     const input = readFileSync(new URL("MainPage.Input.cs", mobile), "utf8");
     assert.match(media, /Editor transcript\s*=\s*new InputEditor\(\)\s*\{[^}]*MaxLength\s*=\s*MealInputText\.MaximumLength\b/);
     assert.match(input, /count\.Text\s*=\s*\$"\{_draftText\.Length\}\/\{MealInputText\.MaximumLength\}"/);
-    assert.match(media, /_draftText\s*=\s*MealInputText\.AppendTranscript\(_draftText, transcript\.Text\);\s*_tab\s*=\s*"Ввод";\s*await Navigation\.PopAsync\(\);/);
+    assert.match(media, /string combinedText\s*=\s*MealInputText\.AppendTranscript\(_draftText, transcript\.Text\);\s*await QueueInputDraftSave\(profileId, CaptureInputDraft\(combinedText\)\);\s*await FlushInputDraftAsync\(\);\s*_draftText\s*=\s*combinedText;\s*_tab\s*=\s*"Ввод";\s*await Navigation\.PopAsync\(\);/);
     assert.doesNotMatch(media, /_draftText\s*=\s*string\.IsNullOrWhiteSpace/);
 });
 

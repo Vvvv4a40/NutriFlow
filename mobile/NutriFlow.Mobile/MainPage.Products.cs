@@ -96,7 +96,7 @@ public partial class MainPage
                 return;
             }
 
-            SetSession(profileId, await _client.CreateManualMealAsync(profileId, product, Ui.Number(grams, "Вес", true), mealDate, estimated.IsToggled ? NutriFlow.Domain.DataQuality.Estimated : NutriFlow.Domain.DataQuality.Exact));
+            await SetSessionAsync(profileId, await _client.CreateManualMealAsync(profileId, product, Ui.Number(grams, "Вес", true), mealDate, estimated.IsToggled ? NutriFlow.Domain.DataQuality.Estimated : NutriFlow.Domain.DataQuality.Exact));
             await Navigation.PopAsync();
         })));
         return Navigation.PushAsync(page);

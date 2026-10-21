@@ -15,6 +15,30 @@ public static class DataBackup
         WriteIndented = true
     };
 
+    // backups reject links inside data paths, but system roots may be links: android /data/user/0, macos /var
+    public static string ResolvePhysicalPath(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        string fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        string? parent = Path.GetDirectoryName(fullPath);
+        if (parent is null)
+        {
+            return fullPath;
+        }
+
+        string resolved = Path.Combine(ResolvePhysicalPath(parent), Path.GetFileName(fullPath));
+        FileSystemInfo? target = null;
+        try
+        {
+            target = new DirectoryInfo(resolved).ResolveLinkTarget(returnFinalTarget: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        return target is null ? resolved : ResolvePhysicalPath(target.FullName);
+    }
+
     public static async Task<BackupManifest> CreateAsync(
         string databasePath,
         string labelPhotosPath,
@@ -160,7 +184,7 @@ public static class DataBackup
                 file, cancellationToken);
         }
 
-        string checkPath = Path.Combine(Path.GetTempPath(), $"nutriflow-backup-check-{Guid.NewGuid():N}");
+        string checkPath = Path.Combine(ResolvePhysicalPath(Path.GetTempPath()), $"nutriflow-backup-check-{Guid.NewGuid():N}");
         BackupFiles.EnsureNoLinks(checkPath);
         Directory.CreateDirectory(checkPath);
         try

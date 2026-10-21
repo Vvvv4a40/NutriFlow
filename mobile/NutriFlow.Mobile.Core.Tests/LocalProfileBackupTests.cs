@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,6 +17,7 @@ public sealed class LocalProfileBackupTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "nutriflow-profile-backup-tests", Guid.NewGuid().ToString("N"));
     private readonly DateOnly _date = new(2026, 10, 19);
+    private readonly List<string> _directoryLinks = [];
 
     [Fact]
     public async Task RoundTripCreatesSeparateProfileAndPreservesPhotosDishesGoalsAdjustmentsAndActiveSession()
@@ -97,6 +99,31 @@ public sealed class LocalProfileBackupTests : IDisposable
         Assert.Empty((await new LocalMealClient(profiles).GetDailyProgressAsync(result.Profile.Id, _date)).Entries);
     }
 
+    [Fact]
+    public async Task ProfilesBehindLinkedAppDirectoryCanBeExportedAndRestored()
+    {
+        // android serves app data through the /data/user/0 -> /data/data link
+        string physical = Path.Combine(_root, "physical");
+        string linked = Path.Combine(_root, "linked");
+        Directory.CreateDirectory(physical);
+        CreateDirectoryLink(linked, physical);
+        LocalProfileStore profiles = new(Path.Combine(linked, "nutriflow"));
+        LocalProfile original = await profiles.CreateAsync("Linked");
+        await new LocalInputDraftStore(profiles).SaveAsync(original.Id,
+            new LocalInputDraft("linked draft", _date, MealSessionPurpose.Diary));
+        string archive = Path.Combine(_root, "linked.zip");
+        LocalProfileBackup backup = new(profiles);
+
+        await backup.ExportAsync(original.Id, archive);
+        await using FileStream input = File.OpenRead(archive);
+        LocalProfileBackupResult result = await backup.ImportAsync(input, "Linked copy");
+
+        LocalProfileStore restarted = new(Path.Combine(linked, "nutriflow"));
+        Assert.Equal(2, (await restarted.ListAsync()).Count);
+        Assert.Equal("linked draft", (await new LocalInputDraftStore(restarted).ReadAsync(result.Profile.Id))!.Text);
+        Assert.Equal(original, await restarted.GetSelectedAsync());
+    }
+
     [Theory]
     [InlineData("../outside.txt")]
     [InlineData("data/../../outside.txt")]
@@ -129,7 +156,7 @@ public sealed class LocalProfileBackupTests : IDisposable
             JsonObject manifest = JsonNode.Parse(entries["profile.json"])!.AsObject();
             if (kind == "future")
             {
-                manifest["FormatVersion"] = 2;
+                manifest["FormatVersion"] = 999;
             }
             else
             {
@@ -335,6 +362,178 @@ public sealed class LocalProfileBackupTests : IDisposable
         Assert.Equal(created, await profiles.GetSelectedAsync());
     }
 
+    [Theory]
+    [InlineData(MealSessionPurpose.Diary)]
+    [InlineData(MealSessionPurpose.CreateDish)]
+    public async Task UnsentInputRoundTripPreservesTextDateAndPurposeWithoutCreatingMeal(MealSessionPurpose purpose)
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile original = await profiles.CreateAsync("Original");
+        LocalInputDraft draft = new("Добавил примерно 600 г мяса 🥣\nПотом овощи и 20 г масла.", _date.AddDays(-7), purpose);
+        LocalInputDraftStore drafts = new(profiles);
+        await drafts.SaveAsync(original.Id, draft);
+        await File.WriteAllTextAsync(Path.Combine(ProfileDirectory(original.Id), "input-draft.synthetic.tmp"), "not-exported");
+        string archive = Path.Combine(_root, "with-input.zip");
+        await new LocalProfileBackup(profiles).ExportAsync(original.Id, archive);
+        Dictionary<string, byte[]> entries = ReadArchive(archive);
+        Assert.Equal(4, entries.Count);
+        Assert.Contains("input-draft.json", entries.Keys);
+        JsonObject manifest = JsonNode.Parse(entries["profile.json"])!.AsObject();
+        Assert.Equal(2, manifest["FormatVersion"]!.GetValue<int>());
+        Assert.Equal(entries["input-draft.json"].Length, manifest["InputDraft"]!["Length"]!.GetValue<int>());
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(entries["input-draft.json"])),
+            manifest["InputDraft"]!["Sha256"]!.GetValue<string>());
+        await using FileStream input = File.OpenRead(archive);
+        LocalProfileBackupResult result = await new LocalProfileBackup(profiles).ImportAsync(input, "Restored");
+        Assert.Equal(draft, await new LocalInputDraftStore(new LocalProfileStore(_root)).ReadAsync(result.Profile.Id));
+        Assert.Equal(draft, await drafts.ReadAsync(original.Id));
+        Assert.Null(result.ActiveSessionId);
+        Assert.Equal(original, await profiles.GetSelectedAsync());
+        Assert.Empty((await new LocalMealClient(profiles).GetDailyProgressAsync(result.Profile.Id, draft.MealDate)).Entries);
+    }
+
+    [Fact]
+    public async Task PendingInputRoundTripKeepsItsSessionContextAndIndependentOwner()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile original = await profiles.CreateAsync("Original");
+        LocalMealClient client = new(profiles);
+        ProductResponse product = new("Synthetic product", 100m, 0m, 0m, 25m,
+            "ManualInput", "Exact", "Synthetic test source", null, null);
+        await client.AddProductAsync(original.Id, product);
+        MealSessionResponse session = await client.CreateManualDishAsync(original.Id, "Synthetic dish",
+            new ManualIngredient[] { new(product, 100m) }, 100m, _date);
+        LocalInputDraft draft = new("Ещё добавил масло, пока не отправлял", session.MealDate,
+            MealSessionPurpose.CreateDish, session.Id);
+        await new LocalInputDraftStore(profiles).SaveAsync(original.Id, draft);
+        string archive = Path.Combine(_root, "pending-input.zip");
+        await new LocalProfileBackup(profiles).ExportAsync(original.Id, archive, session.Id);
+        await using FileStream input = File.OpenRead(archive);
+        LocalProfileBackupResult result = await new LocalProfileBackup(profiles).ImportAsync(input, "Restored");
+        Assert.Equal(session.Id, result.ActiveSessionId);
+        Assert.Equal(draft, await new LocalInputDraftStore(profiles).ReadAsync(result.Profile.Id));
+        MealSessionResponse restoredSession = (await client.FindSessionAsync(result.Profile.Id, session.Id))!;
+        Assert.Equal(session.PreviewToken, restoredSession.PreviewToken);
+        Assert.Equal("CreateDish", restoredSession.Purpose);
+        Assert.Empty(await client.GetSavedDishesAsync(result.Profile.Id));
+        Assert.Empty((await client.GetDailyProgressAsync(result.Profile.Id, _date)).Entries);
+        Assert.NotNull((await client.ConfirmAsync(result.Profile.Id, session.Id, session.PreviewToken))!.SavedDish);
+        Assert.Empty(await client.GetSavedDishesAsync(original.Id));
+        Assert.Equal(draft, await new LocalInputDraftStore(profiles).ReadAsync(original.Id));
+    }
+
+    [Theory]
+    [InlineData("hash")]
+    [InlineData("oversize")]
+    [InlineData("future-draft")]
+    [InlineData("missing-file")]
+    [InlineData("missing-metadata")]
+    [InlineData("foreign-session")]
+    [InlineData("wrong-date")]
+    [InlineData("wrong-purpose")]
+    public async Task InvalidArchivedInputIsRejectedBeforePublishingProfile(string change)
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile original = await profiles.CreateAsync("Original");
+        LocalMealClient client = new(profiles);
+        MealSessionResponse session = await client.CreateManualMealAsync(original.Id, "Unknown synthetic product", 100m, _date);
+        LocalInputDraft draft = new("Неотправленное уточнение", _date, MealSessionPurpose.Diary, session.Id);
+        await new LocalInputDraftStore(profiles).SaveAsync(original.Id, draft);
+        string archive = Path.Combine(_root, "draft.zip");
+        await new LocalProfileBackup(profiles).ExportAsync(original.Id, archive, session.Id);
+        Dictionary<string, byte[]> entries = ReadArchive(archive);
+        JsonObject manifest = JsonNode.Parse(entries["profile.json"])!.AsObject();
+        JsonObject inputFile = JsonNode.Parse(entries["input-draft.json"])!.AsObject();
+        if (change == "hash")
+        {
+            entries["input-draft.json"][0] ^= 0x01;
+        }
+        else if (change == "oversize")
+        {
+            entries["input-draft.json"] = new byte[128 * 1024 + 1];
+        }
+        else if (change == "missing-file")
+        {
+            entries.Remove("input-draft.json");
+        }
+        else if (change == "missing-metadata")
+        {
+            manifest["FormatVersion"] = 1;
+            manifest["InputDraft"] = null;
+        }
+        else
+        {
+            switch (change)
+            {
+                case "future-draft":
+                    inputFile["Version"] = 999;
+                    break;
+                case "foreign-session":
+                    inputFile["Draft"]!["SessionId"] = Guid.NewGuid();
+                    break;
+                case "wrong-date":
+                    inputFile["Draft"]!["MealDate"] = _date.AddDays(1).ToString("yyyy-MM-dd");
+                    break;
+                case "wrong-purpose":
+                    inputFile["Draft"]!["Purpose"] = (int)MealSessionPurpose.CreateDish;
+                    break;
+            }
+            entries["input-draft.json"] = Encoding.UTF8.GetBytes(inputFile.ToJsonString());
+            manifest["InputDraft"]!["Length"] = entries["input-draft.json"].Length;
+            manifest["InputDraft"]!["Sha256"] = Convert.ToHexString(SHA256.HashData(entries["input-draft.json"]));
+        }
+        entries["profile.json"] = Encoding.UTF8.GetBytes(manifest.ToJsonString());
+        using MemoryStream malicious = MakeArchive(entries);
+        await Assert.ThrowsAsync<InvalidDataException>(() => new LocalProfileBackup(profiles).ImportAsync(malicious, "Rejected"));
+        await AssertOriginalOnlyAsync(profiles, original);
+        Assert.Equal(draft, await new LocalInputDraftStore(profiles).ReadAsync(original.Id));
+        Assert.Equal(session.PreviewToken, (await client.FindSessionAsync(original.Id, session.Id))!.PreviewToken);
+    }
+
+    [Fact]
+    public async Task ExportRejectsInputContextFromAnotherProfileWithoutDeletingText()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile original = await profiles.CreateAsync("Original");
+        LocalProfile other = await profiles.CreateAsync("Other");
+        LocalMealClient client = new(profiles);
+        MealSessionResponse foreign = await client.CreateManualMealAsync(other.Id, "Synthetic product", 100m, _date);
+        LocalInputDraft draft = new("Мой неотправленный текст", _date, MealSessionPurpose.Diary, foreign.Id);
+        await new LocalInputDraftStore(profiles).SaveAsync(original.Id, draft);
+        string archive = Path.Combine(_root, "rejected.zip");
+        await Assert.ThrowsAsync<InvalidDataException>(() => new LocalProfileBackup(profiles).ExportAsync(original.Id, archive));
+        Assert.False(File.Exists(archive));
+        Assert.Equal(draft, await new LocalInputDraftStore(profiles).ReadAsync(original.Id));
+        Assert.Equal(other, await profiles.GetSelectedAsync());
+        Assert.Equal(2, (await profiles.ListAsync()).Count);
+        Assert.Empty(Directory.GetDirectories(_root, ".profile-backup-*"));
+    }
+
+    [Fact]
+    public async Task InputBoundToConfirmedSessionIsPreservedWithoutRepeatingConfirmation()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile original = await profiles.CreateAsync("Original");
+        LocalMealClient client = new(profiles);
+        ProductResponse product = new("Synthetic product", 100m, 0m, 0m, 25m,
+            "ManualInput", "Exact", "Synthetic test source", null, null);
+        await client.AddProductAsync(original.Id, product);
+        MealSessionResponse session = await client.CreateManualMealAsync(original.Id, product, 100m, _date);
+        await client.ConfirmAsync(original.Id, session.Id, session.PreviewToken);
+        LocalInputDraft draft = new("Текст, который остался после подтверждения", _date, MealSessionPurpose.Diary, session.Id);
+        await new LocalInputDraftStore(profiles).SaveAsync(original.Id, draft);
+        string archive = Path.Combine(_root, "confirmed-context.zip");
+        await new LocalProfileBackup(profiles).ExportAsync(original.Id, archive);
+        await using FileStream input = File.OpenRead(archive);
+        LocalProfileBackupResult result = await new LocalProfileBackup(profiles).ImportAsync(input, "Restored");
+        Assert.Null(result.ActiveSessionId);
+        Assert.Equal(draft, await new LocalInputDraftStore(profiles).ReadAsync(result.Profile.Id));
+        Assert.Single((await client.GetDailyProgressAsync(result.Profile.Id, _date)).Entries);
+        Assert.Equal("AlreadyConfirmed", (await client.ConfirmAsync(result.Profile.Id, session.Id, session.PreviewToken))!.Outcome);
+        Assert.Single((await client.GetDailyProgressAsync(result.Profile.Id, _date)).Entries);
+        Assert.Single((await client.GetDailyProgressAsync(original.Id, _date)).Entries);
+    }
+
     private async Task<(LocalProfileStore Profiles, LocalProfile Original, string Archive)> CreateEmptyArchiveAsync()
     {
         LocalProfileStore profiles = new(_root);
@@ -410,8 +609,39 @@ public sealed class LocalProfileBackupTests : IDisposable
 
     private string ProfileDirectory(Guid profileId) => Path.Combine(_root, "profiles", profileId.ToString("N"));
 
+    private void CreateDirectoryLink(string linkPath, string targetPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // junctions do not require the symbolic link privilege on windows
+            ProcessStartInfo startInfo = new("cmd.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            foreach (string argument in new[] { "/c", "mklink", "/J", linkPath, targetPath })
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+            using Process process = Process.Start(startInfo)!;
+            process.WaitForExit();
+            Assert.Equal(0, process.ExitCode);
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+        }
+        _directoryLinks.Add(linkPath);
+    }
+
     public void Dispose()
     {
+        foreach (string linkPath in _directoryLinks)
+        {
+            Directory.Delete(linkPath);
+        }
         if (Directory.Exists(_root))
         {
             Directory.Delete(_root, recursive: true);

@@ -114,10 +114,8 @@ public partial class MainPage
         string? choice = await DisplayActionSheetAsync("Локальные профили", "Отмена", null, [.. choices, "Создать профиль"]);
         if (choice == "Создать профиль")
         {
-            if (await CanLeaveDraftTextAsync())
-            {
-                await CreateProfilePageAsync();
-            }
+            await FlushInputDraftAsync();
+            await CreateProfilePageAsync();
             return;
         }
 
@@ -127,22 +125,18 @@ public partial class MainPage
             return;
         }
 
-        if (!await CanLeaveDraftTextAsync())
-        {
-            return;
-        }
-
+        await FlushInputDraftAsync();
+        _inputEditor = null;
         _profile = await _profiles.SelectAsync(profiles[selectedIndex].Id);
         _session = null;
         _draftText = "";
+        _purpose = NutriFlow.Domain.MealSessionPurpose.Diary;
+        _date = DateOnly.FromDateTime(DateTime.Today);
         await ResumeSessionAsync(_profile.Id);
+        await LoadInputDraftAsync(_profile.Id);
         await RefreshProfilesAsync();
         await RenderAsync();
     });
-
-    private Task<bool> CanLeaveDraftTextAsync() => string.IsNullOrWhiteSpace(_draftText)
-        ? Task.FromResult(true)
-        : DisplayAlertAsync("Сменить профиль?", "Набранный, но ещё не отправленный текст будет очищен. Сохранённый черновик останется в своём профиле.", "Сменить", "Отмена");
 
     protected override bool OnBackButtonPressed()
     {

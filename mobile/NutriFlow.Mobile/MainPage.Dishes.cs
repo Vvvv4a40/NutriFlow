@@ -74,7 +74,7 @@ public partial class MainPage
                     return;
                 }
 
-                SetSession(profileId, await _client.CreateSavedDishMealAsync(profileId, savedDish.Id, Ui.Number(grams, "Вес порции", true), mealDate, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
+                await SetSessionAsync(profileId, await _client.CreateSavedDishMealAsync(profileId, savedDish.Id, Ui.Number(grams, "Вес порции", true), mealDate, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
                 await Navigation.PopAsync();
             })));
             await Navigation.PushAsync(page);
@@ -146,7 +146,7 @@ public partial class MainPage
                     throw new ArgumentException("Добавьте хотя бы один ингредиент.");
                 }
 
-                SetSession(profileId, await _client.CreateManualDishAsync(profileId, Ui.Name(name, "Название блюда"), ingredients.ToArray(), Ui.Number(finalWeight, "Готовый вес", true), _date, finalEstimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
+                await SetSessionAsync(profileId, await _client.CreateManualDishAsync(profileId, Ui.Name(name, "Название блюда"), ingredients.ToArray(), Ui.Number(finalWeight, "Готовый вес", true), _date, finalEstimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
                 await Navigation.PopAsync();
             })));
             await Navigation.PushAsync(page);

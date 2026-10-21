@@ -33,6 +33,7 @@ public partial class MainPage : ContentPage
         InitializeComponent();
         _profiles = profiles;
         _client = client;
+        _inputDrafts = new LocalInputDraftStore(profiles);
         Title = "NutriFlow";
         BackgroundColor = Ui.Background;
 #if ANDROID
@@ -100,12 +101,17 @@ public partial class MainPage : ContentPage
             LocalProfile? selected = await _profiles.GetSelectedAsync();
             if (selected?.Id != _profile?.Id)
             {
+                await FlushInputDraftAsync();
+                _inputEditor = null;
                 _profile = selected;
                 _session = null;
                 _draftText = "";
+                _purpose = MealSessionPurpose.Diary;
+                _date = DateOnly.FromDateTime(DateTime.Today);
                 if (selected is not null)
                 {
                     await ResumeSessionAsync(selected.Id);
+                    await LoadInputDraftAsync(selected.Id);
                 }
             }
             else if (_profile is not null && _session is not null)
@@ -193,6 +199,9 @@ public partial class MainPage : ContentPage
 
     private async Task RenderAsync()
     {
+        _inputEditor = null;
+        _inputSaveStatus = null;
+        _inputSaveRetry = null;
         RenderNavigation();
         _body.Children.Clear();
         bool hasProfile = _profile is not null;
@@ -207,6 +216,13 @@ public partial class MainPage : ContentPage
 
         _welcome.Content = null;
         Guid profileId = _profile.Id;
+        if (InputDraftBlocked && _tab != "Ввод")
+        {
+            Button attention = Ui.Action("Проверить сохранённый ввод", () => SelectTabAsync("Ввод"), true);
+            attention.AutomationId = "input-draft-attention";
+            _body.Children.Add(Ui.Card(Ui.Text(_draftReadError ?? "Есть неотправленный текст другой записи."), attention));
+        }
+
         switch (_tab)
         {
             case "Дневник": await RenderDiaryAsync(profileId); break;
@@ -233,6 +249,7 @@ public partial class MainPage : ContentPage
         page.Fields.Children.Add(name);
         Button create = Ui.Action("Продолжить", () => page.RunAsync(async () =>
         {
+            await FlushInputDraftAsync();
             LocalProfile created = await _profiles.CreateAsync(Ui.Name(name, "Имя"));
             await _profiles.SelectAsync(created.Id);
             await Navigation.PopAsync();

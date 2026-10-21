@@ -14,6 +14,12 @@ public partial class MainPage
             RenderSession(profileId, _session);
         }
 
+        View? recovery = InputDraftRecovery(profileId);
+        if (recovery is not null)
+        {
+            _body.Children.Add(recovery);
+        }
+
         Label heading = Ui.Title("");
         heading.FontSize = 28;
         heading.Margin = 0;
@@ -30,8 +36,17 @@ public partial class MainPage
             BackgroundColor = Ui.Surface,
             TextColor = Ui.TextPrimary
         };
+        _inputEditor = editor;
+        Guid? inputSessionId = _session?.Id;
+        editor.IsEnabled = !InputDraftBlocked;
         Button submit = Ui.Action(_session is null ? "Разобрать описание" : "Добавить уточнение", () => RunAsync(async () =>
         {
+            if (InputDraftBlocked)
+            {
+                throw new InvalidOperationException("Сначала восстановите или удалите сохранённый ввод.");
+            }
+
+            await FlushInputDraftAsync();
             string message = _draftText.Trim();
             if (message.Length == 0)
             {
@@ -43,8 +58,7 @@ public partial class MainPage
                 ? await _client.CreateSessionAsync(profileId, new[] { message }, mealDate, _purpose, settings)
                 : await _client.AddMessageAsync(profileId, _session.Id, message, settings)
                     ?? throw new InvalidOperationException("Черновик не найден. Начните новую запись.");
-            SetSession(profileId, session);
-            _draftText = "";
+            await SetSessionAsync(profileId, session);
             await RenderAsync();
         }));
         submit.AutomationId = "input-submit";
@@ -52,7 +66,7 @@ public partial class MainPage
         void RefreshSubmit()
         {
             bool hasText = !string.IsNullOrWhiteSpace(_draftText);
-            submit.IsEnabled = hasText;
+            submit.IsEnabled = hasText && !InputDraftBlocked;
             submit.BackgroundColor = hasText ? Ui.Accent : Ui.SurfaceRaised;
             submit.TextColor = hasText ? Ui.Background : Ui.Muted;
         }
@@ -63,9 +77,16 @@ public partial class MainPage
         count.VerticalOptions = LayoutOptions.Center;
         editor.TextChanged += (_, _) =>
         {
+            if (!ReferenceEquals(_inputEditor, editor) || _profile?.Id != profileId ||
+                _session?.Id != inputSessionId || InputDraftBlocked)
+            {
+                return;
+            }
+
             _draftText = editor.Text ?? "";
             count.Text = $"{_draftText.Length}/{MealInputText.MaximumLength}";
             RefreshSubmit();
+            _ = QueueInputDraftSave(profileId, CaptureInputDraft());
         };
 
         VerticalStackLayout alternatives = new() { Spacing = 10 };
@@ -81,16 +102,39 @@ public partial class MainPage
 
         _body.Children.Add(InputPurposeSelector(RefreshPurpose));
         _body.Children.Add(InputComposer(profileId, editor, count, submit));
+        _inputSaveStatus = Ui.Text(_draftSaveMessage, true);
+        _inputSaveStatus.AutomationId = "input-save-status";
+        _inputSaveStatus.FontSize = 12;
+        _inputSaveStatus.IsVisible = _draftSaveMessage.Length > 0;
+        _body.Children.Add(_inputSaveStatus);
+        _inputSaveRetry = Ui.Action("Повторить сохранение", () => RunAsync(async () =>
+        {
+            await QueueInputDraftSave(profileId, CaptureInputDraft());
+            await FlushInputDraftAsync();
+            await RenderAsync();
+        }), true);
+        _inputSaveRetry.AutomationId = "input-draft-retry";
+        _inputSaveRetry.IsVisible = _draftSaveError is not null && !InputDraftBlocked;
+        _body.Children.Add(_inputSaveRetry);
         _body.Children.Add(alternatives);
         RefreshPurpose();
         if (_session is not null)
         {
             Button restart = Ui.Action("Начать новую запись", () => RunAsync(async () =>
             {
+                if (InputDraftBlocked)
+                {
+                    throw new InvalidOperationException("Сначала восстановите или удалите сохранённый ввод.");
+                }
+
+                await FlushInputDraftAsync();
                 if (await DisplayAlertAsync("Новая запись", "Текущий черновик ещё не подтверждён. Начать новую запись?", "Начать", "Отмена"))
                 {
+                    await _inputDrafts.ClearAsync(profileId);
+                    _inputEditor = null;
                     _session = null;
                     _draftText = "";
+                    SetInputSaveStatus("");
                     ProfileSettings.ClearSession(profileId);
                     await RenderAsync();
                     await _scroll.ScrollToAsync(0, 0, false);
@@ -143,14 +187,27 @@ public partial class MainPage
             page.Fields.Children.Add(Ui.Action("Посмотреть расчёт", () => page.RunAsync(async () =>
             {
                 ProductResponse selected = (ProductResponse?)product.SelectedItem ?? throw new ArgumentException("Выберите продукт.");
-                SetSession(profileId, await _client.CreateManualMealAsync(profileId, selected, Ui.Number(grams, "Вес", true), mealDate, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
+                await SetSessionAsync(profileId, await _client.CreateManualMealAsync(profileId, selected, Ui.Number(grams, "Вес", true), mealDate, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
                 await Navigation.PopAsync();
             })));
             await Navigation.PushAsync(page);
         });
     }
 
-    private Task<bool> CanStartDraftAsync() => _session is null
-        ? Task.FromResult(true)
-        : DisplayAlertAsync("Создать новый черновик?", "Текущий черновик ещё не подтверждён. Новый расчёт заменит его на экране.", "Создать", "Отмена");
+    private async Task<bool> CanStartDraftAsync()
+    {
+        if (InputDraftBlocked)
+        {
+            await DisplayAlertAsync("Сохранённый ввод", "Сначала восстановите или удалите сохранённый текст в разделе добавления еды.", "Понятно");
+            return false;
+        }
+
+        await FlushInputDraftAsync();
+        if (_session is null && string.IsNullOrWhiteSpace(_draftText))
+        {
+            return true;
+        }
+
+        return await DisplayAlertAsync("Создать новый расчёт?", "Текущий черновик и неотправленный текст будут заменены только после успешного создания нового расчёта.", "Создать", "Отмена");
+    }
 }

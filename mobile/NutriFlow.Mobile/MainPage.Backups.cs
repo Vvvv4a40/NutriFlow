@@ -6,10 +6,18 @@ public partial class MainPage
 {
     private Task ExportBackupAsync(Guid profileId) => RunAsync(async () =>
     {
+        await FlushInputDraftAsync();
         string path = Path.Combine(FileSystem.CacheDirectory, $"nutriflow-backup-{Guid.NewGuid():N}.zip");
         try
         {
-            await new LocalProfileBackup(_profiles).ExportAsync(profileId, path, ProfileSettings.SessionId(profileId));
+            try
+            {
+                await new LocalProfileBackup(_profiles).ExportAsync(profileId, path, ProfileSettings.SessionId(profileId));
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new InvalidOperationException("Не удалось создать копию: данные повреждены, не поддерживаются или превышают допустимый размер. Исходные файлы не изменены.", exception);
+            }
             if (await BackupFileAccess.SaveAsync(path, $"NutriFlow-{DateTime.Now:yyyyMMdd-HHmmss}.zip"))
             {
                 await DisplayAlertAsync("Копия сохранена", "Сохранён выбранный профиль без ключа Groq. Храните архив в надёжном месте.", "Готово");
@@ -54,6 +62,7 @@ public partial class MainPage
             }
 
             LocalProfileBackupResult result;
+            await FlushInputDraftAsync();
             try
             {
                 await using Stream stream = await file.OpenReadAsync();

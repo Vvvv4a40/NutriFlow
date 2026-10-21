@@ -32,6 +32,12 @@ public partial class MainPage
 
         Button confirm = Ui.Action(session.Purpose == "CreateDish" ? "Подтвердить и сохранить блюдо" : "Подтвердить и записать в дневник", () => RunAsync(async () =>
         {
+            await FlushInputDraftAsync();
+            if (!await CanDiscardInputAsync("Подтвердить без нового текста?", "Набранное уточнение ещё не отправлено и не входит в этот расчёт. После подтверждения оно будет удалено."))
+            {
+                return;
+            }
+
             ConfirmMealSessionResponse result = await _client.ConfirmAsync(profileId, session.Id, session.PreviewToken)
                 ?? throw new InvalidOperationException("Черновик не найден.");
             _session = result.Session;
@@ -40,10 +46,16 @@ public partial class MainPage
                 _date = result.Session.MealDate;
                 ProfileSettings.ClearSession(profileId);
                 _session = null;
-                _draftText = "";
+                await ClearSubmittedInputAsync(profileId);
                 _tab = result.SavedDish is null ? "Дневник" : "Блюда";
                 await RenderAsync();
-                await DisplayAlertAsync("Сохранено", result.SavedDish is null ? "Запись добавлена в дневник." : "Блюдо сохранено. Его порции можно добавлять без интернета.", "Готово");
+                string message = result.SavedDish is null ? "Запись добавлена в дневник." : "Блюдо сохранено. Его порции можно добавлять без интернета.";
+                if (_draftReadError is not null)
+                {
+                    message += "\n" + _draftReadError;
+                }
+
+                await DisplayAlertAsync("Сохранено", message, "Готово");
             }
             else
             {

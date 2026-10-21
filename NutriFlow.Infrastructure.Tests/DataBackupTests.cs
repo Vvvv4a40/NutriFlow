@@ -232,6 +232,20 @@ public sealed class DataBackupTests
     }
 
     [Fact]
+    public void ResolvePhysicalPath_ReplacesAncestorLinksAndKeepsMissingSegments()
+    {
+        using BackupFixture fixture = new();
+        Directory.CreateDirectory(fixture.PhotosPath);
+        string linkPath = Path.Combine(fixture.RootPath, "photo-link");
+        fixture.CreateDirectoryLink(linkPath, fixture.PhotosPath);
+
+        string resolved = DataBackup.ResolvePhysicalPath(Path.Combine(linkPath, "missing", "child") + Path.DirectorySeparatorChar);
+
+        Assert.Equal(Path.Combine(DataBackup.ResolvePhysicalPath(fixture.PhotosPath), "missing", "child"), resolved);
+        Assert.Equal(DataBackup.ResolvePhysicalPath(fixture.PhotosPath), DataBackup.ResolvePhysicalPath(linkPath));
+    }
+
+    [Fact]
     public async Task CreateAsync_RejectsCorruptDatabaseWithoutChangingSource()
     {
         using BackupFixture fixture = new();

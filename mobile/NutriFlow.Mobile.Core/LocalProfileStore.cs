@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using NutriFlow.Infrastructure.Backups;
 
 namespace NutriFlow.Mobile.Core;
 
@@ -13,7 +14,8 @@ public sealed class LocalProfileStore
     public LocalProfileStore(string rootDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectory);
-        _rootDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDirectory));
+        // android serves app data through the /data/user/0 -> /data/data link, which backups would reject
+        _rootDirectory = DataBackup.ResolvePhysicalPath(rootDirectory);
         _catalogPath = Path.Combine(_rootDirectory, "profiles.json");
         _gate = Gates.GetOrAdd(_rootDirectory, _ => new SemaphoreSlim(1, 1));
     }
