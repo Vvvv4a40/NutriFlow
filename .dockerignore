@@ -29,5 +29,5 @@ NutriFlow.Infrastructure.Tests/
 NutriFlow.Api.Tests/
 mobile/
 docs/
-README.md
+*.md
 NutriFlow.sln
