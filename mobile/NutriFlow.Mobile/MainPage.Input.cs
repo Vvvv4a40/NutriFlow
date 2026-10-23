@@ -6,7 +6,7 @@ namespace NutriFlow.Mobile;
 
 public partial class MainPage
 {
-    private void RenderInput(Guid profileId)
+    private void RenderInput(Guid profileId, bool hasGroqKey)
     {
         DateOnly mealDate = _session?.MealDate ?? _date;
         if (_session is not null)
@@ -20,26 +20,25 @@ public partial class MainPage
             _body.Children.Add(recovery);
         }
 
-        Label heading = Ui.Title("");
-        heading.FontSize = 28;
-        heading.Margin = 0;
-        _body.Children.Add(heading);
-
+        Label context = Ui.Caption("");
         Editor editor = new InputEditor()
         {
             AutomationId = "input-description",
             Text = _draftText,
             AutoSize = EditorAutoSizeOption.Disabled,
-            HeightRequest = 120,
+            HeightRequest = _session is null ? 156 : 104,
             MaxLength = MealInputText.MaximumLength,
-            FontSize = 16,
-            BackgroundColor = Ui.Surface,
-            TextColor = Ui.TextPrimary
+            FontSize = 17,
+            BackgroundColor = Ui.SurfaceRaised,
+            TextColor = Ui.TextPrimary,
+            PlaceholderColor = Ui.Subtle
         };
+        SemanticProperties.SetDescription(editor, _session is null ? "Описание еды" : "Уточнение");
         _inputEditor = editor;
         Guid? inputSessionId = _session?.Id;
         editor.IsEnabled = !InputDraftBlocked;
-        Button submit = Ui.Action(_session is null ? "Разобрать описание" : "Добавить уточнение", () => RunAsync(async () =>
+        Button? submit = null;
+        submit = Ui.Action(_session is null ? "Разобрать описание" : "Добавить уточнение", () => RunAsync(async () =>
         {
             if (InputDraftBlocked)
             {
@@ -54,27 +53,38 @@ public partial class MainPage
             }
 
             var settings = await ProfileSettings.GetGroqAsync(profileId);
+            ShowProgress(submit!, _session is null ? "Разбираю описание…" : "Добавляю уточнение…");
             MealSessionResponse session = _session is null
                 ? await _client.CreateSessionAsync(profileId, new[] { message }, mealDate, _purpose, settings)
                 : await _client.AddMessageAsync(profileId, _session.Id, message, settings)
-                    ?? throw new InvalidOperationException("Черновик не найден. Начните новую запись.");
+                    ?? throw new InvalidOperationException("Расчёт не найден. Начните новую запись.");
             await SetSessionAsync(profileId, session);
             await RenderAsync();
-        }));
+        }), _session is not null);
         submit.AutomationId = "input-submit";
-        submit.FontSize = 14;
         void RefreshSubmit()
         {
-            bool hasText = !string.IsNullOrWhiteSpace(_draftText);
-            submit.IsEnabled = hasText && !InputDraftBlocked;
-            submit.BackgroundColor = hasText ? Ui.Accent : Ui.SurfaceRaised;
-            submit.TextColor = hasText ? Ui.Background : Ui.Muted;
+            bool enabled = !string.IsNullOrWhiteSpace(_draftText) && !InputDraftBlocked;
+            if (_session is null)
+            {
+                Ui.SetEnabled(submit, enabled);
+            }
+            else
+            {
+                submit.IsEnabled = enabled;
+            }
         }
         RefreshSubmit();
-        Label count = Ui.Text($"{_draftText.Length}/{MealInputText.MaximumLength}", true);
-        count.FontSize = 11;
-        count.HorizontalTextAlignment = TextAlignment.End;
-        count.VerticalOptions = LayoutOptions.Center;
+
+        // the counter only appears near the limit, where it helps
+        Label count = Ui.Caption("", Ui.Subtle);
+        count.FontSize = 12;
+        void RefreshCount()
+        {
+            count.Text = $"{_draftText.Length}/{MealInputText.MaximumLength}";
+            count.IsVisible = _draftText.Length > MealInputText.MaximumLength * 0.8;
+        }
+        RefreshCount();
         editor.TextChanged += (_, _) =>
         {
             if (!ReferenceEquals(_inputEditor, editor) || _profile?.Id != profileId ||
@@ -84,43 +94,59 @@ public partial class MainPage
             }
 
             _draftText = editor.Text ?? "";
-            count.Text = $"{_draftText.Length}/{MealInputText.MaximumLength}";
+            RefreshCount();
             RefreshSubmit();
             ScheduleInputDraftSave(profileId);
         };
 
-        VerticalStackLayout alternatives = new() { Spacing = 10 };
-        void RefreshPurpose()
-        {
-            bool creatingDish = _purpose == MealSessionPurpose.CreateDish;
-            heading.Text = _session is not null ? "Уточнение" : creatingDish ? "Создать блюдо" : "Добавить еду";
-            editor.Placeholder = _session is not null ? "Ответьте на вопросы…"
-                : creatingDish ? "Ингредиенты и готовый вес…"
-                : "Что и сколько съели…";
-            RenderInputAlternatives(profileId, alternatives);
-        }
-
-        _body.Children.Add(InputPurposeSelector(RefreshPurpose));
-        _body.Children.Add(InputComposer(profileId, editor, count, submit));
-        _inputSaveStatus = Ui.Text(_draftSaveMessage, true);
+        _inputSaveStatus = Ui.Caption(_draftSaveMessage, Ui.Subtle);
         _inputSaveStatus.AutomationId = "input-save-status";
         _inputSaveStatus.FontSize = 12;
         _inputSaveStatus.IsVisible = _draftSaveMessage.Length > 0;
-        _body.Children.Add(_inputSaveStatus);
-        _inputSaveRetry = Ui.Action("Повторить сохранение", () => RunAsync(async () =>
+        _inputSaveRetry = Ui.Ghost("Повторить сохранение", () => RunAsync(async () =>
         {
             await QueueInputDraftSave(profileId, CaptureInputDraft());
             await FlushInputDraftAsync();
             await RenderAsync();
-        }), true);
+        }), Ui.Warning);
         _inputSaveRetry.AutomationId = "input-draft-retry";
         _inputSaveRetry.IsVisible = _draftSaveError is not null && !InputDraftBlocked;
+
+        VerticalStackLayout alternatives = new() { Spacing = 12 };
+        void RefreshPurpose()
+        {
+            bool creatingDish = _purpose == MealSessionPurpose.CreateDish;
+            _screenTitle.Text = ScreenTitle();
+            context.Text = creatingDish
+                ? "Опишите ингредиенты с весом и сколько весит готовое блюдо. Оно сохранится в «Мои блюда»."
+                : $"Запись попадёт в дневник за {DiaryDay(mealDate)}. Перед сохранением вы увидите расчёт.";
+            editor.Placeholder = _session is not null ? "Ответьте на вопросы или поправьте состав…"
+                : creatingDish ? "Например: фарш 600 г, лук 150 г, рис 200 г сухого. Готовое блюдо 1180 г"
+                : "Например: гречка 200 г, куриная грудка 150 г и огурец";
+            RenderInputAlternatives(profileId, alternatives);
+        }
+
+        if (_session is null)
+        {
+            _body.Children.Add(InputPurposeSelector(RefreshPurpose));
+            _body.Children.Add(context);
+        }
+
+        if (!hasGroqKey && !InputDraftBlocked)
+        {
+            Button settings = Ui.Ghost("Открыть настройки", () => SelectTabAsync("Настройки"));
+            settings.AutomationId = "input-key-settings";
+            _body.Children.Add(Notice(AppIconKind.Key, Ui.Warning,
+                "Чтобы разобрать текст или голос, добавьте личный ключ Groq. Без ключа можно выбрать продукт или блюдо ниже.", settings));
+        }
+
+        _body.Children.Add(InputComposer(profileId, editor, count, submit, _session is null ? null : "Уточнение"));
         _body.Children.Add(_inputSaveRetry);
         _body.Children.Add(alternatives);
         RefreshPurpose();
         if (_session is not null)
         {
-            Button restart = Ui.Action("Начать новую запись", () => RunAsync(async () =>
+            Button restart = Ui.Ghost("Начать запись заново", () => RunAsync(async () =>
             {
                 if (InputDraftBlocked)
                 {
@@ -128,7 +154,7 @@ public partial class MainPage
                 }
 
                 await FlushInputDraftAsync();
-                if (await DisplayAlertAsync("Новая запись", "Текущий черновик ещё не подтверждён. Начать новую запись?", "Начать", "Отмена"))
+                if (await DisplayAlertAsync("Начать заново?", "Текущий расчёт не подтверждён и будет закрыт. Дневник не изменится.", "Начать заново", "Оставить"))
                 {
                     await _inputDrafts.ClearAsync(profileId);
                     _inputEditor = null;
@@ -139,10 +165,19 @@ public partial class MainPage
                     await RenderAsync();
                     await _scroll.ScrollToAsync(0, 0, false);
                 }
-            }), true);
+            }), Ui.Danger);
             restart.AutomationId = "draft-restart";
+            restart.HorizontalOptions = LayoutOptions.Center;
             _body.Children.Add(restart);
         }
+    }
+
+    private static string DiaryDay(DateOnly date)
+    {
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        return date == today ? $"сегодня, {date.ToString("d MMMM", DiaryCulture)}"
+            : date == today.AddDays(-1) ? $"вчера, {date.ToString("d MMMM", DiaryCulture)}"
+            : date.ToString("d MMMM", DiaryCulture);
     }
 
     private void SetSession(Guid profileId, MealSessionResponse session)
@@ -173,18 +208,19 @@ public partial class MainPage
             IReadOnlyList<ProductResponse> products = await _client.SearchProductsAsync(profileId);
             if (products.Count == 0)
             {
-                await ProductEditorPageAsync(profileId);
+                await ProductEditorPageAsync(profileId, reason: "В каталоге пока нет продуктов. Добавьте первый, затем выберите его и укажите вес порции.");
                 return;
             }
 
             DateOnly mealDate = _date;
             FormPage page = new("Продукт в дневник");
             Picker product = new InputPicker() { Title = "Продукт", ItemsSource = products.ToList(), ItemDisplayBinding = new Binding(nameof(ProductResponse.Name)), SelectedIndex = 0 };
-            page.Fields.Children.Add(product);
+            SemanticProperties.SetDescription(product, "Продукт");
+            page.Fields.Children.Add(Ui.Labeled("Продукт", Ui.PickerField(product)));
             Entry grams = AddNumber(page, "Вес порции, г");
             Switch estimated = new();
-            page.Fields.Children.Add(Ui.Row(estimated, Ui.Text("Вес указан примерно")));
-            page.Fields.Children.Add(Ui.Action("Посмотреть расчёт", () => page.RunAsync(async () =>
+            page.Fields.Children.Add(Ui.SwitchRow("Вес указан примерно", estimated));
+            page.AddFooter(Ui.Action("Посмотреть расчёт", () => page.RunAsync(async () =>
             {
                 ProductResponse selected = (ProductResponse?)product.SelectedItem ?? throw new ArgumentException("Выберите продукт.");
                 await SetSessionAsync(profileId, await _client.CreateManualMealAsync(profileId, selected, Ui.Number(grams, "Вес", true), mealDate, estimated.IsToggled ? DataQuality.Estimated : DataQuality.Exact));
@@ -198,7 +234,7 @@ public partial class MainPage
     {
         if (InputDraftBlocked)
         {
-            await DisplayAlertAsync("Сохранённый ввод", "Сначала восстановите или удалите сохранённый текст в разделе добавления еды.", "Понятно");
+            await DisplayAlertAsync("Сохранённый ввод", "Сначала восстановите или удалите сохранённый текст в разделе записи еды.", "Понятно");
             return false;
         }
 
@@ -208,6 +244,6 @@ public partial class MainPage
             return true;
         }
 
-        return await DisplayAlertAsync("Создать новый расчёт?", "Текущий черновик и неотправленный текст будут заменены только после успешного создания нового расчёта.", "Создать", "Отмена");
+        return await DisplayAlertAsync("Создать новый расчёт?", "Текущий расчёт и неотправленный текст будут заменены, только когда новый расчёт будет готов.", "Создать", "Отмена");
     }
 }

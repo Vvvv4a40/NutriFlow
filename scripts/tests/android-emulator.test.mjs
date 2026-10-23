@@ -21,23 +21,30 @@ function welcomeNodes() {
     return identifiedNode("NutriFlow", "welcome-title") + identifiedNode("НАЧАТЬ", "create-profile", 'clickable="true"');
 }
 function formNodes(value = "Имя") {
-    return node("Начало") + node("Твоё имя") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
+    return node("Новый профиль") + node("Как вас зовут?") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
         identifiedNode(value, "profile-name").replace("android.widget.TextView", "android.widget.EditText");
 }
 function addAction() {
     return identifiedNode("+", "add-food", 'content-desc="Добавить еду" clickable="true"');
 }
-function diaryNodes(diaryAddAction = addAction()) {
-    return identifiedNode("0", "diary-calories") + node("ккал") + node("Белки") + node("Жиры") + node("Углеводы") +
-        node("Цель · внешняя") + node("Съедено · внутренняя") +
-        node("Smoke", 'clickable="true"').replace("android.widget.TextView", "android.widget.EditText") +
-        diaryAddAction;
+function describedNode(id, description, top) {
+    return identifiedNode("", id, `content-desc="${description}" clickable="true"`)
+        .replace('bounds="[20,200][300,250]"', `bounds="[20,${top}][300,${top + 50}]"`);
+}
+function tabNodes() {
+    return describedNode("tab-products", "Продукты", 600) + describedNode("tab-dishes", "Блюда", 700);
+}
+function diaryNodes(diaryAddAction = addAction(), tabs = tabNodes()) {
+    return identifiedNode("0", "diary-calories") + node("ккал съедено") + node("Белки") + node("Жиры") + node("Углеводы") +
+        identifiedNode("", "diary-goal", 'content-desc="Цель не задана. Задать цель" clickable="true"') +
+        describedNode("profile-switcher", "Профиль: Smoke. Сменить профиль", 100) +
+        diaryAddAction + tabs;
 }
 function destinationNodes(destination) {
     const screens = {
-        products: node("Продукты") + identifiedNode("Название продукта", "product-search")
+        products: node("Продукты") + identifiedNode("Найти продукт", "product-search")
             .replace("android.widget.TextView", "android.widget.EditText") +
-            identifiedNode("Найти", "product-search-submit", 'clickable="true"'),
+            identifiedNode("", "product-add-manual", 'content-desc="Добавить продукт вручную" clickable="true"'),
         dishes: node("Блюда") + identifiedNode("Собрать блюдо", "dish-create-manual", 'clickable="true"') +
             identifiedNode("Нет блюд", "dish-catalog-empty"),
         input: identifiedNode("", "input-description").replace("android.widget.TextView", "android.widget.EditText") +
@@ -45,14 +52,7 @@ function destinationNodes(destination) {
             identifiedNode("Создать блюдо", "input-purpose-dish", 'clickable="true"') +
             identifiedNode("Разобрать описание", "input-submit", 'clickable="true"').replace('enabled="true"', 'enabled="false"')
     };
-    return screens[destination] + addAction();
-}
-function menuNodes(content = diaryNodes()) {
-    return content.replace('text="+"', 'text="×"').replace('content-desc="Добавить еду"', 'content-desc="Закрыть меню добавления"') +
-        identifiedNode("", "add-menu").replace('bounds="[20,200][300,250]"', 'bounds="[20,280][300,550]"') +
-        [["Записать еду", "input", 300], ["Продукты", "products", 400], ["Мои блюда", "dishes", 500]]
-            .map(([text, id, top]) => identifiedNode(text, `add-menu-${id}`, 'clickable="true"')
-                .replace('bounds="[20,200][300,250]"', `bounds="[20,${top}][300,${top + 50}]"`)).join("");
+    return screens[destination] + addAction() + tabNodes();
 }
 function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
     const diary = diaryNodes(diaryAddAction);
@@ -64,9 +64,6 @@ function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
         products: destinationNodes("products"),
         dishes: destinationNodes("dishes"),
         input: destinationNodes("input"),
-        "menu-diary": menuNodes(diary),
-        ...Object.fromEntries(["products", "dishes", "input"].map(destination =>
-            [`menu-${destination}`, menuNodes(destinationNodes(destination))])),
         "busy-diary": diary + node("Выполняется…"),
         "disabled-diary": diary.replaceAll('enabled="true"', 'enabled="false"'),
         launcher: node("Launcher").replace(packageId, "com.android.launcher3"),
@@ -78,7 +75,7 @@ function hierarchy(screen, diaryAddAction, screenOverrides = {}) {
 
 function fixture(context, { change = () => undefined, startFailure = false, welcome = "welcome", persisted = true,
     consoleLineEnding = "\n", extraConsoleLine = "", diaryScreen = "diary", diarySequence = [], diaryAddAction,
-    formBack = "welcome", keyboardBack = "filled", menuBack, menuDestinations = {}, destinationBack = "diary", screenOverrides = {} } = {}) {
+    formBack = "welcome", keyboardBack = "filled", navigationDestinations = {}, destinationBack = "diary", screenOverrides = {} } = {}) {
     const runnerTemp = mkdtempSync(join(tmpdir(), "nutriflow-android-smoke-test-"));
     context.after(() => rmSync(runnerTemp, { recursive: true, force: true }));
     const apkPath = join(runnerTemp, "verified APK.apk");
@@ -135,11 +132,11 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                     }
                     else if (operation[1] === "input" && operation[2] === "tap") {
                         const coordinates = operation.slice(3);
-                        if (screen.startsWith("menu-")) {
+                        if (screen === "diary") {
                             assert.equal(coordinates[0], "160");
-                            const destination = { 325: "input", 425: "products", 525: "dishes" }[coordinates[1]];
-                            assert.ok(destination || coordinates[1] === "225");
-                            screen = destination ? menuDestinations[destination] ?? destination : screen.slice(5);
+                            const destination = { 225: "input", 625: "products", 725: "dishes" }[coordinates[1]];
+                            assert.ok(destination);
+                            screen = navigationDestinations[destination] ?? destination;
                             return { status: 0, stdout, stderr: "" };
                         }
                         assert.deepEqual(coordinates, ["160", "225"]);
@@ -150,7 +147,7 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                         else if (screen === "filled") {
                             screen = "diary";
                             keyboardVisible = false;
-                        } else if (["diary", "products", "dishes", "input"].includes(screen)) screen = `menu-${screen}`;
+                        }
                     } else if (operation[1] === "input" && operation[2] === "text") {
                         assert.equal(screen, "form");
                         assert.equal(operation[3], "Smoke");
@@ -161,7 +158,6 @@ function fixture(context, { change = () => undefined, startFailure = false, welc
                             keyboardVisible = false;
                             screen = keyboardBack;
                         } else if (screen === "form") screen = formBack;
-                        else if (screen.startsWith("menu-")) screen = menuBack ?? screen.slice(5);
                         else if (["products", "dishes", "input"].includes(screen)) screen = destinationBack;
                     }
                 }
@@ -202,7 +198,7 @@ test("installs and launches the selected emulator, creates a profile by UI bound
         assert.ok(call.options.timeout > 0 && call.options.timeout <= 150_000);
     }
     const backCommands = sample.calls.filter(call => call.args.slice(2).join(" ") === "shell input keyevent 4");
-    assert.equal(backCommands.length, 9);
+    assert.equal(backCommands.length, 5);
     const inputIndex = sample.calls.findIndex(call => call.args.slice(2).join(" ") === "shell input text Smoke");
     const formBackIndex = sample.calls.indexOf(backCommands[0]);
     assert.ok(formBackIndex < inputIndex);
@@ -221,11 +217,8 @@ test("accepts package-qualified automation resource IDs while retaining the expe
     const qualify = xml => xml.replaceAll(/resource-id="([^"]+)"/g, `resource-id="${packageId}:id/$1"`);
     const sample = fixture(context, { screenOverrides: {
         welcome: qualify(welcomeNodes()), form: qualify(formNodes()), filled: qualify(formNodes("Smoke")),
-        diary: qualify(diaryNodes()), "menu-diary": qualify(menuNodes()),
-        ...Object.fromEntries(["products", "dishes", "input"].flatMap(destination => [
-            [destination, qualify(destinationNodes(destination))],
-            [`menu-${destination}`, qualify(menuNodes(destinationNodes(destination)))]
-        ]))
+        diary: qualify(diaryNodes()),
+        ...Object.fromEntries(["products", "dishes", "input"].map(destination => [destination, qualify(destinationNodes(destination))]))
     } });
     const report = await sample.run();
     assert.equal(report.status, "passed");
@@ -252,16 +245,16 @@ for (const [description, welcome] of [
 }
 
 for (const [description, form] of [
-    ["wrong heading", formNodes().replace('text="Твоё имя"', 'text="Другой экран"')],
+    ["wrong heading", formNodes().replace('text="Как вас зовут?"', 'text="Другой экран"')],
     ["missing name field ID", formNodes().replace('resource-id="profile-name"', '')],
     ["noneditable name field", formNodes().replace('class="android.widget.EditText"', 'class="android.widget.TextView"')],
     ["missing submit ID", formNodes().replace('resource-id="profile-create"', '')],
     ["wrong submit text", formNodes().replace('text="Продолжить"', 'text="Другая команда"')],
     ["nonclickable submit action", formNodes().replace('clickable="true"', 'clickable="false"')],
-    ["disabled submit action", node("Начало") + node("Твоё имя") +
+    ["disabled submit action", node("Новый профиль") + node("Как вас зовут?") +
         identifiedNode("Продолжить", "profile-create", 'clickable="true"').replace('enabled="true"', 'enabled="false"') +
         identifiedNode("Имя", "profile-name").replace('class="android.widget.TextView"', 'class="android.widget.EditText"')],
-    ["disabled name field", node("Начало") + node("Твоё имя") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
+    ["disabled name field", node("Новый профиль") + node("Как вас зовут?") + identifiedNode("Продолжить", "profile-create", 'clickable="true"') +
         identifiedNode("Имя", "profile-name").replace('class="android.widget.TextView"', 'class="android.widget.EditText"')
             .replace('enabled="true"', 'enabled="false"')]
 ]) {
@@ -285,7 +278,7 @@ test("rejects a filled form when the entered text belongs to a different field",
 
 test("accepts the exact entered profile name with its native semantic description prefix", async context => {
     const sample = fixture(context, { screenOverrides: {
-        filled: formNodes("Твоё имя, Smoke").replace('resource-id="profile-name"', 'resource-id="profile-name" hint="Имя"')
+        filled: formNodes("Ваше имя, Smoke").replace('resource-id="profile-name"', 'resource-id="profile-name" hint="Имя"')
     } });
     const report = await sample.run();
     assert.equal(report.status, "passed");
@@ -293,7 +286,7 @@ test("accepts the exact entered profile name with its native semantic descriptio
     assert.equal(report.profile.persistence, "passed");
 });
 
-for (const value of ["Другое имя, Smoke", "Твоё имя, Smoke extra", "Твоё имя, Other", "Smoke extra"]) {
+for (const value of ["Другое имя, Smoke", "Ваше имя, Smoke extra", "Ваше имя, Other", "Smoke extra"]) {
     test(`rejects a filled form with a different exact native value ${JSON.stringify(value)}`, async context => {
         const sample = fixture(context, { screenOverrides: { filled: formNodes(value) } });
         await assert.rejects(sample.run(), /expected NutriFlow screen.*profile-filled.xml/);
@@ -338,90 +331,56 @@ test("accepts the diary icon-only add action through its accessible description 
     assert.ok(existsSync(join(sample.outputDirectory, "diary-after-restart.png")));
 });
 
-test("verifies add-menu toggling and Back dismissal before visiting every destination and returning to Diary", async context => {
+test("visits every destination from the bottom navigation and returns to Diary with Back", async context => {
     const sample = fixture(context);
     const report = await sample.run();
-    assert.deepEqual(report.addMenu, {
-        toggle: "passed", back: "passed", products: "passed", dishes: "passed", input: "passed"
-    });
-    for (const file of ["menu-open.xml", "add-menu.png", "diary-after-menu-toggle.xml", "diary-after-menu-back.xml",
-        ...["products", "dishes", "input"].flatMap(destination => [`${destination}.xml`, `${destination}.png`,
-            `menu-on-${destination}.xml`, `${destination}-after-menu-back.xml`, `diary-after-${destination}-back.xml`])]) {
+    assert.deepEqual(report.navigation, { products: "passed", dishes: "passed", input: "passed" });
+    for (const file of ["products", "dishes", "input"].flatMap(destination =>
+        [`${destination}.xml`, `${destination}.png`, `diary-after-${destination}-back.xml`])) {
         assert.ok(existsSync(join(sample.outputDirectory, file)), file);
     }
 });
 
-test("accepts a docked add menu while underlying destination controls are outside the visible hierarchy", async context => {
-    const sample = fixture(context, { screenOverrides: Object.fromEntries(["products", "dishes", "input"]
-        .map(destination => [`menu-${destination}`, menuNodes(addAction())])) });
-    const report = await sample.run();
-    assert.equal(report.status, "passed");
-    assert.deepEqual(report.addMenu, {
-        toggle: "passed", back: "passed", products: "passed", dishes: "passed", input: "passed"
-    });
-});
-
-for (const [description, menu] of [
-    ["missing panel ID", menuNodes().replace('resource-id="add-menu"', '')],
-    ["a panel from another package", menuNodes().replace(identifiedNode("", "add-menu")
-        .replace('bounds="[20,200][300,250]"', 'bounds="[20,280][300,550]"'),
-        identifiedNode("", "add-menu").replace(packageId, "com.example.other"))],
-    ["a disabled panel", menuNodes().replace(identifiedNode("", "add-menu")
-        .replace('bounds="[20,200][300,250]"', 'bounds="[20,280][300,550]"'),
-        identifiedNode("", "add-menu").replace('enabled="true"', 'enabled="false"'))],
-    ["a panel without usable bounds", menuNodes().replace('bounds="[20,280][300,550]"', 'bounds="[0,0][0,0]"')],
-    ["a stale plus icon", menuNodes().replace('text="×"', 'text="+"')],
-    ["the closed accessible description", menuNodes().replace('content-desc="Закрыть меню добавления"', 'content-desc="Добавить еду"')],
-    ...["input", "products", "dishes"].flatMap(destination => {
-        const menu = menuNodes();
-        const action = menu.match(new RegExp(`<node[^>]+resource-id="add-menu-${destination}"[^>]+>`))[0];
+for (const [description, tabs] of [
+    ...[["products", "Продукты", 600], ["dishes", "Блюда", 700]].flatMap(([destination, text, top]) => {
+        const tab = describedNode(`tab-${destination}`, text, top);
+        const others = tabNodes().replace(tab, "");
         return [
-            [`missing ${destination} action ID`, menu.replace(`resource-id="add-menu-${destination}"`, '')],
-            [`wrong ${destination} action text`, menu.replace(action, action.replace(/text="[^"]*"/, 'text="Другое действие"'))],
-            [`a ${destination} action from another package`, menu.replace(action, action.replace(packageId, "com.example.other"))],
-            [`a disabled ${destination} action`, menu.replace(action, action.replace('enabled="true"', 'enabled="false"'))],
-            [`a nonclickable ${destination} action`, menu.replace(action, action.replace('clickable="true"', 'clickable="false"'))],
-            [`a ${destination} action without usable bounds`, menu.replace(action, action.replace(/bounds="[^"]*"/, 'bounds="[0,0][0,0]"'))]
+            [`missing ${destination} tab ID`, others + tab.replace(`resource-id="tab-${destination}"`, "")],
+            [`wrong ${destination} tab description`, others + tab.replace(`content-desc="${text}"`, 'content-desc="Другой раздел"')],
+            [`a ${destination} tab from another package`, others + tab.replace(packageId, "com.example.other")],
+            [`a disabled ${destination} tab`, others + tab.replace('enabled="true"', 'enabled="false"')],
+            [`a nonclickable ${destination} tab`, others + tab.replace('clickable="true"', 'clickable="false"')],
+            [`a ${destination} tab without usable bounds`, others + tab.replace(/bounds="[^"]*"/, 'bounds="[0,0][0,0]"')]
         ];
     })
 ]) {
-    test(`rejects the add menu with ${description}`, async context => {
-        const sample = fixture(context, { screenOverrides: { "menu-diary": menu } });
-        await assert.rejects(sample.run(), /expected NutriFlow screen.*menu-open.xml/);
-        assert.equal(sample.report().addMenu.toggle, "not-tested");
-        assert.ok(!existsSync(join(sample.outputDirectory, "add-menu.png")));
+    test(`rejects bottom navigation with ${description}`, async context => {
+        const sample = fixture(context, { screenOverrides: { diary: diaryNodes(addAction(), tabs) } });
+        await assert.rejects(sample.run());
+        assert.equal(sample.report().profile.creation, "passed");
+        assert.ok(Object.values(sample.report().navigation).includes("not-tested"));
         assert.deepEqual(sample.child.signals, ["SIGTERM"]);
     });
 }
 
-for (const menuBack of ["launcher", "menu-diary"]) {
-    test(`rejects menu Back that leaves ${menuBack} visible instead of the unchanged Diary`, async context => {
-        const sample = fixture(context, { menuBack });
-        await assert.rejects(sample.run(), /expected NutriFlow screen.*diary-after-menu-back.xml/);
-        assert.equal(sample.report().addMenu.toggle, "passed");
-        assert.equal(sample.report().addMenu.back, "not-tested");
-    });
-}
-
 for (const destination of ["products", "dishes", "input"]) {
-    test(`rejects the ${destination} menu action opening another destination`, async context => {
-        const sample = fixture(context, { menuDestinations: { [destination]: destination === "products" ? "input" : "products" } });
+    test(`rejects ${destination} navigation that opens another destination`, async context => {
+        const sample = fixture(context, { navigationDestinations: { [destination]: destination === "products" ? "input" : "products" } });
         await assert.rejects(sample.run(), new RegExp(`expected NutriFlow screen.*${destination}\\.xml`));
-        assert.equal(sample.report().addMenu[destination], "not-tested");
+        assert.equal(sample.report().navigation[destination], "not-tested");
     });
-    test(`rejects a lingering add menu on the ${destination} destination`, async context => {
-        const lingering = menuNodes(destinationNodes(destination)).replace('text="×"', 'text="+"')
-            .replace('content-desc="Закрыть меню добавления"', 'content-desc="Добавить еду"');
-        const sample = fixture(context, { screenOverrides: { [destination]: lingering } });
+    test(`rejects the ${destination} destination without the central add action`, async context => {
+        const sample = fixture(context, { screenOverrides: { [destination]: destinationNodes(destination).replace(addAction(), "") } });
         await assert.rejects(sample.run(), new RegExp(`expected NutriFlow screen.*${destination}\\.xml`));
-        assert.equal(sample.report().addMenu[destination], "not-tested");
+        assert.equal(sample.report().navigation[destination], "not-tested");
     });
 }
 
-test("rejects menu Back from a catalog that changes the current destination", async context => {
-    const sample = fixture(context, { menuBack: "diary" });
-    await assert.rejects(sample.run(), /expected NutriFlow screen.*products-after-menu-back.xml/);
-    assert.equal(sample.report().addMenu.products, "not-tested");
+test("rejects Back from a destination that stays on the destination instead of Diary", async context => {
+    const sample = fixture(context, { destinationBack: "products" });
+    await assert.rejects(sample.run(), /expected NutriFlow screen.*diary-after-products-back.xml/);
+    assert.equal(sample.report().navigation.products, "not-tested");
 });
 
 for (const [description, dishes] of [
@@ -437,7 +396,7 @@ for (const [description, dishes] of [
     test(`rejects the dish catalog with ${description}`, async context => {
         const sample = fixture(context, { screenOverrides: { dishes } });
         await assert.rejects(sample.run(), /expected NutriFlow screen.*dishes\.xml/);
-        assert.equal(sample.report().addMenu.dishes, "not-tested");
+        assert.equal(sample.report().navigation.dishes, "not-tested");
         assert.ok(!existsSync(join(sample.outputDirectory, "dishes.png")));
         assert.deepEqual(sample.child.signals, ["SIGTERM"]);
     });
@@ -446,7 +405,7 @@ for (const [description, dishes] of [
 test("rejects a second Back from a destination that leaves the app on the launcher", async context => {
     const sample = fixture(context, { destinationBack: "launcher" });
     await assert.rejects(sample.run(), /expected NutriFlow screen.*diary-after-products-back.xml/);
-    assert.equal(sample.report().addMenu.products, "not-tested");
+    assert.equal(sample.report().navigation.products, "not-tested");
 });
 
 for (const [description, action] of [
@@ -488,8 +447,10 @@ for (const [description, diary] of [
         identifiedNode("0", "diary-calories").replace("android.widget.TextView", "android.widget.EditText"))],
     ["a calorie value in another package", diaryNodes().replace(identifiedNode("0", "diary-calories"),
         identifiedNode("0", "diary-calories").replace(packageId, "com.example.other"))],
-    ...["ккал", "Белки", "Жиры", "Углеводы", "Цель · внешняя", "Съедено · внутренняя"].map(text =>
+    ...["ккал съедено", "Белки", "Жиры", "Углеводы"].map(text =>
         [`missing ${JSON.stringify(text)}`, diaryNodes().replace(node(text), "")]),
+    ["a goal action without its description", diaryNodes().replace('content-desc="Цель не задана. Задать цель"', "")],
+    ["a profile avatar for another profile", diaryNodes().replace("Профиль: Smoke.", "Профиль: Другой.")],
     ["an add action ID without its expected text or description", diaryNodes(identifiedNode("+", "add-food", 'clickable="true"'))],
     ["a visible add action without its ID", diaryNodes(node("Добавить еду", 'clickable="true"'))]
 ]) {

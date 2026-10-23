@@ -166,6 +166,51 @@ public sealed class NutritionArcLayoutTests
         AssertSemicircle(NutritionArcLayout.Create(protein, fat, carbohydrates));
     }
 
+    [Fact]
+    public void ProgressFillsTheGoalShareAndSplitsItByEnergy()
+    {
+        IReadOnlyList<NutritionArcSegment> segments = NutritionArcLayout.CreateProgress(1000m, 2000m, 25m, 0m, 25m);
+
+        Assert.Equal(2, segments.Count);
+        AssertSegment(segments[0], NutritionMacro.Protein, 180m, 45m);
+        AssertSegment(segments[1], NutritionMacro.Carbohydrates, 135m, 45m);
+    }
+
+    [Fact]
+    public void ProgressWeighsFatByItsHigherEnergy()
+    {
+        IReadOnlyList<NutritionArcSegment> segments = NutritionArcLayout.CreateProgress(170m, 170m, 10m, 10m, 10m);
+
+        AssertSegment(segments[0], NutritionMacro.Protein, 180m, 180m * 40m / 170m);
+        AssertSegment(segments[1], NutritionMacro.Fat, 180m - 180m * 40m / 170m, 180m * 90m / 170m);
+        AssertAngle(0m, segments[2].StartAngle - segments[2].SweepAngle);
+    }
+
+    [Fact]
+    public void ProgressAboveGoalStopsAtTheFullSemicircle()
+    {
+        IReadOnlyList<NutritionArcSegment> segments = NutritionArcLayout.CreateProgress(3000m, 2000m, 50m, 20m, 100m);
+
+        AssertSemicircle(segments);
+        Assert.Equal(1m, NutritionArcLayout.Progress(3000m, 2000m));
+    }
+
+    [Theory]
+    [InlineData(0, 2000, 10, 10, 10)]
+    [InlineData(500, 0, 10, 10, 10)]
+    [InlineData(500, 2000, 0, 0, 0)]
+    public void ProgressWithoutGoalIntakeOrMacrosHasNoSegments(int consumed, int goal, int protein, int fat, int carbohydrates)
+    {
+        Assert.Empty(NutritionArcLayout.CreateProgress(consumed, goal, protein, fat, carbohydrates));
+    }
+
+    [Fact]
+    public void ProgressRejectsNegativeValues()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => NutritionArcLayout.CreateProgress(-1m, 2000m, 1m, 1m, 1m));
+        Assert.Throws<ArgumentOutOfRangeException>(() => NutritionArcLayout.CreateProgress(100m, 2000m, 1m, -1m, 1m));
+    }
+
     private static void AssertSegment(NutritionArcSegment segment, NutritionMacro macro, decimal start, decimal sweep)
     {
         Assert.Equal(macro, segment.Macro);

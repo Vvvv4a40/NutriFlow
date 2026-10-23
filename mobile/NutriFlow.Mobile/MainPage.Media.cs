@@ -9,8 +9,18 @@ public partial class MainPage
     private Task LabelSourcePageAsync(Guid profileId)
     {
         FormPage page = new("Фото этикетки");
-        page.Fields.Children.Add(Ui.Title("Пищевая ценность с упаковки"));
-        page.Fields.Children.Add(Ui.Text("Снимите название и таблицу КБЖУ крупно. Фото отправится в Groq, затем вы сможете сверить и исправить каждое значение."));
+        Border tile = Ui.IconTile(AppIconKind.Camera, Ui.Accent, 64);
+        tile.HorizontalOptions = LayoutOptions.Start;
+        page.Fields.Children.Add(tile);
+        page.Fields.Children.Add(Ui.Headline("Пищевая ценность с упаковки", 24));
+        page.Fields.Children.Add(Ui.Text("Фото отправится в Groq. Затем вы сверите и при необходимости исправите каждое значение.", true));
+        VerticalStackLayout tips = new() { Spacing = 10 };
+        tips.Children.Add(Tip("Таблица КБЖУ крупно и без бликов"));
+        tips.Children.Add(Tip("Название продукта тоже в кадре"));
+        tips.Children.Add(Tip("Видно, на 100 г или на порцию указаны значения"));
+        page.Fields.Children.Add(Ui.Card(tips));
+        Button? takePhoto = null;
+        Button? pickPhoto = null;
         async Task ReadPhotoAsync(bool camera)
         {
             await page.RunAsync(async () =>
@@ -39,6 +49,7 @@ public partial class MainPage
 
                 byte[] bytes = await ReadFileAsync(file, 8 * 1024 * 1024);
                 string mediaType = PhotoMediaType(file);
+                page.ShowProgress(camera ? takePhoto! : pickPhoto!, "Распознаю этикетку…");
                 LabelCapture capture = await _client.ReadLabelAsync(profileId, bytes, mediaType, settings);
                 NutritionLabelDraft draft = capture.Draft;
                 string basis = draft.Basis switch { NutritionBasis.Per100Grams => "на 100 г", NutritionBasis.Per100Milliliters => "на 100 мл", NutritionBasis.PerServing => "на порцию", _ => "не определена" };
@@ -47,35 +58,59 @@ public partial class MainPage
             });
         }
 
-        page.Fields.Children.Add(Ui.Action("Сделать фото", () => ReadPhotoAsync(true)));
-        page.Fields.Children.Add(Ui.Action("Выбрать из галереи", () => ReadPhotoAsync(false), true));
+        takePhoto = Ui.Action("Сделать фото", () => ReadPhotoAsync(true));
+        pickPhoto = Ui.Action("Выбрать из галереи", () => ReadPhotoAsync(false), true);
+        page.AddFooter(takePhoto);
+        page.AddFooter(pickPhoto);
         return Navigation.PushAsync(page);
+    }
+
+    private static View Tip(string text)
+    {
+        Grid row = new()
+        {
+            ColumnSpacing = 10,
+            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star } }
+        };
+        row.Add(new AppIcon(AppIconKind.Check, Ui.Success, 18) { VerticalOptions = LayoutOptions.Start, Margin = new Thickness(0, 2, 0, 0) }, 0);
+        row.Add(Ui.Text(text), 1);
+        return row;
     }
 
     private Task AudioPageAsync(Guid profileId)
     {
-        FormPage page = new("Голос и аудио");
+        FormPage page = new("Голосом");
         AudioCapture capture = new();
         IDispatcherTimer timer = page.Dispatcher.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(1);
         int elapsedSeconds = 0;
         bool transcribing = false;
-        Label recordingStatus = Ui.Text("", true);
-        Editor transcript = new InputEditor() { Placeholder = "Здесь появится текст. Проверьте и исправьте его.", MinimumHeightRequest = 180, AutoSize = EditorAutoSizeOption.TextChanges, MaxLength = MealInputText.MaximumLength, BackgroundColor = Ui.SurfaceRaised };
-        page.Fields.Children.Add(Ui.Title("Описание еды голосом"));
-        page.Fields.Children.Add(Ui.Text("Распознавание отправляет аудио в Groq. Полученный текст можно исправить перед разбором еды.", true));
-        page.Fields.Children.Add(recordingStatus);
+        Label recordingStatus = Ui.Text("Расскажите, что и сколько съели. Запись до 110 секунд.", true);
+        recordingStatus.HorizontalTextAlignment = TextAlignment.Center;
+        Editor transcript = new InputEditor() { Placeholder = "Здесь появится распознанный текст — его можно исправить", MinimumHeightRequest = 160, AutoSize = EditorAutoSizeOption.TextChanges, MaxLength = MealInputText.MaximumLength, BackgroundColor = Ui.SurfaceRaised, PlaceholderColor = Ui.Subtle, FontSize = 17 };
         Button? start = null;
         Button? stop = null;
         Button? pick = null;
-        async Task TranscribeAsync(byte[] bytes, string? mediaType)
+        Button? retry = null;
+        (byte[] Bytes, string? MediaType)? lastAudio = null;
+        async Task TranscribeAsync(byte[] bytes, string? mediaType, Button progress)
         {
             transcribing = true;
+            lastAudio = (bytes, mediaType);
+            retry!.IsVisible = false;
             try
             {
                 GroqSettings settings = await ProfileSettings.GetGroqAsync(profileId);
+                page.ShowProgress(progress, "Распознаю…");
                 transcript.Text = await _client.TranscribeAsync(profileId, bytes, mediaType, settings);
                 recordingStatus.Text = "Текст готов — проверьте его перед использованием.";
+            }
+            catch
+            {
+                // the recording is already stopped, so keep it and let the user retry instead of recording again
+                recordingStatus.Text = "Не удалось распознать запись. Её можно отправить ещё раз.";
+                retry.IsVisible = true;
+                throw;
             }
             finally
             {
@@ -89,8 +124,7 @@ public partial class MainPage
             await page.RunAsync(async () =>
             {
                 byte[] bytes = await capture.StopAsync();
-                recordingStatus.Text = "Распознавание…";
-                await TranscribeAsync(bytes, "audio/mp4");
+                await TranscribeAsync(bytes, "audio/mp4", stop!);
             });
             start!.IsEnabled = true;
             stop!.IsEnabled = false;
@@ -108,7 +142,7 @@ public partial class MainPage
             pick!.IsEnabled = false;
             timer.Start();
         }));
-        stop = Ui.Action("Остановить и распознать", StopAsync, true);
+        stop = Ui.Action("Остановить", StopAsync, true);
         stop.IsEnabled = false;
         pick = Ui.Action("Выбрать аудиофайл", () => page.RunAsync(async () =>
         {
@@ -126,16 +160,34 @@ public partial class MainPage
             });
             if (file is not null)
             {
-                await TranscribeAsync(await ReadFileAsync(file, 8 * 1024 * 1024), AudioMediaType(file));
+                await TranscribeAsync(await ReadFileAsync(file, 8 * 1024 * 1024), AudioMediaType(file), pick!);
             }
         }), true);
+        retry = Ui.Ghost("Повторить распознавание", () => page.RunAsync(() =>
+            lastAudio is { } audio ? TranscribeAsync(audio.Bytes, audio.MediaType, retry!) : Task.CompletedTask), Ui.Warning);
+        retry.IsVisible = false;
+        retry.HorizontalOptions = LayoutOptions.Center;
+        start.MinimumHeightRequest = 56;
+        stop.MinimumHeightRequest = 56;
+        pick.HorizontalOptions = LayoutOptions.Center;
+        pick.BackgroundColor = Colors.Transparent;
+        pick.TextColor = Ui.Accent;
+        Border tile = Ui.IconTile(AppIconKind.Microphone, Ui.Accent, 88);
+        tile.HorizontalOptions = LayoutOptions.Center;
+        tile.Margin = new Thickness(0, 12, 0, 0);
+        page.Fields.Children.Add(tile);
+        page.Fields.Children.Add(recordingStatus);
+        page.Fields.Children.Add(retry);
 #if ANDROID
-        page.Fields.Children.Add(start);
-        page.Fields.Children.Add(stop);
+        Grid controls = new() { ColumnSpacing = 10, ColumnDefinitions = new ColumnDefinitionCollection { new(), new() } };
+        controls.Add(start, 0);
+        controls.Add(stop, 1);
+        page.Fields.Children.Add(controls);
 #endif
         page.Fields.Children.Add(pick);
-        page.Fields.Children.Add(transcript);
-        page.Fields.Children.Add(Ui.Action("Использовать проверенный текст", () => page.RunAsync(async () =>
+        page.Fields.Children.Add(Ui.Labeled("Распознанный текст", transcript));
+        page.Fields.Children.Add(Ui.Caption("Аудио отправляется в Groq только для распознавания. Текст попадёт в описание еды после вашей проверки.", Ui.Subtle));
+        Button use = Ui.Action("Использовать текст", () => page.RunAsync(async () =>
         {
             if (capture.IsRecording || transcribing)
             {
@@ -153,7 +205,11 @@ public partial class MainPage
             _draftText = combinedText;
             _tab = "Ввод";
             await Navigation.PopAsync();
-        })));
+        }));
+        // the main action stays inactive until there is recognised or typed text to use
+        Ui.SetEnabled(use, false);
+        transcript.TextChanged += (_, _) => Ui.SetEnabled(use, !string.IsNullOrWhiteSpace(transcript.Text));
+        page.AddFooter(use);
         timer.Tick += async (_, _) =>
         {
             elapsedSeconds++;

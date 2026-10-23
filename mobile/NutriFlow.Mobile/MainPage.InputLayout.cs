@@ -7,110 +7,78 @@ public partial class MainPage
 {
     private View InputPurposeSelector(Action changed)
     {
-        Button diary = new() { Text = "В дневник", AutomationId = "input-purpose-diary" };
-        Button dish = new() { Text = "Создать блюдо", AutomationId = "input-purpose-dish" };
+        ContentView container = new();
+        (string, string)[] options = [("В дневник", "input-purpose-diary"), ("Создать блюдо", "input-purpose-dish")];
 
-        void Refresh(Button button, MealSessionPurpose purpose)
+        void Render()
         {
-            bool selected = _purpose == purpose;
-            button.FontSize = 13;
-            button.Padding = new Thickness(10, 12);
-            button.CornerRadius = 14;
-            button.BackgroundColor = selected ? Ui.Accent : Colors.Transparent;
-            button.TextColor = selected ? Ui.Background : Ui.Muted;
-            button.BorderColor = selected ? Ui.Accent : Colors.Transparent;
-            button.BorderWidth = 1;
-            button.IsEnabled = _session is null && !InputDraftBlocked;
-            SemanticProperties.SetDescription(button, selected ? $"{button.Text}. Выбрано" : button.Text);
-            if (_session is not null)
-            {
-                SemanticProperties.SetHint(button, "Режим черновика зафиксирован. Для изменения начните новую запись.");
-            }
+            container.Content = Ui.Segmented(options, _purpose == MealSessionPurpose.CreateDish ? 1 : 0, Select,
+                _session is null && !InputDraftBlocked);
         }
 
-        void Select(MealSessionPurpose purpose)
+        void Select(int index)
         {
-            if (_busy || _session is not null || _purpose == purpose || InputDraftBlocked)
+            MealSessionPurpose purpose = index == 1 ? MealSessionPurpose.CreateDish : MealSessionPurpose.Diary;
+            if (Busy || _session is not null || _purpose == purpose || InputDraftBlocked)
             {
                 return;
             }
 
             _purpose = purpose;
             _ = QueueInputDraftSave(CurrentProfileId(), CaptureInputDraft());
-            Refresh(diary, MealSessionPurpose.Diary);
-            Refresh(dish, MealSessionPurpose.CreateDish);
+            Render();
             changed();
         }
 
-        Refresh(diary, MealSessionPurpose.Diary);
-        Refresh(dish, MealSessionPurpose.CreateDish);
-        diary.Clicked += (_, _) => Select(MealSessionPurpose.Diary);
-        dish.Clicked += (_, _) => Select(MealSessionPurpose.CreateDish);
-        Grid choices = new()
-        {
-            ColumnSpacing = 6,
-            ColumnDefinitions = new ColumnDefinitionCollection { new(), new() }
-        };
-        choices.Add(diary, 0);
-        choices.Add(dish, 1);
-        return new Border
-        {
-            Content = choices,
-            BackgroundColor = Ui.Surface,
-            Padding = 5,
-            StrokeThickness = 0,
-            StrokeShape = new RoundRectangle { CornerRadius = 20 }
-        };
+        Render();
+        return container;
     }
 
-    private View InputComposer(Guid profileId, Editor editor, Label count, Button submit)
+    private View InputComposer(Guid profileId, Editor editor, Label count, Button submit, string? title)
     {
-        Label title = Ui.Text(_session is null ? "Описание еды" : "Дополнение");
-        title.FontSize = 15;
-        title.FontAttributes = FontAttributes.Bold;
-        Grid heading = new()
-        {
-            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } }
-        };
-        heading.Add(title, 0);
-        heading.Add(count, 1);
-
-        Button voice = Ui.Action("", () => AudioPageAsync(profileId), true);
-        voice.AutomationId = "input-voice";
-        voice.IsEnabled = !InputDraftBlocked;
-        voice.Padding = 0;
-        voice.MinimumHeightRequest = 56;
-        SemanticProperties.SetDescription(voice, "Голос или аудиофайл");
-        SemanticProperties.SetHint(voice, "Распознать речь и проверить текст перед использованием");
-        Label voiceText = Ui.Text("Голос");
-        voiceText.FontSize = 13;
-        voiceText.FontAttributes = FontAttributes.Bold;
-        HorizontalStackLayout voiceContent = new() { Spacing = 6, InputTransparent = true, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center };
-        voiceContent.Children.Add(new AppIcon(AppIconKind.Microphone, Ui.Accent, 20));
-        voiceContent.Children.Add(voiceText);
-        voiceContent.SetValue(AutomationProperties.ExcludedWithChildrenProperty, true);
-        Grid voiceControl = new() { WidthRequest = 96 };
-        voiceControl.Add(voice);
-        voiceControl.Add(voiceContent);
-        Grid actions = new()
-        {
-            ColumnSpacing = 8,
-            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star } }
-        };
-        actions.Add(voiceControl, 0);
-        actions.Add(submit, 1);
         VerticalStackLayout composer = new() { Spacing = 12 };
-        composer.Children.Add(heading);
-        composer.Children.Add(editor);
-        composer.Children.Add(actions);
-        return new Border
+        if (title is not null)
         {
-            Content = composer,
-            Padding = 16,
-            BackgroundColor = Ui.Surface,
-            StrokeThickness = 0,
-            StrokeShape = new RoundRectangle { CornerRadius = 24 }
+            composer.Children.Add(Ui.Overline(title));
+        }
+
+        composer.Children.Add(editor);
+        Grid tools = new()
+        {
+            ColumnSpacing = 10,
+            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } }
         };
+        HorizontalStackLayout voiceContent = new() { Spacing = 8, Padding = new Thickness(14, 0, 16, 0), VerticalOptions = LayoutOptions.Center };
+        voiceContent.Children.Add(new AppIcon(AppIconKind.Microphone, Ui.Accent, 20) { VerticalOptions = LayoutOptions.Center });
+        Label voiceText = Ui.Strong("Голос", 15);
+        voiceText.TextColor = Ui.Accent;
+        voiceText.VerticalOptions = LayoutOptions.Center;
+        voiceContent.Children.Add(voiceText);
+        Border voiceChip = new()
+        {
+            Content = voiceContent,
+            HeightRequest = 44,
+            BackgroundColor = Ui.AccentSoft,
+            StrokeThickness = 0,
+            StrokeShape = new RoundRectangle { CornerRadius = 22 }
+        };
+        Grid voice = Ui.Pressable(voiceChip, () => AudioPageAsync(profileId), "Голос или аудиофайл",
+            "Распознать речь и проверить текст перед использованием", "input-voice");
+        Ui.FillPressable(voice, voiceChip, Ui.AccentSoft);
+        voice.IsEnabled = !InputDraftBlocked;
+        voice.VerticalOptions = LayoutOptions.Center;
+        tools.Add(voice, 0);
+        if (_inputSaveStatus is not null)
+        {
+            _inputSaveStatus.VerticalOptions = LayoutOptions.Center;
+            tools.Add(_inputSaveStatus, 1);
+        }
+
+        count.VerticalOptions = LayoutOptions.Center;
+        tools.Add(count, 2);
+        composer.Children.Add(tools);
+        composer.Children.Add(submit);
+        return Ui.Panel(composer, 16);
     }
 
     private void RenderInputAlternatives(Guid profileId, VerticalStackLayout alternatives)
@@ -122,44 +90,25 @@ public partial class MainPage
             return;
         }
 
+        alternatives.Children.Add(SectionHeader("Или без описания"));
         if (_purpose == MealSessionPurpose.CreateDish)
         {
-            alternatives.Children.Add(InputShortcut("Из ингредиентов", AppIconKind.Dishes,
-                "input-manual-dish", () => ManualDishPageAsync(profileId)));
+            alternatives.Children.Add(Ui.List([
+                Ui.Row("Собрать из продуктов", "Ингредиенты из каталога и готовый вес", null, null,
+                    () => ManualDishPageAsync(profileId), "Собрать блюдо из продуктов каталога", AppIconKind.Dishes,
+                    automationId: "input-manual-dish")
+            ]));
         }
         else
         {
-            alternatives.Children.Add(InputShortcut("Продукт", AppIconKind.Products,
-                "input-manual-product", () => ChooseManualMealPageAsync(profileId)));
-            alternatives.Children.Add(InputShortcut("Мои блюда", AppIconKind.Dishes,
-                "input-saved-dishes", () => SelectTabAsync("Блюда")));
+            alternatives.Children.Add(Ui.List([
+                Ui.Row("Продукт из каталога", "Указать вес порции", null, null,
+                    () => ChooseManualMealPageAsync(profileId), "Продукт из каталога", AppIconKind.Products,
+                    automationId: "input-manual-product"),
+                Ui.Row("Моё блюдо", "Порция сохранённого блюда", null, null,
+                    () => SelectTabAsync("Блюда"), "Мои блюда", AppIconKind.Dishes,
+                    automationId: "input-saved-dishes")
+            ]));
         }
-    }
-
-    private static View InputShortcut(string title, AppIconKind icon, string automationId, Func<Task> action)
-    {
-        Button button = Ui.Action("", action, true);
-        button.AutomationId = automationId;
-        button.BackgroundColor = Colors.Transparent;
-        button.MinimumHeightRequest = 56;
-        SemanticProperties.SetDescription(button, title);
-        Label name = Ui.Text(title);
-        name.FontAttributes = FontAttributes.Bold;
-        name.VerticalOptions = LayoutOptions.Center;
-        Grid content = new()
-        {
-            Padding = new Thickness(16, 14),
-            ColumnSpacing = 12,
-            InputTransparent = true,
-            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } }
-        };
-        content.Add(new AppIcon(icon, Ui.Accent) { VerticalOptions = LayoutOptions.Center }, 0);
-        content.Add(name, 1);
-        content.Add(new AppIcon(AppIconKind.Next, Ui.Muted, 18) { VerticalOptions = LayoutOptions.Center }, 2);
-        content.SetValue(AutomationProperties.ExcludedWithChildrenProperty, true);
-        Grid row = new();
-        row.Add(button);
-        row.Add(content);
-        return new Border { Content = row, BackgroundColor = Ui.Surface, StrokeThickness = 0, StrokeShape = new RoundRectangle { CornerRadius = 20 } };
     }
 }

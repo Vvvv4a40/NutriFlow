@@ -4,68 +4,41 @@ namespace NutriFlow.Mobile;
 
 public partial class MainPage
 {
-    private View ProductCatalogCard(Guid profileId, ProductResponse product)
+    private View ProductRow(Guid profileId, ProductResponse product)
     {
-        VerticalStackLayout content = new() { Spacing = 8 };
-        Label name = Ui.Title(product.Name);
-        name.FontSize = 20;
-        name.Margin = 0;
-        name.LineBreakMode = LineBreakMode.WordWrap;
-        SemanticProperties.SetHeadingLevel(name, SemanticHeadingLevel.Level2);
-        content.Children.Add(name);
+        string qualityMark = product.DataQuality == "Estimated" ? "≈ " : "";
+        return Ui.Row(product.Name, null, $"{qualityMark}{Ui.Kilocalories(product.Calories)}", "ккал / 100 г",
+            () => ProductPortionPageAsync(profileId, product),
+            $"{product.Name}. На 100 граммов: {Ui.SpokenNutrition(product)}. {Ui.Quality(product.DataQuality)}",
+            subtitleSpans: Ui.MacroSpans(product), hint: "Добавить порцию в дневник");
+    }
 
-        VerticalStackLayout nutrition = new() { Spacing = 6 };
-        Label calories = Ui.Title($"{Ui.Amount(product.Calories)} ккал · на 100 г");
-        calories.FontSize = 20;
-        calories.Margin = 0;
-        nutrition.Children.Add(calories);
-        Label macros = Ui.Text("");
-        macros.FontSize = 13;
-        macros.FormattedText = new FormattedString();
-        macros.FormattedText.Spans.Add(new Span { Text = $"Белки {Ui.MacroAmount(product.ProteinGrams)} г", TextColor = Ui.Protein });
-        macros.FormattedText.Spans.Add(new Span { Text = " · ", TextColor = Ui.Muted });
-        macros.FormattedText.Spans.Add(new Span { Text = $"Жиры {Ui.MacroAmount(product.FatGrams)} г", TextColor = Ui.Fat });
-        macros.FormattedText.Spans.Add(new Span { Text = " · ", TextColor = Ui.Muted });
-        macros.FormattedText.Spans.Add(new Span { Text = $"Углеводы {Ui.MacroAmount(product.CarbohydratesGrams)} г", TextColor = Ui.Carbs });
-        nutrition.Children.Add(macros);
-        content.Children.Add(nutrition);
-
+    private static View ProductNutritionCard(ProductResponse product)
+    {
+        NutritionResponse per100 = new(product.Calories, product.ProteinGrams, product.FatGrams, product.CarbohydratesGrams);
         string sourceKind = string.IsNullOrWhiteSpace(product.SourceKind) ? "тип неизвестен" : Ui.Source(product.SourceKind);
         string sourceName = string.IsNullOrWhiteSpace(product.SourceName) ? "название неизвестно" : product.SourceName;
-        content.Children.Add(ProductCatalogDetail($"{Ui.Quality(product.DataQuality)} · {sourceKind}"));
-        VerticalStackLayout provenance = new() { Spacing = 8, IsVisible = false };
-        provenance.Children.Add(ProductCatalogDetail($"Источник: {sourceKind} · {sourceName}"));
+        HorizontalStackLayout meta = new() { Spacing = 8 };
+        meta.Children.Add(Ui.Caption(sourceKind));
+        AddBadge(meta, Ui.QualityBadge(product.DataQuality));
+
+        VerticalStackLayout provenance = new() { Spacing = 6 };
+        provenance.Children.Add(Ui.Caption($"Источник: {sourceKind} · {sourceName}"));
+        provenance.Children.Add(Ui.Caption($"Качество: {Ui.Quality(product.DataQuality)}"));
         if (!string.IsNullOrWhiteSpace(product.Barcode))
         {
-            Label barcode = ProductCatalogDetail($"Штрихкод: {product.Barcode}");
+            Label barcode = Ui.Caption($"Штрихкод: {product.Barcode}");
             barcode.LineBreakMode = LineBreakMode.CharacterWrap;
             provenance.Children.Add(barcode);
         }
 
         if (!string.IsNullOrWhiteSpace(product.SourceReference))
         {
-            Label reference = ProductCatalogDetail($"Данные источника: {product.SourceReference}");
+            Label reference = Ui.Caption($"Данные источника: {product.SourceReference}", Ui.Subtle);
             reference.LineBreakMode = LineBreakMode.CharacterWrap;
             provenance.Children.Add(reference);
         }
-        Button source = Ui.Action("Источник", () =>
-        {
-            provenance.IsVisible = !provenance.IsVisible;
-            return Task.CompletedTask;
-        }, true);
-        SemanticProperties.SetDescription(source, $"Источник продукта «{product.Name}»");
-        SemanticProperties.SetHint(source, "Показать или скрыть подробности источника, штрихкод и ссылку");
-        Button add = Ui.Action("Добавить порцию", () => ProductPortionPageAsync(profileId, product), true);
-        SemanticProperties.SetDescription(add, $"Добавить порцию продукта «{product.Name}» в дневник");
-        content.Children.Add(Ui.Row(source, add));
-        content.Children.Add(provenance);
-        return Ui.Card(content);
-    }
 
-    private static Label ProductCatalogDetail(string text)
-    {
-        Label detail = Ui.Text(text, true);
-        detail.FontSize = 12;
-        return detail;
+        return Ui.Card(Ui.NutritionBlock(per100, "На 100 г"), meta, Ui.Expander("Источник данных", provenance));
     }
 }

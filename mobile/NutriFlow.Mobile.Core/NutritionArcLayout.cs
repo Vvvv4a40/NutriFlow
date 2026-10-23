@@ -74,4 +74,56 @@ public static class NutritionArcLayout
 
         return segments.AsReadOnly();
     }
+
+    // the filled length follows calories against the goal; colors split it by each macro's share of energy
+    public static IReadOnlyList<NutritionArcSegment> CreateProgress(
+        decimal consumedCalories, decimal goalCalories,
+        decimal proteinGrams, decimal fatGrams, decimal carbohydratesGrams)
+    {
+        decimal fraction = Progress(consumedCalories, goalCalories);
+        if (fraction == 0m || Math.Max(proteinGrams, Math.Max(fatGrams, carbohydratesGrams)) <= 0m)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(proteinGrams);
+            ArgumentOutOfRangeException.ThrowIfNegative(fatGrams);
+            ArgumentOutOfRangeException.ThrowIfNegative(carbohydratesGrams);
+            return Array.Empty<NutritionArcSegment>();
+        }
+
+        MacroGoalAllocation shares = MacroGoalAllocation.FromGrams(proteinGrams, fatGrams, carbohydratesGrams);
+        (NutritionMacro Macro, decimal Percent)[] macros =
+        [
+            (NutritionMacro.Protein, shares.ProteinPercent),
+            (NutritionMacro.Fat, shares.FatPercent),
+            (NutritionMacro.Carbohydrates, shares.CarbohydratesPercent)
+        ];
+        decimal filled = 180m * fraction;
+        decimal start = 180m;
+        decimal end = 180m - filled;
+        List<NutritionArcSegment> segments = [];
+        int last = Array.FindLastIndex(macros, macro => macro.Percent > 0m);
+        for (int index = 0; index <= last; index++)
+        {
+            (NutritionMacro macro, decimal percent) = macros[index];
+            if (percent <= 0m)
+            {
+                continue;
+            }
+
+            decimal sweep = index == last ? start - end : Math.Min(start - end, filled * percent / 100m);
+            if (sweep > 0m)
+            {
+                segments.Add(new NutritionArcSegment(macro, start, sweep));
+                start -= sweep;
+            }
+        }
+
+        return segments.AsReadOnly();
+    }
+
+    public static decimal Progress(decimal consumedCalories, decimal goalCalories)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(consumedCalories);
+        ArgumentOutOfRangeException.ThrowIfNegative(goalCalories);
+        return goalCalories == 0m ? 0m : Math.Min(1m, consumedCalories / goalCalories);
+    }
 }

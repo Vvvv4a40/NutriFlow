@@ -35,13 +35,16 @@ public partial class MainPage
     private Task RestoreBackupPageAsync()
     {
         FormPage page = new("Восстановление");
-        page.Fields.Children.Add(Ui.Text("Копия будет восстановлена в новый профиль. Существующие данные не изменятся."));
-        page.Fields.Children.Add(Ui.Text("Имя нового профиля"));
+        Border tile = Ui.IconTile(AppIconKind.Archive, Ui.Accent, 64);
+        tile.HorizontalOptions = LayoutOptions.Start;
+        page.Fields.Children.Add(tile);
+        page.Fields.Children.Add(Ui.Headline("Восстановить из копии", 24));
+        page.Fields.Children.Add(Ui.Text("Копия восстановится в новый профиль. Существующие профили и их данные не изменятся.", true));
         Entry name = Ui.Field("Например, Восстановленный");
         name.AutomationId = "backup-profile-name";
         name.MaxLength = 80;
-        page.Fields.Children.Add(name);
-        page.Fields.Children.Add(Ui.Text("Ключ Groq нужно добавить заново.", true));
+        page.Fields.Children.Add(Ui.Labeled("Имя нового профиля", name));
+        page.Fields.Children.Add(Ui.Caption("Ключ Groq в копию не входит — его нужно будет добавить заново.", Ui.Subtle));
         Button restore = Ui.Action("Выбрать ZIP и восстановить", () => page.RunAsync(async () =>
         {
             string profileName = Ui.Name(name, "Имя профиля");
@@ -83,7 +86,7 @@ public partial class MainPage
             await DisplayAlertAsync("Восстановлено", $"Создан профиль «{result.Profile.Name}». Исходные профили сохранены.", "Готово");
         }));
         restore.AutomationId = "backup-import";
-        page.Fields.Children.Add(restore);
+        page.AddFooter(restore);
         return Navigation.PushAsync(page);
     }
 }

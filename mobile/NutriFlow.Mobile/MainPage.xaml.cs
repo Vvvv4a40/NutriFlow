@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Maui.Controls.Shapes;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Mobile.Core;
@@ -10,22 +11,28 @@ public partial class MainPage : ContentPage
     private readonly LocalProfileStore _profiles;
     private readonly LocalMealClient _client;
     private readonly Button _profileButton;
-    private readonly Button _addButton;
-    private readonly VerticalStackLayout _body = new() { Padding = new Thickness(20, 0, 20, 28), Spacing = 16 };
-    private readonly Grid _navigation = new() { ColumnSpacing = 4, Padding = new Thickness(8, 8, 8, 12) };
-    private readonly ContentView _addMenu = new() { IsVisible = false, AutomationId = "add-menu", Margin = new Thickness(20, 0, 20, 4) };
+    private readonly Label _profileInitial;
+    private readonly Label _screenTitle;
+    private readonly Grid _header;
+    private readonly VerticalStackLayout _body = new() { Padding = new Thickness(Ui.ScreenPadding, 4, Ui.ScreenPadding, 32), Spacing = 16 };
+    private readonly Grid _navigation = new() { Padding = new Thickness(6, 6, 6, 8) };
+    private readonly Grid _navigationArea = new();
+    private readonly ContentView _actionBar = new() { Padding = new Thickness(Ui.ScreenPadding, 10, Ui.ScreenPadding, 10) };
+    private readonly Grid _actionBarArea = new() { IsVisible = false };
+    private readonly BoxView _actionBarLine = new() { HeightRequest = 1, VerticalOptions = LayoutOptions.Start };
+    private readonly BoxView _navigationLine = new() { HeightRequest = 1, VerticalOptions = LayoutOptions.Start };
+    private readonly Border _avatar;
     private readonly ScrollView _scroll;
-    private readonly VerticalStackLayout _top = new() { Spacing = 0 };
     private readonly ContentView _welcome = new() { IsVisible = false };
-    private readonly ActivityIndicator _activity = new() { Color = Ui.Accent, IsVisible = false, WidthRequest = 20, HeightRequest = 20 };
-    private readonly Label _status = Ui.Text("", true);
+    private readonly ActivityIndicator _activity = new() { IsVisible = false, WidthRequest = 22, HeightRequest = 22 };
+    private readonly BoxView _blocker = new() { Color = Colors.Transparent, IsVisible = false };
     private LocalProfile? _profile;
     private MealSessionResponse? _session;
     private DateOnly _date = DateOnly.FromDateTime(DateTime.Today);
     private MealSessionPurpose _purpose;
     private string _draftText = "";
     private string _tab = "Дневник";
-    private bool _busy;
+    private readonly ActionRunner _runner;
     private bool _scrollToPreview;
 
     public MainPage(LocalProfileStore profiles, LocalMealClient client)
@@ -35,62 +42,102 @@ public partial class MainPage : ContentPage
         _client = client;
         _inputDrafts = new LocalInputDraftStore(profiles);
         Title = "NutriFlow";
-        BackgroundColor = Ui.Background;
 #if ANDROID
         SafeAreaEdges = SafeAreaEdges.All;
 #endif
         NavigationPage.SetHasNavigationBar(this, false);
-        _profileButton = Ui.Action("Профиль", OpenProfilesAsync, true);
-        _profileButton.FontSize = 13;
-        _profileButton.MaximumWidthRequest = 140;
-        _profileButton.LineBreakMode = LineBreakMode.TailTruncation;
-        _profileButton.AutomationId = "profile-switcher";
-        _addButton = CreateAddButton();
-        _addMenu.Content = CreateAddMenu();
 
-        Label brand = Ui.Title("NutriFlow");
-        brand.FontSize = 25;
-        brand.Margin = 0;
-        brand.CharacterSpacing = -0.8;
-        brand.VerticalOptions = LayoutOptions.Center;
-        Grid header = new()
+        _screenTitle = Ui.Title("Дневник");
+        _screenTitle.VerticalOptions = LayoutOptions.Center;
+        _screenTitle.MaxLines = 1;
+        _screenTitle.LineBreakMode = LineBreakMode.TailTruncation;
+        // an avatar instead of a name chip leaves the header to the screen title on narrow phones;
+        // the full name stays in the accessible description, the profile sheet and settings
+        _profileInitial = new Label
         {
-            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } },
-            ColumnSpacing = 12,
-            Padding = new Thickness(22, 14, 20, 16)
+            FontSize = 16,
+            FontAttributes = FontAttributes.Bold,
+            FontAutoScalingEnabled = false,
+            HorizontalTextAlignment = TextAlignment.Center,
+            VerticalTextAlignment = TextAlignment.Center
         };
-        header.Add(brand, 0);
-        header.Add(_profileButton, 1);
-        _status.IsVisible = false;
-        _status.FontSize = 12;
-        HorizontalStackLayout feedback = new() { Spacing = 8, Margin = new Thickness(22, 0, 20, 8) };
-        feedback.Children.Add(_activity);
-        feedback.Children.Add(_status);
-        _top.Children.Add(header);
-        _top.Children.Add(feedback);
-
-        for (int index = 0; index < 3; index++)
+        _avatar = new Border
         {
-            _navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
-        }
+            WidthRequest = 40,
+            HeightRequest = 40,
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            StrokeThickness = 1,
+            StrokeShape = new RoundRectangle { CornerRadius = 20 },
+            Content = _profileInitial
+        };
+        Grid profileChip = Ui.Pressable(_avatar, OpenProfilesAsync, "Локальные профили", "Сменить или создать профиль", "profile-switcher");
+        profileChip.WidthRequest = 48;
+        profileChip.HeightRequest = 48;
+        profileChip.VerticalOptions = LayoutOptions.Center;
+        _profileButton = (Button)profileChip.Children[0];
+        _profileButton.CornerRadius = 24;
+
+        _header = new Grid
+        {
+            Padding = new Thickness(Ui.ScreenPadding, 10, 16, 8),
+            ColumnSpacing = 10,
+            ColumnDefinitions = new ColumnDefinitionCollection
+            {
+                new() { Width = GridLength.Star }, new() { Width = GridLength.Auto }, new() { Width = GridLength.Auto }
+            }
+        };
+        _header.Add(_screenTitle, 0);
+        _header.Add(_activity, 1);
+        _header.Add(profileChip, 2);
 
         _scroll = new ScrollView { Content = _body };
-        VerticalStackLayout bottom = new() { Spacing = 0 };
-        bottom.Children.Add(_addMenu);
-        bottom.Children.Add(_navigation);
+        _actionBarArea.Add(_actionBarLine);
+        _actionBarArea.Add(_actionBar);
+        _navigationArea.Add(_navigation);
+        _navigationArea.Add(_navigationLine);
+        CreateNavigation();
+
         Grid layout = new()
         {
             RowDefinitions = new RowDefinitionCollection
             {
-                new() { Height = GridLength.Auto }, new() { Height = GridLength.Star }, new() { Height = GridLength.Auto }
+                new() { Height = GridLength.Auto }, new() { Height = GridLength.Star },
+                new() { Height = GridLength.Auto }, new() { Height = GridLength.Auto }
             }
         };
-        layout.Add(_top, 0, 0);
+        layout.Add(_header, 0, 0);
         layout.Add(_scroll, 0, 1);
-        layout.Add(bottom, 0, 2);
+        layout.Add(_actionBarArea, 0, 2);
+        layout.Add(_navigationArea, 0, 3);
         layout.Add(_welcome, 0, 0);
-        Grid.SetRowSpan(_welcome, 3);
+        Grid.SetRowSpan(_welcome, 4);
+        layout.Add(_blocker, 0, 0);
+        Grid.SetRowSpan(_blocker, 4);
         Content = layout;
+        _runner = new ActionRunner(this, _activity, _blocker);
+    }
+
+    // controls built once in the constructor are recoloured here; everything else is rebuilt by RenderAsync
+    internal void ApplyTheme()
+    {
+        ApplyShellColors();
+        _ = RunAsync(RenderAsync);
+    }
+
+    internal void ApplyShellColors()
+    {
+        BackgroundColor = Ui.Background;
+        _screenTitle.TextColor = Ui.TextPrimary;
+        _activity.Color = Ui.Accent;
+        _avatar.BackgroundColor = Ui.AccentSoft;
+        _avatar.Stroke = Ui.Accent.WithAlpha(0.35f);
+        _profileInitial.TextColor = Ui.Accent;
+        Ui.ApplyStates(_profileButton, Ui.SurfacePressed, Ui.TextPrimary);
+        _navigation.BackgroundColor = Ui.Background;
+        _actionBarArea.BackgroundColor = Ui.Background;
+        _navigationLine.Color = Ui.Stroke;
+        _actionBarLine.Color = Ui.Stroke;
     }
 
     protected override async void OnAppearing()
@@ -128,7 +175,8 @@ public partial class MainPage : ContentPage
 
     private Task RefreshProfilesAsync()
     {
-        _profileButton.Text = _profile?.Name ?? "Профиль";
+        string name = _profile?.Name ?? "";
+        _profileInitial.Text = name.Length > 0 ? name[..1].ToUpper(CultureInfo.CurrentCulture) : "?";
         SemanticProperties.SetDescription(_profileButton, _profile is null ? "Локальные профили" : $"Профиль: {_profile.Name}. Сменить профиль");
         return Task.CompletedTask;
     }
@@ -153,49 +201,39 @@ public partial class MainPage : ContentPage
         }
     }
 
-    private async Task RunAsync(Func<Task> action)
-    {
-        if (_busy)
-        {
-            return;
-        }
+    private bool Busy => _runner.IsBusy;
 
-        _busy = true;
-        SetAddMenuOpen(false);
-        _profileButton.IsEnabled = false;
-        _navigation.IsEnabled = false;
-        _addMenu.IsEnabled = false;
-        _body.IsEnabled = false;
-        _welcome.IsEnabled = false;
-        _activity.IsRunning = true;
-        _activity.IsVisible = true;
-        _status.Text = "Выполняется…";
-        _status.IsVisible = true;
-        try
-        {
-            await action();
-            _status.Text = "";
-            _status.IsVisible = false;
-        }
-        catch (Exception exception)
-        {
-            _status.Text = "Действие не завершено";
-            await DisplayAlertAsync("Не удалось выполнить действие", FormPage.ErrorText(exception), "Понятно");
-        }
-        finally
-        {
-            _activity.IsRunning = false;
-            _activity.IsVisible = false;
-            _profileButton.IsEnabled = true;
-            _navigation.IsEnabled = true;
-            _addMenu.IsEnabled = true;
-            _body.IsEnabled = true;
-            _welcome.IsEnabled = true;
-            _busy = false;
-        }
-    }
+    private Task RunAsync(Func<Task> action) => _runner.RunAsync(action);
+
+    private void ShowProgress(Button button, string text) => _runner.ShowProgress(button, text);
+
+    // dialogs go through the runner so the spinner does not keep turning behind them
+    private new Task<bool> DisplayAlertAsync(string title, string message, string accept, string cancel) =>
+        _runner.ConfirmAsync(title, message, accept, cancel);
+
+    private new Task DisplayAlertAsync(string title, string message, string cancel) =>
+        _runner.AlertAsync(title, message, cancel);
+
+    private new Task<string?> DisplayActionSheetAsync(string title, string cancel, string? destruction, params string[] buttons) =>
+        _runner.ChooseAsync(title, cancel, destruction, buttons);
 
     private Guid CurrentProfileId() => _profile?.Id ?? throw new InvalidOperationException("Сначала создайте или выберите профиль.");
+
+    private void SetActionBar(View? content)
+    {
+        _actionBar.Content = content;
+        _actionBarArea.IsVisible = content is not null;
+    }
+
+    private string ScreenTitle() => _tab switch
+    {
+        "Ввод" when _session is not null => _session.Purpose == "CreateDish" ? "Проверьте блюдо" : "Проверьте запись",
+        "Ввод" => _purpose == MealSessionPurpose.CreateDish ? "Новое блюдо" : "Запись еды",
+        "Продукты" => "Продукты",
+        "Блюда" => "Блюда",
+        "Настройки" => "Настройки",
+        _ => "Дневник"
+    };
 
     private async Task RenderAsync()
     {
@@ -203,10 +241,12 @@ public partial class MainPage : ContentPage
         _inputSaveStatus = null;
         _inputSaveRetry = null;
         RenderNavigation();
+        SetActionBar(null);
         _body.Children.Clear();
         bool hasProfile = _profile is not null;
-        _top.IsVisible = hasProfile;
+        _header.IsVisible = hasProfile;
         _scroll.IsVisible = hasProfile;
+        _navigationArea.IsVisible = hasProfile;
         _welcome.IsVisible = !hasProfile;
         if (_profile is null)
         {
@@ -215,18 +255,18 @@ public partial class MainPage : ContentPage
         }
 
         _welcome.Content = null;
+        _screenTitle.Text = ScreenTitle();
         Guid profileId = _profile.Id;
         if (InputDraftBlocked && _tab != "Ввод")
         {
-            Button attention = Ui.Action("Проверить сохранённый ввод", () => SelectTabAsync("Ввод"), true);
-            attention.AutomationId = "input-draft-attention";
-            _body.Children.Add(Ui.Card(Ui.Text(_draftReadError ?? "Есть неотправленный текст другой записи."), attention));
+            _body.Children.Add(Notice(AppIconKind.Warning, Ui.Warning, _draftReadError ?? "Есть неотправленный текст другой записи.",
+                Ui.Ghost("Проверить сохранённый ввод", () => SelectTabAsync("Ввод")), "input-draft-attention"));
         }
 
         switch (_tab)
         {
             case "Дневник": await RenderDiaryAsync(profileId); break;
-            case "Ввод": RenderInput(profileId); break;
+            case "Ввод": RenderInput(profileId, await ProfileSettings.HasGroqAsync(profileId)); break;
             case "Продукты": await RenderProductsAsync(profileId); break;
             case "Блюда": await RenderDishesAsync(profileId); break;
             case "Настройки": await RenderSettingsAsync(profileId); break;
@@ -239,13 +279,55 @@ public partial class MainPage : ContentPage
         }
     }
 
+    private static View Notice(AppIconKind icon, Color color, string message, View? action = null, string? automationId = null)
+    {
+        Grid content = new()
+        {
+            ColumnSpacing = 12,
+            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star } }
+        };
+        content.Add(new AppIcon(icon, color, 22) { VerticalOptions = LayoutOptions.Start, Margin = new Thickness(0, 1, 0, 0) }, 0);
+        VerticalStackLayout text = new() { Spacing = 6 };
+        text.Children.Add(Ui.Text(message));
+        if (action is Button)
+        {
+            action.HorizontalOptions = LayoutOptions.Start;
+            action.Margin = new Thickness(-12, 0, 0, -8);
+        }
+
+        if (action is not null)
+        {
+            text.Children.Add(action);
+        }
+
+        content.Add(text, 1);
+        Border notice = new()
+        {
+            Content = content,
+            Padding = new Thickness(16, 14),
+            BackgroundColor = color.WithAlpha(0.08f),
+            Stroke = color.WithAlpha(0.35f),
+            StrokeThickness = 1,
+            StrokeShape = new RoundRectangle { CornerRadius = 18 }
+        };
+        if (automationId is not null)
+        {
+            notice.AutomationId = automationId;
+        }
+
+        return notice;
+    }
+
     private Task CreateProfilePageAsync()
     {
-        FormPage page = new("Начало");
+        FormPage page = new("Новый профиль");
+        Label title = Ui.Title("Как вас зовут?");
+        page.Fields.Children.Add(title);
+        page.Fields.Children.Add(Ui.Text("Имя видно только вам и помогает различать профили на этом телефоне.", true));
         Entry name = Ui.Field("Имя");
         name.AutomationId = "profile-name";
-        SemanticProperties.SetDescription(name, "Твоё имя");
-        page.Fields.Children.Add(Ui.Title("Твоё имя"));
+        name.MaxLength = 80;
+        SemanticProperties.SetDescription(name, "Ваше имя");
         page.Fields.Children.Add(name);
         Button create = Ui.Action("Продолжить", () => page.RunAsync(async () =>
         {
@@ -255,21 +337,23 @@ public partial class MainPage : ContentPage
             await Navigation.PopAsync();
         }));
         create.AutomationId = "profile-create";
-        page.Fields.Children.Add(create);
+        page.AddFooter(create);
         return Navigation.PushAsync(page);
     }
 
     private Task EditEntryPageAsync(Guid profileId, MealEntryResponse entry)
     {
         FormPage page = new("Изменить запись");
-        page.Fields.Children.Add(Ui.Title(entry.Name));
-        page.Fields.Children.Add(Ui.Text("КБЖУ пересчитаются по сохранённому составу."));
-        Entry grams = AddNumber(page, "Вес порции, г", entry.WeightInGrams);
+        page.Fields.Children.Add(Ui.Headline(entry.Name, 24));
+        page.Fields.Children.Add(Ui.NutritionBlock(entry.Nutrition, "Сейчас"));
+        Entry grams = Ui.Field("", Ui.Amount(entry.WeightInGrams), true);
+        page.Fields.Children.Add(Ui.Labeled("Вес порции, г", grams));
+        page.Fields.Children.Add(Ui.Caption("КБЖУ пересчитаются по сохранённому составу."));
         Switch estimated = new();
         bool qualityChanged = false;
         estimated.Toggled += (_, _) => qualityChanged = true;
-        page.Fields.Children.Add(Ui.Row(estimated, Ui.Text("Новый вес указан примерно")));
-        page.Fields.Children.Add(Ui.Action("Сохранить", () => page.RunAsync(async () =>
+        page.Fields.Children.Add(Ui.SwitchRow("Новый вес указан примерно", estimated));
+        page.AddFooter(Ui.Action("Сохранить", () => page.RunAsync(async () =>
         {
             decimal newWeight = Ui.Number(grams, "Вес", true);
             if (newWeight != entry.WeightInGrams || qualityChanged)
@@ -284,9 +368,8 @@ public partial class MainPage : ContentPage
 
     private static Entry AddNumber(FormPage page, string label, decimal? value = null)
     {
-        page.Fields.Children.Add(Ui.Text(label));
-        Entry field = Ui.Field("", value?.ToString(CultureInfo.CurrentCulture), true);
-        page.Fields.Children.Add(field);
+        Entry field = Ui.Field("", value is decimal number ? Ui.Amount(number) : null, true);
+        page.Fields.Children.Add(Ui.Labeled(label, field));
         return field;
     }
 }

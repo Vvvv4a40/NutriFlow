@@ -5,99 +5,96 @@ namespace NutriFlow.Mobile;
 
 public partial class MainPage
 {
-    private void RenderNavigation()
-    {
-        _navigation.Children.Clear();
-        _navigation.IsVisible = _profile is not null;
-        _navigation.BackgroundColor = Ui.Background;
-        AddNavigationTab("Дневник", AppIconKind.Diary, 0);
-        AddNavigationTab("Настройки", AppIconKind.Settings, 2);
-        _navigation.Add(_addButton, 1);
-        SetAddMenuOpen(false);
-    }
+    private static readonly (string Tab, AppIconKind Icon, int Column)[] Tabs =
+    [
+        ("Дневник", AppIconKind.Diary, 0),
+        ("Продукты", AppIconKind.Products, 1),
+        ("Блюда", AppIconKind.Dishes, 3),
+        ("Настройки", AppIconKind.Settings, 4)
+    ];
 
-    private Button CreateAddButton()
+    private void CreateNavigation()
     {
-        Button add = Ui.Action("+", () =>
+        for (int index = 0; index < 5; index++)
         {
-            if (!_busy && _profile is not null)
-            {
-                SetAddMenuOpen(!_addMenu.IsVisible);
-            }
-            return Task.CompletedTask;
-        });
-        add.AutomationId = "add-food";
-        add.FontSize = 32;
-        add.FontAttributes = FontAttributes.None;
-        add.Padding = 0;
-        add.CornerRadius = 30;
-        add.WidthRequest = 60;
-        add.HeightRequest = 60;
-        add.HorizontalOptions = LayoutOptions.Center;
-        add.VerticalOptions = LayoutOptions.Center;
-        add.Shadow = new Shadow { Brush = new SolidColorBrush(Ui.Accent), Offset = new Point(0, 4), Radius = 14, Opacity = 0.22f };
-        return add;
-    }
-
-    private View CreateAddMenu()
-    {
-        VerticalStackLayout actions = new() { Spacing = 4 };
-        AddAction("Записать еду", "add-menu-input", "Ввод");
-        AddAction("Продукты", "add-menu-products", "Продукты");
-        AddAction("Мои блюда", "add-menu-dishes", "Блюда");
-        return new Border
-        {
-            Content = new ScrollView { Content = actions, MaximumHeightRequest = 280 },
-            BackgroundColor = Ui.Surface,
-            Padding = 8,
-            StrokeThickness = 0,
-            StrokeShape = new RoundRectangle { CornerRadius = 24 }
-        };
-
-        void AddAction(string title, string automationId, string tab)
-        {
-            Button button = Ui.Action(title, () => SelectTabAsync(tab), true);
-            button.AutomationId = automationId;
-            button.MinimumHeightRequest = 56;
-            button.BackgroundColor = Ui.Surface;
-            SemanticProperties.SetDescription(button, title);
-            actions.Children.Add(button);
+            _navigation.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
         }
     }
 
-    private void SetAddMenuOpen(bool open)
+    private void RenderNavigation()
     {
-        _addMenu.IsVisible = open;
-        _addButton.Text = open ? "×" : "+";
-        SemanticProperties.SetDescription(_addButton, open ? "Закрыть меню добавления" : "Добавить еду");
-        SemanticProperties.SetHint(_addButton, open ? "Скрыть способы добавления" : "Открыть меню: записать еду, продукты или мои блюда");
+        _navigation.Children.Clear();
+        foreach ((string tab, AppIconKind icon, int column) in Tabs)
+        {
+            _navigation.Add(NavigationTab(tab, icon), column);
+        }
+
+        _navigation.Add(CreateAddButton(), 2);
     }
 
-    private void AddNavigationTab(string tab, AppIconKind icon, int column)
+    // logging food is the most frequent task, so the central button opens it directly
+    private Button CreateAddButton()
+    {
+        Button add = new()
+        {
+            Text = "+",
+            AutomationId = "add-food",
+            FontSize = 30,
+            TextColor = Ui.OnAccent,
+            BackgroundColor = Ui.Accent,
+            Padding = 0,
+            CornerRadius = 28,
+            WidthRequest = 56,
+            HeightRequest = 56,
+            HorizontalOptions = LayoutOptions.Center,
+            VerticalOptions = LayoutOptions.Center,
+            Shadow = new Shadow { Brush = new SolidColorBrush(Ui.Accent), Offset = new Point(0, 4), Radius = 16, Opacity = 0.28f }
+        };
+        SemanticProperties.SetDescription(add, "Добавить еду");
+        SemanticProperties.SetHint(add, "Описать еду текстом или голосом, выбрать продукт или блюдо");
+        add.Clicked += async (_, _) =>
+        {
+            if (!Busy && _profile is not null)
+            {
+                await SelectTabAsync("Ввод");
+            }
+        };
+        return add;
+    }
+
+    private View NavigationTab(string tab, AppIconKind icon)
     {
         bool selected = _tab == tab;
-        Color color = selected ? Ui.Accent : Ui.Muted;
-        Button button = Ui.Action("", () => SelectTabAsync(tab), true);
-        button.AutomationId = $"tab-{icon.ToString().ToLowerInvariant()}";
-        button.BackgroundColor = selected ? Ui.Surface : Colors.Transparent;
-        button.Padding = 0;
-        button.MinimumHeightRequest = 64;
-        SemanticProperties.SetDescription(button, tab);
-        SemanticProperties.SetHint(button, selected ? "Текущий раздел" : $"Открыть раздел «{tab}»");
-
-        Label caption = Ui.Text(tab);
-        caption.FontSize = 10;
-        caption.TextColor = color;
-        caption.HorizontalTextAlignment = TextAlignment.Center;
-        caption.InputTransparent = true;
-        AutomationProperties.SetIsInAccessibleTree(caption, false);
-        VerticalStackLayout content = new() { Spacing = 5, HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center, InputTransparent = true };
-        content.Children.Add(new AppIcon(icon, color) { HorizontalOptions = LayoutOptions.Center });
+        Color color = selected ? Ui.Accent : Ui.Subtle;
+        Border indicator = new()
+        {
+            WidthRequest = 56,
+            HeightRequest = 30,
+            HorizontalOptions = LayoutOptions.Center,
+            BackgroundColor = selected ? Ui.AccentSoft : Colors.Transparent,
+            StrokeThickness = 0,
+            StrokeShape = new RoundRectangle { CornerRadius = 15 },
+            Content = new AppIcon(icon, color, 22) { HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center }
+        };
+        Label caption = new()
+        {
+            Text = tab,
+            FontSize = 12,
+            FontAutoScalingEnabled = false,
+            FontFamily = Ui.MediumFont,
+            TextColor = color,
+            HorizontalTextAlignment = TextAlignment.Center,
+            MaxLines = 1,
+            LineBreakMode = LineBreakMode.TailTruncation
+        };
+        VerticalStackLayout content = new() { Spacing = 4, VerticalOptions = LayoutOptions.Center, Padding = new Thickness(0, 6) };
+        content.Children.Add(indicator);
         content.Children.Add(caption);
-        Grid tile = new();
-        tile.Add(button);
-        tile.Add(content);
-        _navigation.Add(tile, column);
+        Grid tile = Ui.Pressable(content, () => SelectTabAsync(tab), tab,
+            selected ? "Текущий раздел" : $"Открыть раздел «{tab}»", $"tab-{icon.ToString().ToLowerInvariant()}");
+        ((Button)tile.Children[0]).CornerRadius = 18;
+        tile.MinimumHeightRequest = 64;
+        return tile;
     }
 
     private Task SelectTabAsync(string tab) => RunAsync(async () =>
@@ -110,8 +107,9 @@ public partial class MainPage
     private Task OpenProfilesAsync() => RunAsync(async () =>
     {
         IReadOnlyList<LocalProfile> profiles = await _profiles.ListAsync();
-        string[] choices = profiles.Select((profile, index) => $"{index + 1}. {profile.Name}").ToArray();
-        string? choice = await DisplayActionSheetAsync("Локальные профили", "Отмена", null, [.. choices, "Создать профиль"]);
+        string[] choices = profiles.Select((profile, index) => profile.Id == _profile?.Id
+            ? $"{index + 1}. {profile.Name} ✓" : $"{index + 1}. {profile.Name}").ToArray();
+        string? choice = await DisplayActionSheetAsync("Профили на этом телефоне", "Отмена", null, [.. choices, "Создать профиль"]);
         if (choice == "Создать профиль")
         {
             await FlushInputDraftAsync();
@@ -140,14 +138,8 @@ public partial class MainPage
 
     protected override bool OnBackButtonPressed()
     {
-        if (_busy)
+        if (Busy)
         {
-            return true;
-        }
-
-        if (_addMenu.IsVisible)
-        {
-            SetAddMenuOpen(false);
             return true;
         }
 
@@ -162,43 +154,68 @@ public partial class MainPage
 
     private void RenderWelcome()
     {
-        Label title = Ui.Title("NutriFlow");
-        title.AutomationId = "welcome-title";
-        title.FontSize = 44;
-        title.CharacterSpacing = -1.4;
-        title.HorizontalOptions = LayoutOptions.Center;
-        title.Margin = 0;
+        Border mark = Ui.IconTile(AppIconKind.Sparkle, Ui.Accent, 72);
+        mark.HorizontalOptions = LayoutOptions.Start;
+        Label title = new()
+        {
+            Text = "NutriFlow",
+            AutomationId = "welcome-title",
+            FontSize = 44,
+            FontAttributes = FontAttributes.Bold,
+            CharacterSpacing = -1.4,
+            TextColor = Ui.TextPrimary
+        };
+        SemanticProperties.SetHeadingLevel(title, SemanticHeadingLevel.Level1);
+        Label tagline = Ui.Text("Опишите еду своими словами — калории и БЖУ посчитаются по весу.", true);
+        tagline.FontSize = 18;
+        VerticalStackLayout intro = new() { Spacing = 14 };
+        intro.Children.Add(mark);
+        intro.Children.Add(title);
+        intro.Children.Add(tagline);
+
+        VerticalStackLayout features = new() { Spacing = 16, Margin = new Thickness(0, 12, 0, 0) };
+        features.Children.Add(WelcomeFeature(AppIconKind.Microphone, "Текст, голос или фото этикетки"));
+        features.Children.Add(WelcomeFeature(AppIconKind.Check, "Калории считаются по весу, оценки помечены"));
+        features.Children.Add(WelcomeFeature(AppIconKind.Archive, "Данные хранятся только на этом телефоне"));
+        intro.Children.Add(features);
+
         Button create = Ui.Action("Начать", () => RunAsync(CreateProfilePageAsync));
         create.AutomationId = "create-profile";
         create.MinimumHeightRequest = 56;
-        Button restore = Ui.Action("Восстановить копию", () => RunAsync(RestoreBackupPageAsync), true);
+        Button restore = Ui.Ghost("Восстановить из копии", () => RunAsync(RestoreBackupPageAsync));
         restore.AutomationId = "welcome-backup-restore";
-        VerticalStackLayout actions = new() { Spacing = 10 };
+        VerticalStackLayout actions = new() { Spacing = 6 };
         actions.Children.Add(create);
         actions.Children.Add(restore);
         Grid welcome = new()
         {
-            Padding = new Thickness(28, 24, 28, 28),
+            Padding = new Thickness(28, 24, 28, 20),
+            RowSpacing = 32,
             RowDefinitions = new RowDefinitionCollection
             {
                 new() { Height = GridLength.Star }, new() { Height = GridLength.Auto },
-                new() { Height = GridLength.Star }, new() { Height = GridLength.Auto }
+                new() { Height = new GridLength(1.4, GridUnitType.Star) }, new() { Height = GridLength.Auto }
             }
         };
-        welcome.Add(title, 0, 1);
+        welcome.Add(intro, 0, 1);
         welcome.Add(actions, 0, 3);
-        _welcome.Content = welcome;
+        // the grid fills the screen to keep the start button low, and scrolls on small phones or with large system fonts
+        ScrollView scroll = new() { Content = welcome };
+        scroll.SizeChanged += (_, _) => welcome.MinimumHeightRequest = scroll.Height;
+        _welcome.Content = scroll;
     }
 
-    private static Grid IconAction(AppIconKind icon, string description, Func<Task> action)
+    private static View WelcomeFeature(AppIconKind icon, string text)
     {
-        Button button = Ui.Action("", action, true);
-        button.BackgroundColor = Colors.Transparent;
-        button.Padding = 0;
-        SemanticProperties.SetDescription(button, description);
-        Grid control = new() { WidthRequest = 48, MinimumHeightRequest = 48 };
-        control.Add(button);
-        control.Add(new AppIcon(icon, Ui.Muted) { HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center });
-        return control;
+        Grid row = new()
+        {
+            ColumnSpacing = 14,
+            ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star } }
+        };
+        row.Add(Ui.IconTile(icon, Ui.Accent, 36), 0);
+        Label label = Ui.Text(text);
+        label.VerticalOptions = LayoutOptions.Center;
+        row.Add(label, 1);
+        return row;
     }
 }

@@ -42,7 +42,7 @@ export async function testAndroidEmulator({
         apkSha256: createHash("sha256").update(readFileSync(apkPath)).digest("hex"),
         profile: { name: "Smoke", creation: "not-tested", persistence: "not-tested" },
         backNavigation: { form: "not-tested" },
-        addMenu: { toggle: "not-tested", back: "not-tested", products: "not-tested", dishes: "not-tested", input: "not-tested" },
+        navigation: { products: "not-tested", dishes: "not-tested", input: "not-tested" },
         scope: "cloud emulator; no phone, Groq key or AI network requests"
     };
     const deadline = now() + 420_000;
@@ -109,9 +109,12 @@ export async function testAndroidEmulator({
         const bounds = /^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$/.exec(node.bounds ?? "");
         return bounds && Number(bounds[3]) > Number(bounds[1]) && Number(bounds[4]) > Number(bounds[2]) ? bounds : null;
     }
-    function addToggle(node, open = false) {
-        return identifiedAction(node, "add-food", open ? "×" : "+") && uiBounds(node) &&
-            node["content-desc"] === (open ? "Закрыть меню добавления" : "Добавить еду");
+    function addAction(node) {
+        return identifiedAction(node, "add-food", "+") && uiBounds(node) && node["content-desc"] === "Добавить еду";
+    }
+    function describedAction(node, id, description) {
+        return hasAutomationId(node, id) && node["content-desc"] === description &&
+            node.enabled === "true" && node.clickable === "true" && uiBounds(node);
     }
     function profileNameField(node) {
         return hasAutomationId(node, "profile-name") && node.class === "android.widget.EditText" && node.enabled === "true";
@@ -227,7 +230,7 @@ export async function testAndroidEmulator({
         launch("launch.log");
         const welcomePredicate = nodes => nodes.some(node => hasAutomationId(node, "welcome-title") && node.text === "NutriFlow") &&
             nodes.some(node => identifiedAction(node, "create-profile", "Начать"));
-        const profileFormPredicate = nodes => hasText(nodes, "Твоё имя") && nodes.some(profileNameField) &&
+        const profileFormPredicate = nodes => hasText(nodes, "Как вас зовут?") && nodes.some(profileNameField) &&
             nodes.some(node => identifiedAction(node, "profile-create", "Продолжить"));
         const welcome = await waitUi("welcome.xml", welcomePredicate);
         screenshot("welcome.png");
@@ -246,64 +249,40 @@ export async function testAndroidEmulator({
         adb(["shell", "input", "text", "Smoke"]);
         adb(["shell", "input", "keyevent", "4"]);
         const filled = await waitUi("profile-filled.xml", nodes => profileFormPredicate(nodes) &&
-            nodes.some(node => profileNameField(node) && (node.text === "Smoke" || node.text === "Твоё имя, Smoke")));
+            nodes.some(node => profileNameField(node) && (node.text === "Smoke" || node.text === "Ваше имя, Smoke")));
         tap(filled, node => identifiedAction(node, "profile-create", "Продолжить"));
         const diaryContent = nodes => nodes.some(node => hasAutomationId(node, "diary-calories") &&
             node.class === "android.widget.TextView" && node.text === "0") &&
-            ["ккал", "Белки", "Жиры", "Углеводы", "Цель · внешняя", "Съедено · внутренняя"].every(text => hasText(nodes, text)) &&
-            enabledAction(nodes, "Smoke");
-        const menuActions = [["input", "Записать еду"], ["products", "Продукты"], ["dishes", "Мои блюда"]];
-        const menuClosed = nodes => nodes.some(node => addToggle(node)) && !nodes.some(node =>
-            hasAutomationId(node, "add-menu") || menuActions.some(([id]) => hasAutomationId(node, `add-menu-${id}`)));
-        const menuOpen = nodes => nodes.some(node => addToggle(node, true)) &&
-            nodes.some(node => hasAutomationId(node, "add-menu") && node.enabled === "true" && uiBounds(node)) &&
-            menuActions.every(([id, text]) => nodes.some(node => identifiedAction(node, `add-menu-${id}`, text) && uiBounds(node)));
-        const diaryPredicate = nodes => diaryContent(nodes) && menuClosed(nodes);
+            ["ккал съедено", "Белки", "Жиры", "Углеводы"].every(text => hasText(nodes, text)) &&
+            nodes.some(node => describedAction(node, "diary-goal", "Цель не задана. Задать цель")) &&
+            nodes.some(node => describedAction(node, "profile-switcher", "Профиль: Smoke. Сменить профиль"));
+        const diaryPredicate = nodes => diaryContent(nodes) && nodes.some(addAction);
         let diary = await waitUi("diary.xml", diaryPredicate);
         screenshot("diary.png");
         report.profile.creation = "passed";
-        async function openMenu(nodes, file) {
-            tap(nodes, node => addToggle(node));
-            return waitUi(file, menuOpen);
-        }
-        report.phase = "add-menu";
-        const menu = await openMenu(diary, "menu-open.xml");
-        screenshot("add-menu.png");
-        tap(menu, node => addToggle(node, true));
-        diary = await waitUi("diary-after-menu-toggle.xml", diaryPredicate);
-        report.addMenu.toggle = "passed";
-        await openMenu(diary, "menu-before-back.xml");
-        adb(["shell", "input", "keyevent", "4"]);
-        diary = await waitUi("diary-after-menu-back.xml", diaryPredicate);
-        report.addMenu.back = "passed";
         const destinations = [
-            ["products", "Продукты", nodes => hasText(nodes, "Продукты") &&
+            ["products", node => describedAction(node, "tab-products", "Продукты"), nodes => hasText(nodes, "Продукты") &&
                 nodes.some(node => hasAutomationId(node, "product-search") && node.class === "android.widget.EditText" &&
                     node.enabled === "true" && uiBounds(node)) &&
-                nodes.some(node => identifiedAction(node, "product-search-submit", "Найти") && uiBounds(node))],
-            ["dishes", "Мои блюда", nodes => hasText(nodes, "Блюда") &&
+                nodes.some(node => describedAction(node, "product-add-manual", "Добавить продукт вручную"))],
+            ["dishes", node => describedAction(node, "tab-dishes", "Блюда"), nodes => hasText(nodes, "Блюда") &&
                 nodes.some(node => identifiedAction(node, "dish-create-manual", "Собрать блюдо") && uiBounds(node)) &&
                 hasText(nodes, "Нет блюд") && nodes.some(node => hasAutomationId(node, "dish-catalog-empty") &&
                     node.enabled === "true" && uiBounds(node))],
-            ["input", "Записать еду", nodes => nodes.some(node => hasAutomationId(node, "input-description") &&
+            ["input", addAction, nodes => nodes.some(node => hasAutomationId(node, "input-description") &&
                 node.class === "android.widget.EditText" && node.enabled === "true" && uiBounds(node)) &&
                 nodes.some(node => identifiedAction(node, "input-purpose-diary", "В дневник") && uiBounds(node)) &&
                 nodes.some(node => identifiedAction(node, "input-purpose-dish", "Создать блюдо") && uiBounds(node)) &&
                 nodes.some(node => hasAutomationId(node, "input-submit") && node.text === "Разобрать описание")]
         ];
-        for (const [id, text, content] of destinations) {
-            report.phase = `add-menu-${id}`;
-            const selection = await openMenu(diary, `${id}-menu.xml`);
-            tap(selection, node => identifiedAction(node, `add-menu-${id}`, text));
-            const destinationPredicate = nodes => content(nodes) && menuClosed(nodes);
-            const destination = await waitUi(`${id}.xml`, destinationPredicate);
+        for (const [id, selector, content] of destinations) {
+            report.phase = `navigation-${id}`;
+            tap(diary, selector);
+            await waitUi(`${id}.xml`, nodes => content(nodes) && nodes.some(addAction));
             screenshot(`${id}.png`);
-            await openMenu(destination, `menu-on-${id}.xml`);
-            adb(["shell", "input", "keyevent", "4"]);
-            await waitUi(`${id}-after-menu-back.xml`, destinationPredicate);
             adb(["shell", "input", "keyevent", "4"]);
             diary = await waitUi(`diary-after-${id}-back.xml`, diaryPredicate);
-            report.addMenu[id] = "passed";
+            report.navigation[id] = "passed";
         }
         report.phase = "restart";
         adb(["shell", "am", "force-stop", packageId]);

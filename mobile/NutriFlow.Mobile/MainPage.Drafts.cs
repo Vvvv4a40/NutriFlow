@@ -32,7 +32,6 @@ public partial class MainPage
         CancellationTokenSource delay = new();
         _draftSaveDelay = delay;
         _delayedDraftProfileId = profileId;
-        SetInputSaveStatus("Сохраняется…");
         _ = SaveAfterDelayAsync(delay);
     }
 
@@ -78,7 +77,6 @@ public partial class MainPage
     {
         CancelDelayedInputDraftSave();
         int version = ++_draftSaveVersion;
-        SetInputSaveStatus("Сохраняется…");
         _draftSaveTask = PersistInputDraftAsync(profileId, draft, version);
         return _draftSaveTask;
     }
@@ -156,7 +154,7 @@ public partial class MainPage
                 _pendingInputDraft = draft;
                 if (alreadySubmitted)
                 {
-                    _draftReadError = "Сохранённый текст уже есть в сессии. Удалите его копию или явно восстановите текст.";
+                    _draftReadError = "Этот текст уже отправлен в текущий расчёт. Удалите копию или явно восстановите текст.";
                 }
                 return;
             }
@@ -195,7 +193,7 @@ public partial class MainPage
                         ? await _client.FindSessionAsync(profileId, id) : null;
                     bool canResume = previous is not null && previous.Status != "Confirmed";
                     if (canResume && draft.MatchesLastSubmittedMessage(previous!.Messages) &&
-                        !await DisplayAlertAsync("Вернуть уже отправленный текст?", "Это уточнение уже добавлено в сессию. Восстановление позволит отправить его ещё раз.", "Вернуть", "Отмена"))
+                        !await DisplayAlertAsync("Вернуть уже отправленный текст?", "Это уточнение уже есть в расчёте. Восстановление позволит отправить его ещё раз.", "Вернуть", "Отмена"))
                     {
                         return;
                     }
@@ -206,7 +204,7 @@ public partial class MainPage
                     }
 
                     if (draft.SessionId is not null && !canResume &&
-                        !await DisplayAlertAsync("Открыть как новое описание?", "Исходная сессия завершена или недоступна. Текст не будет добавлен к другому расчёту.", "Открыть", "Отмена"))
+                        !await DisplayAlertAsync("Открыть как новое описание?", "Исходный расчёт завершён или недоступен. Текст не будет добавлен к другому расчёту.", "Открыть", "Отмена"))
                     {
                         return;
                     }
@@ -248,7 +246,7 @@ public partial class MainPage
                 recovery.Children.Add(retry);
             }
 
-            Button discard = Ui.Action("Удалить сохранённый текст", () => RunAsync(async () =>
+            Button discard = Ui.Ghost("Удалить сохранённый текст", () => RunAsync(async () =>
             {
                 if (!await DisplayAlertAsync("Удалить сохранённый ввод?", "Будет удалён только неотправленный текст этого профиля. Дневник, продукты и блюда останутся.", "Удалить", "Отмена"))
                 {
@@ -264,12 +262,20 @@ public partial class MainPage
                 _draftText = "";
                 SetInputSaveStatus("");
                 await RenderAsync();
-            }), true);
+            }), Ui.Danger);
             discard.AutomationId = "input-draft-discard";
             recovery.Children.Add(discard);
         }
 
-        return Ui.Card(recovery);
+        return new Border
+        {
+            Content = recovery,
+            Padding = 16,
+            BackgroundColor = Ui.Warning.WithAlpha(0.07f),
+            Stroke = Ui.Warning.WithAlpha(0.35f),
+            StrokeThickness = 1,
+            StrokeShape = new Microsoft.Maui.Controls.Shapes.RoundRectangle { CornerRadius = Ui.CardRadius }
+        };
     }
 
     private async Task ClearSubmittedInputAsync(Guid profileId)
