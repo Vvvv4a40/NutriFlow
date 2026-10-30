@@ -1,0 +1,1 @@
+import{CacheStorageVFS as s,VFS_NAME as e}from"./bit-bsqlite-cache-vfs.js";async function f({module:r,sqlite3:t}){const a=await s.create(e,r);return t.vfs_register(a,!1),{vfsName:e}}export{e as VFS_NAME,f as register};

@@ -1,0 +1,1 @@
+import{IDBBatchAtomicVFS as o}from"./engine/examples/IDBBatchAtomicVFS.js";const t="idb-batch-atomic",i="idb-batch-atomic";async function s({module:e,sqlite3:c}){const a=await o.create(t,e,{idbName:i});return c.vfs_register(a,!1),{vfsName:t,onOpenSql:["PRAGMA cache_size=-8000"]}}export{i as IDB_NAME,t as VFS_NAME,s as register};

@@ -1,0 +1,1 @@
+import{OPFSCoopSyncVFS as t}from"./engine/examples/OPFSCoopSyncVFS.js";const o="opfs-coop-sync";async function n({module:e,sqlite3:r}){const s=await t.create(o,e);return r.vfs_register(s,!1),{vfsName:o}}export{o as VFS_NAME,n as register};
