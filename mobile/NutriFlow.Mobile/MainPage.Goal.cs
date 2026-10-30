@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Maui.Controls.Shapes;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Mobile.Core;
@@ -77,8 +78,14 @@ public partial class MainPage
 
         void AddMacro(NutritionMacro macro, string name, Color color, string id)
         {
-            Label title = Ui.Strong(name, 15);
-            title.TextColor = color;
+            // the macro colour marks the name with a dot; as text it would not reach 4.5:1 on every theme
+            Grid title = new()
+            {
+                ColumnSpacing = 8,
+                ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Auto } }
+            };
+            title.Add(new Ellipse { Fill = color, WidthRequest = 8, HeightRequest = 8, VerticalOptions = LayoutOptions.Center }, 0);
+            title.Add(Ui.Strong(name, 15), 1);
             Label value = new() { FontSize = 15, FontAutoScalingEnabled = true, HorizontalTextAlignment = TextAlignment.End, FormattedText = new FormattedString() };
             value.AutomationId = $"goal-{id}-value";
             Grid caption = new()

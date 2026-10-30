@@ -40,16 +40,17 @@ public partial class MainPage
             Text = "+",
             AutomationId = "add-food",
             FontSize = 30,
-            TextColor = Ui.OnAccent,
-            BackgroundColor = Ui.Accent,
+            TextColor = Ui.FabForeground,
+            BackgroundColor = Ui.FabBackground,
             Padding = 0,
             CornerRadius = 28,
             WidthRequest = 56,
             HeightRequest = 56,
             HorizontalOptions = LayoutOptions.Center,
             VerticalOptions = LayoutOptions.Center,
-            Shadow = new Shadow { Brush = new SolidColorBrush(Ui.Accent), Offset = new Point(0, 4), Radius = 16, Opacity = 0.28f }
+            Shadow = new Shadow { Brush = new SolidColorBrush(Ui.FabBackground), Offset = new Point(0, 4), Radius = 16, Opacity = 0.28f }
         };
+        Ui.ApplyStates(add, Ui.FabPressed, Ui.FabForeground);
         SemanticProperties.SetDescription(add, "Добавить еду");
         SemanticProperties.SetHint(add, "Описать еду текстом или голосом, выбрать продукт или блюдо");
         add.Clicked += async (_, _) =>
@@ -65,16 +66,19 @@ public partial class MainPage
     private View NavigationTab(string tab, AppIconKind icon)
     {
         bool selected = _tab == tab;
-        Color color = selected ? Ui.Accent : Ui.Subtle;
         Border indicator = new()
         {
             WidthRequest = 56,
             HeightRequest = 30,
             HorizontalOptions = LayoutOptions.Center,
-            BackgroundColor = selected ? Ui.AccentSoft : Colors.Transparent,
+            BackgroundColor = selected ? Ui.NavSelected : Colors.Transparent,
             StrokeThickness = 0,
             StrokeShape = new RoundRectangle { CornerRadius = 15 },
-            Content = new AppIcon(icon, color, 22) { HorizontalOptions = LayoutOptions.Center, VerticalOptions = LayoutOptions.Center }
+            Content = new AppIcon(icon, selected ? Ui.NavSelectedIcon : Ui.NavForeground, 22)
+            {
+                HorizontalOptions = LayoutOptions.Center,
+                VerticalOptions = LayoutOptions.Center
+            }
         };
         Label caption = new()
         {
@@ -82,7 +86,7 @@ public partial class MainPage
             FontSize = 12,
             FontAutoScalingEnabled = false,
             FontFamily = Ui.MediumFont,
-            TextColor = color,
+            TextColor = selected ? Ui.NavSelectedText : Ui.NavForeground,
             HorizontalTextAlignment = TextAlignment.Center,
             MaxLines = 1,
             LineBreakMode = LineBreakMode.TailTruncation
@@ -92,7 +96,9 @@ public partial class MainPage
         content.Children.Add(caption);
         Grid tile = Ui.Pressable(content, () => SelectTabAsync(tab), tab,
             selected ? "Текущий раздел" : $"Открыть раздел «{tab}»", $"tab-{icon.ToString().ToLowerInvariant()}");
-        ((Button)tile.Children[0]).CornerRadius = 18;
+        Button layer = (Button)tile.Children[0];
+        layer.CornerRadius = 18;
+        Ui.ApplyStates(layer, Ui.NavPressed, Ui.NavForeground);
         tile.MinimumHeightRequest = 64;
         return tile;
     }

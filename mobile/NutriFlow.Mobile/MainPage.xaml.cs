@@ -43,7 +43,10 @@ public partial class MainPage : ContentPage
         _inputDrafts = new LocalInputDraftStore(profiles);
         Title = "NutriFlow";
 #if ANDROID
-        SafeAreaEdges = SafeAreaEdges.All;
+        // the navigation panel takes the bottom inset itself, so its colour runs under the system navigation bar
+        SafeAreaEdges = new SafeAreaEdges(SafeAreaRegions.All, SafeAreaRegions.All, SafeAreaRegions.All, SafeAreaRegions.None);
+        _navigationArea.SafeAreaEdges = new SafeAreaEdges(SafeAreaRegions.None, SafeAreaRegions.None, SafeAreaRegions.None, SafeAreaRegions.All);
+        _welcome.SafeAreaEdges = new SafeAreaEdges(SafeAreaRegions.None, SafeAreaRegions.None, SafeAreaRegions.None, SafeAreaRegions.All);
 #endif
         NavigationPage.SetHasNavigationBar(this, false);
 
@@ -106,6 +109,10 @@ public partial class MainPage : ContentPage
                 new() { Height = GridLength.Auto }, new() { Height = GridLength.Auto }
             }
         };
+#if ANDROID
+        // a layout that reaches the bottom edge pads itself by default, which would leave a strip under the panel
+        layout.SafeAreaEdges = SafeAreaEdges.None;
+#endif
         layout.Add(_header, 0, 0);
         layout.Add(_scroll, 0, 1);
         layout.Add(_actionBarArea, 0, 2);
@@ -116,26 +123,23 @@ public partial class MainPage : ContentPage
         Grid.SetRowSpan(_blocker, 4);
         Content = layout;
         _runner = new ActionRunner(this, _activity, _blocker);
+        ApplyShellColors();
     }
 
     // controls built once in the constructor are recoloured here; everything else is rebuilt by RenderAsync
-    internal void ApplyTheme()
-    {
-        ApplyShellColors();
-        _ = RunAsync(RenderAsync);
-    }
-
-    internal void ApplyShellColors()
+    private void ApplyShellColors()
     {
         BackgroundColor = Ui.Background;
-        _screenTitle.TextColor = Ui.TextPrimary;
+        _screenTitle.TextColor = Ui.Highlight;
         _activity.Color = Ui.Accent;
         _avatar.BackgroundColor = Ui.AccentSoft;
         _avatar.Stroke = Ui.Accent.WithAlpha(0.35f);
         _profileInitial.TextColor = Ui.Accent;
         Ui.ApplyStates(_profileButton, Ui.SurfacePressed, Ui.TextPrimary);
-        _navigation.BackgroundColor = Ui.Background;
+        _navigationArea.BackgroundColor = Ui.NavBackground;
         _actionBarArea.BackgroundColor = Ui.Background;
+        // a panel in the page colour needs a hairline to separate it, a coloured one does not
+        _navigationLine.IsVisible = Ui.Theme.NavBackground == Ui.Theme.Background;
         _navigationLine.Color = Ui.Stroke;
         _actionBarLine.Color = Ui.Stroke;
     }
@@ -240,6 +244,11 @@ public partial class MainPage : ContentPage
         _inputEditor = null;
         _inputSaveStatus = null;
         _inputSaveRetry = null;
+        if (Ui.UseTheme(_profile is null ? null : ProfileSettings.Theme(_profile.Id)))
+        {
+            ApplyShellColors();
+        }
+
         RenderNavigation();
         SetActionBar(null);
         _body.Children.Clear();
@@ -248,6 +257,7 @@ public partial class MainPage : ContentPage
         _scroll.IsVisible = hasProfile;
         _navigationArea.IsVisible = hasProfile;
         _welcome.IsVisible = !hasProfile;
+        App.SetSystemBars(hasProfile ? Ui.Theme.IsNavigationDark : Ui.IsDark);
         if (_profile is null)
         {
             RenderWelcome();

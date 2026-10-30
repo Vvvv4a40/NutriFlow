@@ -10,6 +10,9 @@ public partial class MainPage
                 $"Профиль {_profile?.Name}. Сменить или создать профиль", AppIconKind.User, automationId: "settings-profile")
         ]));
 
+        _body.Children.Add(SectionHeader("Тема"));
+        _body.Children.Add(ThemePicker(profileId));
+
         bool hasKey = await ProfileSettings.HasGroqAsync(profileId);
         _body.Children.Add(SectionHeader("Распознавание"));
         Grid provider = new()
@@ -112,5 +115,53 @@ public partial class MainPage
         version.HorizontalTextAlignment = TextAlignment.Center;
         version.Margin = new Thickness(0, 12, 0, 0);
         _body.Children.Add(version);
+    }
+
+    private View ThemePicker(Guid profileId)
+    {
+        Grid choices = new() { ColumnSpacing = 4, RowSpacing = 12 };
+        for (int column = 0; column < 4; column++)
+        {
+            choices.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Star });
+        }
+
+        for (int index = 0; index < Theme.All.Count; index++)
+        {
+            if (index % 4 == 0)
+            {
+                choices.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            }
+
+            Theme theme = Theme.All[index];
+            bool selected = theme == Ui.Theme;
+            VerticalStackLayout content = new() { Spacing = 6, Padding = new Thickness(0, 6) };
+            content.Children.Add(new ThemeSwatch(theme, selected) { HorizontalOptions = LayoutOptions.Center });
+            Label name = Ui.Caption(theme.Name, selected ? Ui.TextPrimary : Ui.Muted);
+            name.FontSize = 12;
+            name.HorizontalTextAlignment = TextAlignment.Center;
+            if (selected)
+            {
+                name.FontFamily = Ui.MediumFont;
+            }
+
+            content.Children.Add(name);
+            Grid choice = Ui.Pressable(content, () => RunAsync(async () =>
+            {
+                if (_profile?.Id != profileId || theme == Ui.Theme)
+                {
+                    return;
+                }
+
+                ProfileSettings.SaveTheme(profileId, theme.Id);
+                await RenderAsync();
+            }), selected ? $"Тема «{theme.Name}». Выбрано" : $"Тема «{theme.Name}»",
+                selected ? null : "Применить тему к этому профилю", $"settings-theme-{theme.Id}");
+            ((Button)choice.Children[0]).CornerRadius = 16;
+            choices.Add(choice, index % 4, index / 4);
+        }
+
+        Label note = Ui.Caption("У каждого профиля своя тема.");
+        note.HorizontalTextAlignment = TextAlignment.Center;
+        return Ui.Card(choices, note);
     }
 }

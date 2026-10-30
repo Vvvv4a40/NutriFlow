@@ -62,6 +62,12 @@ internal sealed class FormPage : ContentPage
         _footerArea.IsVisible = true;
     }
 
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        App.SetSystemBars(Ui.IsDark);
+    }
+
     protected override void OnDisappearing()
     {
         OnClose?.Invoke();

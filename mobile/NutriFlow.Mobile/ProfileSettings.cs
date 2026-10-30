@@ -15,6 +15,12 @@ internal static class ProfileSettings
     public static string SpeechModel(Guid profileId) =>
         Preferences.Default.Get(Key(profileId, "speech-model"), "whisper-large-v3-turbo");
 
+    public static string Theme(Guid profileId) =>
+        Preferences.Default.Get(Key(profileId, "theme"), NutriFlow.Mobile.Theme.DefaultId);
+
+    public static void SaveTheme(Guid profileId, string theme) =>
+        Preferences.Default.Set(Key(profileId, "theme"), theme);
+
     public static async Task<GroqSettings> GetGroqAsync(Guid profileId)
     {
         string? apiKey = await SecureStorage.Default.GetAsync(Key(profileId, "groq-key"));

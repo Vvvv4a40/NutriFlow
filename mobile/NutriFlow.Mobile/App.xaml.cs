@@ -4,20 +4,14 @@ public partial class App : Application
 {
     private readonly MainPage _mainPage;
     private NavigationPage? _navigation;
+    private static bool _darkNavigationBar;
 
     public App(MainPage mainPage)
     {
         InitializeComponent();
         _mainPage = mainPage;
         ApplyThemeResources();
-        // the page is created by DI before the application exists, so its shell starts in the fallback theme
-        _mainPage.ApplyShellColors();
-        RequestedThemeChanged += (_, _) => Dispatcher.Dispatch(() =>
-        {
-            ApplyThemeResources();
-            ApplySystemBars();
-            _mainPage.ApplyTheme();
-        });
+        Ui.ThemeChanged += ApplyThemeResources;
     }
 
     protected override Window CreateWindow(IActivationState? activationState)
@@ -27,7 +21,7 @@ public partial class App : Application
         Window window = new(_navigation);
         // a backgrounded app may be killed without warning, so pending typed text is written on the first pause
         window.Deactivated += (_, _) => _mainPage.SaveDelayedInputDraftNow();
-        window.Activated += (_, _) => ApplySystemBars();
+        window.Activated += (_, _) => SetSystemBars(_darkNavigationBar);
         return window;
     }
 
@@ -40,6 +34,7 @@ public partial class App : Application
         Resources["Muted"] = Ui.Muted;
         Resources["Subtle"] = Ui.Subtle;
         Resources["Accent"] = Ui.Accent;
+        Resources["AccentFill"] = Ui.AccentFill;
         Resources["AccentPressed"] = Ui.AccentPressed;
         Resources["OnAccent"] = Ui.OnAccent;
         if (_navigation is not null)
@@ -49,17 +44,17 @@ public partial class App : Application
         }
     }
 
-    // edge-to-edge windows keep the status bar transparent, so its icons must follow the theme to stay visible
-    private static void ApplySystemBars()
+    // edge-to-edge windows keep the system bars transparent, so their icons follow whatever is drawn under them:
+    // the page background at the top and, at the bottom, the navigation panel or the page
+    internal static void SetSystemBars(bool darkNavigationBar)
     {
+        _darkNavigationBar = darkNavigationBar;
 #if ANDROID
-        if (Platform.CurrentActivity?.Window is { } window)
+        if (Platform.CurrentActivity?.Window is { } window
+            && AndroidX.Core.View.WindowCompat.GetInsetsController(window, window.DecorView) is { } controller)
         {
-            if (AndroidX.Core.View.WindowCompat.GetInsetsController(window, window.DecorView) is { } controller)
-            {
-                controller.AppearanceLightStatusBars = !Ui.IsDark;
-                controller.AppearanceLightNavigationBars = !Ui.IsDark;
-            }
+            controller.AppearanceLightStatusBars = !Ui.IsDark;
+            controller.AppearanceLightNavigationBars = !darkNavigationBar;
         }
 #endif
     }

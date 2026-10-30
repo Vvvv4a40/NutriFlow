@@ -71,12 +71,12 @@ public partial class MainPage
             FontSize = 16,
             FontFamily = Ui.MediumFont,
             FontAutoScalingEnabled = true,
-            TextColor = Ui.TextPrimary,
+            TextColor = Ui.DateForeground,
             BackgroundColor = Colors.Transparent,
             Padding = new Thickness(8, 6),
             MinimumHeightRequest = 48
         };
-        Ui.ApplyStates(chooseDate, Ui.SurfaceRaised, Ui.TextPrimary);
+        Ui.ApplyStates(chooseDate, Ui.DatePressed, Ui.DateForeground);
         chooseDate.Clicked += (_, _) =>
         {
             picker.Unfocus();
@@ -90,17 +90,26 @@ public partial class MainPage
         {
             ColumnDefinitions = new ColumnDefinitionCollection { new() { Width = GridLength.Auto }, new() { Width = GridLength.Star }, new() { Width = GridLength.Auto } }
         };
-        row.Add(Ui.IconButton(AppIconKind.Previous, "Предыдущий день", () => ChangeDiaryDateAsync(profileId, selectedDate.AddDays(-1)), Ui.Muted), 0);
+        row.Add(DateStep(AppIconKind.Previous, "Предыдущий день", () => ChangeDiaryDateAsync(profileId, selectedDate.AddDays(-1))), 0);
         row.Add(dateControl, 1);
-        row.Add(Ui.IconButton(AppIconKind.Next, "Следующий день", () => ChangeDiaryDateAsync(profileId, selectedDate.AddDays(1)), Ui.Muted), 2);
+        row.Add(DateStep(AppIconKind.Next, "Следующий день", () => ChangeDiaryDateAsync(profileId, selectedDate.AddDays(1))), 2);
+        // a pill in the card colour needs an outline to stand out from the page, a coloured one does not
+        bool outlined = Ui.Theme.DateBackground == Ui.Theme.Surface;
         return new Border
         {
             Content = row,
-            BackgroundColor = Ui.Surface,
-            Stroke = Ui.Stroke,
-            StrokeThickness = 1,
+            BackgroundColor = Ui.DateBackground,
+            Stroke = outlined ? Ui.Stroke : Colors.Transparent,
+            StrokeThickness = outlined ? 1 : 0,
             StrokeShape = new RoundRectangle { CornerRadius = 26 }
         };
+    }
+
+    private static Grid DateStep(AppIconKind icon, string description, Func<Task> action)
+    {
+        Grid step = Ui.IconButton(icon, description, action, Ui.DateForeground);
+        Ui.ApplyStates((Button)step.Children[0], Ui.DatePressed, Ui.DateForeground);
+        return step;
     }
 
     private Task ChangeDiaryDateAsync(Guid profileId, DateOnly date) => RunAsync(async () =>
@@ -134,7 +143,7 @@ public partial class MainPage
             CharacterSpacing = -1.6,
             FontAutoScalingEnabled = false,
             HorizontalTextAlignment = TextAlignment.Center,
-            TextColor = Ui.TextPrimary
+            TextColor = Ui.Highlight
         };
         Label caption = Ui.Caption("");
         caption.HorizontalTextAlignment = TextAlignment.Center;

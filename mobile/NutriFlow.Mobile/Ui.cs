@@ -6,62 +6,68 @@ namespace NutriFlow.Mobile;
 
 internal static class Ui
 {
-    // "Terracotta & Linen": linen and terracotta in the light theme, espresso and lighter terracotta in the dark one
-    private sealed record Palette(
-        string Background, string Surface, string SurfaceRaised, string SurfacePressed, string Stroke,
-        string TextPrimary, string Muted, string Subtle,
-        string Accent, string AccentPressed, string AccentSoft, string OnAccent,
-        string FieldStroke, string FieldFocus,
-        string Protein, string Fat, string Carbs,
-        string Success, string Warning, string Danger);
+    // screens read the profile theme while they are built and are rebuilt when it changes
+    public static Theme Theme { get; private set; } = Theme.Find(Theme.DefaultId);
 
-    private static readonly Palette LightPalette = new(
-        "#F5EEE4", "#FFFBF5", "#EFE6D9", "#E3D6C4", "#E6DBCC",
-        "#2D211B", "#6E5F53", "#756458",
-        "#A2461F", "#8A3A18", "#F7E7DC", "#FFFFFF",
-        "#8C7766", "#A2461F",
-        "#3F6286", "#946C1C", "#6E5A8E",
-        "#2E7A4E", "#8A5200", "#A8283E");
+    public static event Action? ThemeChanged;
 
-    private static readonly Palette DarkPalette = new(
-        "#151110", "#201A17", "#2F2722", "#3C322B", "#2C2420",
-        "#F4EBE1", "#BBAA9A", "#9C8B7D",
-        "#E5824F", "#F0A57C", "#36231A", "#22100A",
-        "#8A7667", "#F0A57C",
-        "#8FB0D3", "#DDB866", "#B3A2D6",
-        "#8FD3A8", "#F0B65E", "#F0899A");
+    public static bool UseTheme(string? id)
+    {
+        Theme theme = Theme.Find(id);
+        if (theme == Theme)
+        {
+            return false;
+        }
 
-    // screens read the current theme while they are built and are rebuilt when the system theme changes
-    public static bool IsDark => Application.Current?.RequestedTheme != AppTheme.Light;
+        Theme = theme;
+        ThemeChanged?.Invoke();
+        return true;
+    }
 
-    private static Palette Current => IsDark ? DarkPalette : LightPalette;
+    public static bool IsDark => Theme.IsDark;
 
-    public static Color Background => Color.FromArgb(Current.Background);
-    public static Color Surface => Color.FromArgb(Current.Surface);
-    public static Color SurfaceRaised => Color.FromArgb(Current.SurfaceRaised);
-    public static Color SurfacePressed => Color.FromArgb(Current.SurfacePressed);
-    public static Color Stroke => Color.FromArgb(Current.Stroke);
-    public static Color TextPrimary => Color.FromArgb(Current.TextPrimary);
-    public static Color Muted => Color.FromArgb(Current.Muted);
-    public static Color Subtle => Color.FromArgb(Current.Subtle);
-    public static Color Accent => Color.FromArgb(Current.Accent);
-    public static Color AccentPressed => Color.FromArgb(Current.AccentPressed);
-    public static Color AccentSoft => Color.FromArgb(Current.AccentSoft);
-    public static Color OnAccent => Color.FromArgb(Current.OnAccent);
-    public static Color FieldStroke => Color.FromArgb(Current.FieldStroke);
-    public static Color FieldFocus => Color.FromArgb(Current.FieldFocus);
-    public static Color Protein => Color.FromArgb(Current.Protein);
-    public static Color Fat => Color.FromArgb(Current.Fat);
-    public static Color Carbs => Color.FromArgb(Current.Carbs);
-    public static Color Success => Color.FromArgb(Current.Success);
-    public static Color Warning => Color.FromArgb(Current.Warning);
-    public static Color Danger => Color.FromArgb(Current.Danger);
+    public static Color Background => Color.FromArgb(Theme.Background);
+    public static Color Surface => Color.FromArgb(Theme.Surface);
+    public static Color SurfaceRaised => Color.FromArgb(Theme.SurfaceRaised);
+    public static Color SurfacePressed => Color.FromArgb(Theme.SurfacePressed);
+    public static Color Stroke => Color.FromArgb(Theme.Stroke);
+    public static Color TextPrimary => Color.FromArgb(Theme.TextPrimary);
+    public static Color Muted => Color.FromArgb(Theme.Muted);
+    public static Color Subtle => Color.FromArgb(Theme.Subtle);
+    public static Color Highlight => Color.FromArgb(Theme.Highlight);
+    public static Color Accent => Color.FromArgb(Theme.Accent);
+    public static Color AccentFill => Color.FromArgb(Theme.AccentFill);
+    public static Color AccentPressed => Color.FromArgb(Theme.AccentPressed);
+    public static Color AccentSoft => Color.FromArgb(Theme.AccentSoft);
+    public static Color OnAccent => Color.FromArgb(Theme.OnAccent);
+    public static Color FieldStroke => Color.FromArgb(Theme.FieldStroke);
+    public static Color Protein => Color.FromArgb(Theme.Protein);
+    public static Color Fat => Color.FromArgb(Theme.Fat);
+    public static Color Carbs => Color.FromArgb(Theme.Carbs);
+    public static Color Success => Color.FromArgb(Theme.Success);
+    public static Color Warning => Color.FromArgb(Theme.Warning);
+    public static Color Danger => Color.FromArgb(Theme.Danger);
+    public static Color NavBackground => Color.FromArgb(Theme.NavBackground);
+    public static Color NavForeground => Color.FromArgb(Theme.NavForeground);
+    public static Color NavPressed => Color.FromArgb(Theme.NavPressed);
+    public static Color NavSelected => Color.FromArgb(Theme.NavSelected);
+    public static Color NavSelectedIcon => Color.FromArgb(Theme.NavSelectedIcon);
+    public static Color NavSelectedText => Color.FromArgb(Theme.NavSelectedText);
+    public static Color FabBackground => Color.FromArgb(Theme.FabBackground);
+    public static Color FabForeground => Color.FromArgb(Theme.FabForeground);
+    public static Color FabPressed => Color.FromArgb(Theme.FabPressed);
+    public static Color DateBackground => Color.FromArgb(Theme.DateBackground);
+    public static Color DateForeground => Color.FromArgb(Theme.DateForeground);
+    public static Color DatePressed => Color.FromArgb(Theme.DatePressed);
+    // a focused field is outlined with the text accent, which keeps 3:1 against every surface
+    public static Color FieldFocus => Accent;
 
     public const string MediumFont = "sans-serif-medium";
     public const double ScreenPadding = 20;
     public const double CardRadius = 22;
 
     private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
+    private const char NoBreakSpace = (char)0xA0;
 
     public static Label Title(string text)
     {
@@ -131,7 +137,7 @@ internal static class Ui
             FontFamily = MediumFont,
             CharacterSpacing = 1.2,
             FontAutoScalingEnabled = true,
-            TextColor = Subtle
+            TextColor = Highlight
         };
         SemanticProperties.SetHeadingLevel(label, SemanticHeadingLevel.Level2);
         return label;
@@ -183,7 +189,7 @@ internal static class Ui
             FontFamily = MediumFont,
             FontAutoScalingEnabled = true,
             LineBreakMode = LineBreakMode.WordWrap,
-            BackgroundColor = secondary ? SurfaceRaised : Accent,
+            BackgroundColor = secondary ? SurfaceRaised : AccentFill,
             TextColor = secondary ? TextPrimary : OnAccent,
             CornerRadius = 16,
             MinimumHeightRequest = 52,
@@ -236,7 +242,7 @@ internal static class Ui
     public static void SetEnabled(Button button, bool enabled)
     {
         button.IsEnabled = enabled;
-        button.BackgroundColor = enabled ? Accent : SurfaceRaised;
+        button.BackgroundColor = enabled ? AccentFill : SurfaceRaised;
         button.TextColor = enabled ? OnAccent : Subtle;
     }
 
@@ -661,15 +667,25 @@ internal static class Ui
         return card;
     }
 
+    // macro colours only reach 3:1 on tinted surfaces, so they mark the values with dots and the numbers stay in the text colour
     public static FormattedString MacroSpans(decimal protein, decimal fat, decimal carbs)
     {
         FormattedString text = new();
-        text.Spans.Add(new Span { Text = $"Б {MacroAmount(protein)}", TextColor = Protein });
-        text.Spans.Add(new Span { Text = "  ·  ", TextColor = Subtle });
-        text.Spans.Add(new Span { Text = $"Ж {MacroAmount(fat)}", TextColor = Fat });
-        text.Spans.Add(new Span { Text = "  ·  ", TextColor = Subtle });
-        text.Spans.Add(new Span { Text = $"У {MacroAmount(carbs)} г", TextColor = Carbs });
+        AddMacro(text, Protein, $"Б {MacroAmount(protein)}");
+        AddMacro(text, Fat, $"Ж {MacroAmount(fat)}");
+        AddMacro(text, Carbs, $"У {MacroAmount(carbs)} г");
         return text;
+    }
+
+    private static void AddMacro(FormattedString text, Color color, string value)
+    {
+        if (text.Spans.Count > 0)
+        {
+            text.Spans.Add(new Span { Text = "   " });
+        }
+
+        text.Spans.Add(new Span { Text = "●" + NoBreakSpace, TextColor = color });
+        text.Spans.Add(new Span { Text = value, TextColor = TextPrimary });
     }
 
     public static FormattedString MacroSpans(NutritionResponse value) =>

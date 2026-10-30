@@ -45,7 +45,7 @@
                 <Setter Property="MinimumHeightRequest" Value="48" />
             </Style>
             <Style TargetType="Button">
-                <Setter Property="BackgroundColor" Value="{DynamicResource Accent}" />
+                <Setter Property="BackgroundColor" Value="{DynamicResource AccentFill}" />
                 <Setter Property="TextColor" Value="{DynamicResource OnAccent}" />
                 <Setter Property="FontSize" Value="15" />
                 <Setter Property="FontAttributes" Value="Bold" />
