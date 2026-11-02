@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru" translate="no">
+
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' https://api.groq.com https://world.openfoodfacts.org; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#151110" />
+    <meta name="apple-mobile-web-app-title" content="NutriFlow" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>NutriFlow</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="css/app.css" />
+    <script type="importmap"></script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="splash" role="status" data-testid="startup-splash">
+            <svg class="splash-logo" viewBox="0 0 64 64" aria-hidden="true">
+                <path d="M18 47V17h8l14 19V17h7v30h-7L25 27v20z" fill="#F5EEE4" />
+                <circle cx="49" cy="14" r="5" fill="#E5824F" />
+            </svg>
+            <p class="splash-text">Загружаю NutriFlow…</p>
+        </div>
+    </div>
+
+    <template id="startup-unsupported">
+        <main class="screen gate" data-testid="startup-unsupported">
+            <h1 class="title">Этот браузер не подходит для NutriFlow</h1>
+            <p class="text">Откройте сайт в свежей версии Safari, Chrome или Edge.</p>
+        </main>
+    </template>
+
+    <template id="startup-second-instance">
+        <main class="screen gate" data-testid="startup-second-instance">
+            <h1 class="title">NutriFlow уже открыт</h1>
+            <p class="text">Закройте другую вкладку или окно с NutriFlow и обновите эту страницу.</p>
+            <button class="action" type="button" data-action="reload">Обновить</button>
+        </main>
+    </template>
+
+    <template id="startup-install">
+        <main class="screen gate" data-testid="startup-install">
+            <svg class="gate-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v12M8 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+            <h1 class="title">Установите NutriFlow на экран «Домой»</h1>
+            <p class="text">На iPhone и iPad дневник хранится в установленном приложении. Нажмите «Поделиться», выберите «На экран «Домой»» и откройте NutriFlow с иконки.</p>
+        </main>
+    </template>
+
+    <div id="blazor-error-ui" role="alert">
+        Не удалось продолжить работу.
+        <a href="." class="reload">Обновить страницу</a>
+    </div>
+
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js" autostart="false"></script>
+    <script type="module" src="js/boot.mjs"></script>
+</body>
+
+</html>

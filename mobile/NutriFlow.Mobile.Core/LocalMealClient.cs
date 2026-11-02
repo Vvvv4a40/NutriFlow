@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -15,14 +16,20 @@ namespace NutriFlow.Mobile.Core;
 
 public sealed class LocalMealClient
 {
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ProfileGates = new();
     private readonly LocalProfileStore _profiles;
     private readonly Func<HttpClient> _httpClientFactory;
+    private readonly Func<string, Guid, CancellationToken, Task<NutriFlowDbContext>> _openDatabase;
 
-    public LocalMealClient(LocalProfileStore profiles, Func<HttpClient>? httpClientFactory = null)
+    public LocalMealClient(
+        LocalProfileStore profiles,
+        Func<HttpClient>? httpClientFactory = null,
+        Func<string, Guid, CancellationToken, Task<NutriFlowDbContext>>? openDatabase = null)
     {
         ArgumentNullException.ThrowIfNull(profiles);
         _profiles = profiles;
         _httpClientFactory = httpClientFactory ?? (() => new HttpClient());
+        _openDatabase = openDatabase ?? LocalProfileDatabase.OpenAsync;
     }
 
     public Task<DailyProgressResponse> GetDailyProgressAsync(
@@ -91,7 +98,16 @@ public sealed class LocalMealClient
             using HttpClient client = _httpClientFactory();
             client.BaseAddress = new Uri("https://world.openfoodfacts.org/");
             client.Timeout = TimeSpan.FromSeconds(20);
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("NutriFlow/1.0 (https://github.com/Vvvv4a40/NutriFlow)");
+            const string identification = "NutriFlow/1.0 (https://github.com/Vvvv4a40/NutriFlow)";
+            if (OperatingSystem.IsBrowser())
+            {
+                // fetch cannot set user-agent; open food facts accepts the same value in x-user-agent
+                client.DefaultRequestHeaders.Add("X-User-Agent", identification);
+            }
+            else
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd(identification);
+            }
             Product? product = await new ProductLookupService(
                 new LocalProductCatalog(context, profileId), new OpenFoodFactsClient(client))
                 .FindByBarcodeAsync(barcode, cancellationToken);
@@ -432,9 +448,19 @@ public sealed class LocalMealClient
         return Task.Run(async () =>
         {
             await _profiles.RequireAsync(profileId, cancellationToken);
-            await using NutriFlowDbContext context = await LocalProfileDatabase.OpenAsync(
-                _profiles.GetDatabasePath(profileId), profileId, cancellationToken);
-            return await operation(context);
+            // one operation per profile at a time: a browser host shares a single connection per profile
+            SemaphoreSlim gate = ProfileGates.GetOrAdd(profileId, _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                await using NutriFlowDbContext context = await _openDatabase(
+                    _profiles.GetDatabasePath(profileId), profileId, cancellationToken);
+                return await operation(context);
+            }
+            finally
+            {
+                gate.Release();
+            }
         }, cancellationToken);
     }
 

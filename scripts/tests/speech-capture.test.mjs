@@ -40,6 +40,7 @@ function createFixture(options = {}) {
     }
 
     const capture = createSpeechCapture({
+        ...(options.maximumDuration === undefined ? {} : { maximumDurationInMilliseconds: options.maximumDuration }),
         Recorder,
         getUserMedia: options.getUserMedia ?? (async constraints => {
             assert.deepEqual(constraints, { audio: true });
@@ -53,7 +54,7 @@ function createFixture(options = {}) {
         onError: message => errors.push(message),
         onTranscript: text => transcripts.push(text),
         setTimeout: (callback, duration) => {
-            assert.equal(duration, 60_000);
+            assert.equal(duration, options.maximumDuration ?? 60_000);
             const id = timers.size + 1;
             timers.set(id, callback);
             return id;
@@ -222,6 +223,17 @@ test("maximum duration automatically stops and transcribes", async () => {
     assert.equal(fixture.capture.phase, "idle");
     assert.equal(fixture.track.stops, 1);
     assert.equal(fixture.timers.size, 0);
+});
+
+test("custom maximum duration schedules the automatic stop with that duration", async () => {
+    const fixture = createFixture({ maximumDuration: 110_000 });
+    await fixture.capture.start();
+    fixture.recorder.emit(new Blob(["speech"]));
+    assert.equal(fixture.timers.size, 1);
+    [...fixture.timers.values()][0]();
+    await flushPromises();
+    assert.equal(fixture.requests.length, 1);
+    assert.equal(fixture.capture.phase, "idle");
 });
 
 test("an expired timer from cancelled recording cannot stop the next recording", async () => {

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Infrastructure;
 
 namespace NutriFlow.Mobile.Core.Tests;
 
@@ -122,6 +123,87 @@ public sealed class LocalMealClientThreadingTests : IDisposable
             Assert.Same(expected, actual);
             Assert.Empty(await client.SearchProductsAsync(profile.Id));
         });
+    }
+
+    [Fact]
+    public async Task CustomDatabaseOpenerReceivesProfileDatabaseAndOwner()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile profile = await profiles.CreateAsync("Своё хранилище");
+        List<(string Path, Guid Owner)> opened = [];
+        LocalMealClient client = new(profiles, openDatabase: (path, owner, cancellationToken) =>
+        {
+            lock (opened)
+            {
+                opened.Add((path, owner));
+            }
+
+            return LocalProfileDatabase.OpenAsync(path, owner, cancellationToken);
+        });
+
+        await client.AddProductAsync(profile.Id, new ProductResponse("Продукт", 100m, 10m, 5m, 15m,
+            "ManualInput", "Exact", "Ручной ввод", null, null));
+        Assert.Single(await client.SearchProductsAsync(profile.Id));
+
+        Assert.Equal(2, opened.Count);
+        Assert.All(opened, call =>
+        {
+            Assert.Equal(profile.Id, call.Owner);
+            Assert.Equal(Path.Combine(_root, "profiles", profile.Id.ToString("N"), "nutriflow.db"), call.Path);
+        });
+    }
+
+    [Fact]
+    public async Task OperationsOnOneProfileRunOneAtATimeAndOtherProfilesAreNotBlocked()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile first = await profiles.CreateAsync("Первый");
+        LocalProfile second = await profiles.CreateAsync("Второй");
+        TaskCompletionSource firstEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ConcurrentQueue<Guid> entries = new();
+        LocalMealClient client = new(profiles, openDatabase: async (path, owner, cancellationToken) =>
+        {
+            entries.Enqueue(owner);
+            if (owner == first.Id && firstEntered.TrySetResult())
+            {
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+
+            return await LocalProfileDatabase.OpenAsync(path, owner, cancellationToken);
+        });
+
+        Task<DailyProgressResponse> held = client.GetDailyProgressAsync(first.Id, _date);
+        await firstEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Task<DailyProgressResponse> queued = client.GetDailyProgressAsync(first.Id, _date);
+        await client.GetDailyProgressAsync(second.Id, _date).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(100);
+
+        Assert.Equal([first.Id, second.Id], entries.ToArray());
+        Assert.False(queued.IsCompleted);
+
+        release.SetResult();
+        await Task.WhenAll(held, queued).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal([first.Id, second.Id, first.Id], entries.ToArray());
+    }
+
+    [Fact]
+    public async Task BarcodeLookupIdentifiesClientInUserAgentOutsideBrowser()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile profile = await profiles.CreateAsync("Штрихкод");
+        HttpRequestMessage? sent = null;
+        LocalMealClient client = new(profiles, () => new HttpClient(new Handler((request, _) =>
+        {
+            sent = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        })));
+
+        Assert.Null(await client.LookupBarcodeAsync(profile.Id, "3017620422003"));
+
+        Assert.NotNull(sent);
+        Assert.Equal("NutriFlow/1.0 (https://github.com/Vvvv4a40/NutriFlow)", sent.Headers.UserAgent.ToString());
+        Assert.False(sent.Headers.Contains("X-User-Agent"));
     }
 
     [Theory]

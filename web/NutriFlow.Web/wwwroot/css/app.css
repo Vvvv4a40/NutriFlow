@@ -1,0 +1,180 @@
+/* tokens of the default theme «Терракота и лён» from mobile/NutriFlow.Mobile/Theme.cs */
+:root {
+    --background: #EDE2D1;
+    --surface: #F6EEE2;
+    --surface-raised: #E3D5C0;
+    --stroke: #E2DACE;
+    --text-primary: #2D211B;
+    --muted: #65574B;
+    --highlight: #963F1B;
+    --accent: #963F1B;
+    --accent-fill: #A2461F;
+    --accent-pressed: #AF603E;
+    --accent-soft: #E5CCBB;
+    --on-accent: #FFFFFF;
+    --danger: #A8283E;
+
+    /* splash and icon do not follow the theme */
+    --splash-background: #151110;
+    --splash-text: #F5EEE4;
+
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --title-size: 1.75rem;
+    --text-size: 1rem;
+    --caption-size: 0.8125rem;
+    --screen-padding: 20px;
+    --gap: 16px;
+    --card-radius: 22px;
+    --button-radius: 16px;
+    --column-width: 480px;
+    --touch-target: 48px;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--background);
+    color: var(--text-primary);
+    font-family: var(--font);
+    font-size: var(--text-size);
+    line-height: 1.4;
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+    min-height: 100dvh;
+    max-width: var(--column-width);
+    margin: 0 auto;
+}
+
+.splash {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap);
+    background: var(--splash-background);
+    color: var(--splash-text);
+}
+
+.splash-logo {
+    width: 96px;
+    height: 96px;
+}
+
+.splash-text {
+    margin: 0;
+    font-size: var(--caption-size);
+    opacity: 0.8;
+}
+
+.screen {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 100dvh;
+    padding:
+        calc(env(safe-area-inset-top) + 48px)
+        calc(env(safe-area-inset-right) + var(--screen-padding))
+        calc(env(safe-area-inset-bottom) + var(--screen-padding))
+        calc(env(safe-area-inset-left) + var(--screen-padding));
+}
+
+.gate {
+    justify-content: center;
+    padding-top: calc(env(safe-area-inset-top) + var(--screen-padding));
+}
+
+.gate-icon {
+    width: 56px;
+    height: 56px;
+    color: var(--highlight);
+}
+
+.title {
+    margin: 0;
+    color: var(--highlight);
+    font-size: var(--title-size);
+    font-weight: 700;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.text {
+    margin: 0;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.caption {
+    margin: 0;
+    color: var(--muted);
+    font-size: var(--caption-size);
+}
+
+.notice {
+    margin: 0;
+    padding: 12px 16px;
+    border-radius: var(--card-radius);
+    background: var(--surface);
+    border: 1px solid var(--stroke);
+    color: var(--muted);
+    font-size: var(--caption-size);
+}
+
+.action {
+    align-self: stretch;
+    min-height: var(--touch-target);
+    margin-top: 8px;
+    padding: 12px 20px;
+    border: 0;
+    border-radius: var(--button-radius);
+    background: var(--accent-fill);
+    color: var(--on-accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.action:hover {
+    background: var(--accent-pressed);
+}
+
+.action:active {
+    background: var(--accent-pressed);
+}
+
+.action:focus-visible,
+.reload:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 3px;
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 1000;
+    padding: 16px calc(env(safe-area-inset-right) + var(--screen-padding)) calc(env(safe-area-inset-bottom) + 16px) calc(env(safe-area-inset-left) + var(--screen-padding));
+    background: var(--danger);
+    color: var(--on-accent);
+}
+
+#blazor-error-ui .reload {
+    color: inherit;
+    font-weight: 600;
+}

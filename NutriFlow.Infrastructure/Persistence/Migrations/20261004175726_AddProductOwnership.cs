@@ -39,10 +39,16 @@ namespace NutriFlow.Infrastructure.Persistence.Migrations
                 defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
 
             // старый каталог не публикуем, даже если у продукта внешний источник
+            // one statement per command: a browser sqlite host prepares a whole batch before running it,
+            // so a statement cannot see a table created earlier in the same command
             migrationBuilder.Sql("""
                 CREATE TEMP TABLE "__ProductOwnershipGuard" ("UserId" TEXT NOT NULL);
+                """);
+            migrationBuilder.Sql("""
                 INSERT INTO "__ProductOwnershipGuard" ("UserId")
                 VALUES ((SELECT "Id" FROM "Users" WHERE "IsLegacyLocal" = 1));
+                """);
+            migrationBuilder.Sql("""
                 DROP TABLE "__ProductOwnershipGuard";
                 UPDATE "Products"
                 SET "UserId" = (SELECT "Id" FROM "Users" WHERE "IsLegacyLocal" = 1);

@@ -39,11 +39,30 @@ public static class LocalProfileDatabase
             new DbContextOptionsBuilder<NutriFlowDbContext>()
                 .UseSqlite(connectionString)
                 .Options;
+        return await OpenAsync(options, ownerId, cancellationToken);
+    }
+
+    public static async Task<NutriFlowDbContext> OpenAsync(
+        DbContextOptions<NutriFlowDbContext> options,
+        Guid ownerId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (ownerId == Guid.Empty)
+        {
+            throw new ArgumentException("An owner ID cannot be empty.", nameof(ownerId));
+        }
+
         NutriFlowDbContext context = new(options);
 
         try
         {
-            await context.Database.MigrateAsync(cancellationToken);
+            // MigrateAsync also takes the migration lock, which costs hundreds of milliseconds in the browser
+            if ((await context.Database.GetPendingMigrationsAsync(cancellationToken)).Any())
+            {
+                await context.Database.MigrateAsync(cancellationToken);
+            }
+
             await context.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO "Users" ("Id", "CreatedAtUtc", "IsLegacyLocal", "LegacyLabelPhotosImported")
                 VALUES ({ownerId}, {DateTimeOffset.UtcNow}, {false}, {false})

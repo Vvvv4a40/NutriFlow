@@ -1,0 +1,99 @@
+name: Web app on GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Channel shown in the app
+        type: choice
+        options:
+          - test
+          - production
+        default: test
+      base_path:
+        description: Path of the site on the host, with leading and trailing slash
+        type: string
+        default: /NutriFlow/
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and test web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      DOTNET_NOLOGO: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # the web lock file pins packages that follow the sdk patch (ILLink.Tasks, WebAssembly.Pack)
+      - name: Set up exact .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.401'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Restore and test
+        run: |
+          test "$(dotnet --version)" = '10.0.401'
+          dotnet restore web/NutriFlow.Web.slnx --locked-mode --warnaserror
+          dotnet test web/NutriFlow.Web.slnx --configuration Release --no-restore --warnaserror
+          node --test scripts/tests/web-startup.test.mjs scripts/tests/prepare-web-deploy.test.mjs
+
+      # without symbols the .wasm files carry no absolute paths of the build machine
+      - name: Publish
+        run: >-
+          dotnet publish web/NutriFlow.Web/NutriFlow.Web.csproj
+          --configuration Release --no-restore
+          --output "$RUNNER_TEMP/publish"
+          -p:DebugType=none -p:DebugSymbols=false -p:TrimmerRemoveSymbols=true
+
+      - name: Prepare site
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          BASE_PATH: ${{ inputs.base_path }}
+        run: >-
+          node scripts/prepare-web-deploy.mjs
+          "--source=$RUNNER_TEMP/publish/wwwroot"
+          "--target=$RUNNER_TEMP/site"
+          "--base=$BASE_PATH"
+          "--channel=$CHANNEL"
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

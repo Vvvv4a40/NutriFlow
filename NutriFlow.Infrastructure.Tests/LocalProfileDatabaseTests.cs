@@ -186,6 +186,58 @@ public sealed class LocalProfileDatabaseTests
     }
 
     [Fact]
+    public async Task OpenAsync_WithOptionsMigratesSharedConnectionAndAddsOwnerOnce()
+    {
+        await using Microsoft.Data.Sqlite.SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<NutriFlowDbContext> options =
+            new DbContextOptionsBuilder<NutriFlowDbContext>().UseSqlite(connection).Options;
+        Guid owner = Guid.NewGuid();
+
+        await using (NutriFlowDbContext created = await LocalProfileDatabase.OpenAsync(options, owner))
+        {
+            Assert.Empty(await created.Database.GetPendingMigrationsAsync());
+        }
+
+        await using NutriFlowDbContext reopened = await LocalProfileDatabase.OpenAsync(options, owner);
+        Assert.Equal(1, await OwnerCountAsync(reopened, owner));
+        Assert.Equal(1, await reopened.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS \"Value\" FROM \"Users\" WHERE \"IsLegacyLocal\" = 0").SingleAsync());
+    }
+
+    [Fact]
+    public async Task OpenAsync_WithOptionsCompletesPartiallyMigratedDatabase()
+    {
+        await using Microsoft.Data.Sqlite.SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<NutriFlowDbContext> options =
+            new DbContextOptionsBuilder<NutriFlowDbContext>().UseSqlite(connection).Options;
+        await using (NutriFlowDbContext old = new(options))
+        {
+            await old.Database.MigrateAsync("20261001185045_AddMealSessionMessageReceipts");
+            Assert.NotEmpty(await old.Database.GetPendingMigrationsAsync());
+        }
+
+        Guid owner = Guid.NewGuid();
+        await using NutriFlowDbContext upgraded = await LocalProfileDatabase.OpenAsync(options, owner);
+
+        Assert.Empty(await upgraded.Database.GetPendingMigrationsAsync());
+        Assert.Equal(1, await OwnerCountAsync(upgraded, owner));
+    }
+
+    [Fact]
+    public async Task OpenAsync_WithOptionsRejectsMissingOptionsAndEmptyOwner()
+    {
+        DbContextOptions<NutriFlowDbContext> options =
+            new DbContextOptionsBuilder<NutriFlowDbContext>().UseSqlite("Data Source=:memory:").Options;
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            LocalProfileDatabase.OpenAsync((DbContextOptions<NutriFlowDbContext>)null!, Guid.NewGuid()));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            LocalProfileDatabase.OpenAsync(options, Guid.Empty));
+    }
+
+    [Fact]
     public async Task OpenAsync_CorruptDatabaseFailurePreservesFileAndReleasesConnection()
     {
         using TemporaryProfiles profiles = new();

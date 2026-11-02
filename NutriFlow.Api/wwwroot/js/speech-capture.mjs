@@ -1,4 +1,4 @@
-const maximumDurationInMilliseconds = 60_000;
+const defaultMaximumDurationInMilliseconds = 60_000;
 const maximumAudioSizeInBytes = 8 * 1024 * 1024;
 const maximumTranscriptLength = 4000;
 
@@ -21,7 +21,8 @@ export function createSpeechCapture({
     onTranscript,
     onStateChange,
     onError,
-    getUserMedia = constraints => globalThis.navigator.mediaDevices.getUserMedia(constraints),
+    maximumDurationInMilliseconds = defaultMaximumDurationInMilliseconds,
+    getUserMedia =constraints => globalThis.navigator.mediaDevices.getUserMedia(constraints),
     Recorder = globalThis.MediaRecorder,
     setTimeout: scheduleTimeout = globalThis.setTimeout,
     clearTimeout: cancelTimeout = globalThis.clearTimeout
