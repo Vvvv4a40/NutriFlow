@@ -1,0 +1,20 @@
+@if (SpokenText is null)
+{
+    <span class="nf-badge @PressableBase.ToneClass(Tone)">@Text</span>
+}
+else
+{
+    <span class="nf-badge @PressableBase.ToneClass(Tone)"><span aria-hidden="true">@Text</span><span class="nf-visually-hidden">@SpokenText</span></span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    // words for screen readers when the badge uses a symbol, «≈ оценка» would be read as «примерно равно оценка»
+    [Parameter]
+    public string? SpokenText { get; set; }
+
+    [Parameter]
+    public Tone Tone { get; set; } = Tone.Muted;
+}

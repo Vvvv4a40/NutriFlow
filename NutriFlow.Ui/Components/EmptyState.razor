@@ -1,0 +1,26 @@
+<Card Class="nf-empty" TestId="@TestId">
+    <IconTile Icon="Icon" Large="true" />
+    <Headline Small="true" Class="nf-empty__title">@Title</Headline>
+    <p class="nf-caption nf-empty__message">@Message</p>
+    @if (Action is not null)
+    {
+        <div class="nf-empty__action">@Action</div>
+    }
+</Card>
+
+@code {
+    [Parameter, EditorRequired]
+    public AppIconKind Icon { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = "";
+
+    [Parameter]
+    public RenderFragment? Action { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+}

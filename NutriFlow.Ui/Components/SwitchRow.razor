@@ -1,0 +1,40 @@
+@* the whole row toggles, as tapping the label does on android; the name is the text, the hint is a description *@
+<label class="nf-switch-row @Class">
+    <span class="nf-switch-row__text">
+        <span id="@(_id + "-text")" class="nf-text">@Text</span>
+        @if (Hint is not null)
+        {
+            <span id="@(_id + "-hint")" class="nf-caption">@Hint</span>
+        }
+    </span>
+    <input type="checkbox" role="switch" class="nf-switch" checked="@Checked" data-testid="@TestId"
+           aria-labelledby="@(_id + "-text")" aria-describedby="@(Hint is null ? null : _id + "-hint")" @onchange="OnChangeAsync" />
+</label>
+
+@code {
+    private readonly string _id = "switch-" + Guid.NewGuid().ToString("N")[..8];
+
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    [Parameter]
+    public string? Hint { get; set; }
+
+    [Parameter]
+    public bool Checked { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> CheckedChanged { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private Task OnChangeAsync(ChangeEventArgs args)
+    {
+        Checked = args.Value is true;
+        return CheckedChanged.InvokeAsync(Checked);
+    }
+}

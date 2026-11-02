@@ -1,0 +1,43 @@
+<div class="nf-field @Class">
+    @if (Label is not null)
+    {
+        <label class="nf-field__label" for="@_id">@Label</label>
+    }
+    <textarea id="@_id" class="nf-field__input nf-field__input--multiline" rows="@Rows" placeholder="@Placeholder"
+              maxlength="@MaxLength" aria-label="@(Label is null ? Placeholder : null)" data-testid="@TestId"
+              value="@Value" @oninput="OnInputAsync"></textarea>
+</div>
+
+@code {
+    private readonly string _id = "text-" + Guid.NewGuid().ToString("N")[..8];
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter]
+    public string? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter]
+    public string? Placeholder { get; set; }
+
+    [Parameter]
+    public int Rows { get; set; } = 4;
+
+    [Parameter]
+    public int? MaxLength { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private Task OnInputAsync(ChangeEventArgs args)
+    {
+        Value = args.Value?.ToString();
+        return ValueChanged.InvokeAsync(Value);
+    }
+}

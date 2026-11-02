@@ -1,0 +1,22 @@
+@* macro colours only reach 3:1 on tinted surfaces, so they mark the values with dots and the numbers stay in the text colour.
+   screen readers get the values in words from a hidden text: «Б · Ж · У» would be spelled out letter by letter *@
+<span class="nf-macros @Class">
+    <span class="nf-macro" aria-hidden="true"><span class="nf-macro__dot nf-tone-protein">●</span>&nbsp;Б&nbsp;@NutritionText.MacroAmount(Protein)</span>
+    <span class="nf-macro" aria-hidden="true"><span class="nf-macro__dot nf-tone-fat">●</span>&nbsp;Ж&nbsp;@NutritionText.MacroAmount(Fat)</span>
+    <span class="nf-macro" aria-hidden="true"><span class="nf-macro__dot nf-tone-carbs">●</span>&nbsp;У&nbsp;@NutritionText.MacroAmount(Carbs)&nbsp;г</span>
+    <span class="nf-visually-hidden">@NutritionText.SpokenMacros(Protein, Fat, Carbs)</span>
+</span>
+
+@code {
+    [Parameter]
+    public decimal Protein { get; set; }
+
+    [Parameter]
+    public decimal Fat { get; set; }
+
+    [Parameter]
+    public decimal Carbs { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

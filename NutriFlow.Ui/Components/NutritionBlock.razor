@@ -1,0 +1,31 @@
+@* calories, then the macro breakdown, as one block for summaries *@
+<div class="nf-nutrition @Class">
+    @if (Caption is not null)
+    {
+        <Overline>@Caption</Overline>
+    }
+    @if (Value is null)
+    {
+        <p class="nf-caption">КБЖУ пока неизвестны</p>
+    }
+    else
+    {
+        <p class="nf-nutrition__calories">
+            <span class="nf-nutrition__number" aria-hidden="true">@NutritionText.Kilocalories(Value.Calories)</span>
+            <span class="nf-nutrition__unit" aria-hidden="true">ккал</span>
+            <span class="nf-visually-hidden">@NutritionText.Amount(Value.Calories) килокалорий</span>
+        </p>
+        <MacroLine Protein="Value.ProteinGrams" Fat="Value.FatGrams" Carbs="Value.CarbohydratesGrams" />
+    }
+</div>
+
+@code {
+    [Parameter]
+    public NutritionResponse? Value { get; set; }
+
+    [Parameter]
+    public string? Caption { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

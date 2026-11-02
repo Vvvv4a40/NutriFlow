@@ -2,16 +2,23 @@
 @inject AppInfo Info
 @inject IWebAssemblyHostEnvironment Environment
 
-<main class="screen" data-testid="web-shell">
-    <h1 class="title">NutriFlow</h1>
-    <p class="text">Веб-версия запущена. Дневник, продукты и блюда появятся в следующих сборках.</p>
-    @if (Info.IsTest)
-    {
-        <p class="notice" data-testid="test-channel">Тестовая версия: данные с этого адреса не перенесутся в постоянную версию.</p>
-    }
-    <p class="caption">@Info.VersionText</p>
-    @if (Environment.IsDevelopment())
-    {
-        <NutriFlow.Web.Diagnostics.StorageCheck />
-    }
-</main>
+@if (Environment.IsDevelopment())
+{
+    <UiRoot>
+        <NutriFlow.Web.Diagnostics.ShellDemo />
+    </UiRoot>
+}
+else
+{
+    <main class="screen" data-testid="web-shell">
+        <Title>NutriFlow</Title>
+        <BodyText>Веб-версия запущена. Дневник, продукты и блюда появятся в следующих сборках.</BodyText>
+        @if (Info.IsTest)
+        {
+            <Card TestId="test-channel">
+                <Caption>Тестовая версия: данные с этого адреса не перенесутся в постоянную версию.</Caption>
+            </Card>
+        }
+        <Caption>@Info.VersionText</Caption>
+    </main>
+}

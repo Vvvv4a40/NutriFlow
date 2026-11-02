@@ -1,0 +1,10 @@
+@* section heading in capitals; the capitals come from css so screen readers read the normal word *@
+<h2 class="nf-overline @Class">@ChildContent</h2>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

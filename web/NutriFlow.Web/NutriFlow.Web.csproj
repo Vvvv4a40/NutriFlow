@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../mobile/NutriFlow.Mobile.Core/NutriFlow.Mobile.Core.csproj" />
+    <ProjectReference Include="../../NutriFlow.Ui/NutriFlow.Ui.csproj" />
   </ItemGroup>
 
   <ItemGroup>

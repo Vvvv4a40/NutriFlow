@@ -1,0 +1,44 @@
+@inherits PressableBase
+@implements IDisposable
+@inject ActionRunner Runner
+
+<button type="button" class="nf-button @(Secondary ? "nf-button--secondary" : "nf-button--primary") @Class"
+        disabled="@(!Enabled)" aria-label="@(ShownText == Text ? Description : null)" data-testid="@TestId" @onclick="ClickAsync">@ShownText</button>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    [Parameter]
+    public bool Secondary { get; set; }
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    // a longer spoken name; it has to start with the visible text, or voice control will not find the button
+    [Parameter]
+    public string? Description { get; set; }
+
+    // ActionRunner.ShowProgress(key, text) replaces the text of the button with this key until the action ends
+    [Parameter]
+    public string? ProgressKey { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private string ShownText => ProgressKey is not null && Runner.ProgressKey == ProgressKey && Runner.ProgressText is { } progress
+        ? progress
+        : Text;
+
+    protected override void OnInitialized() => Runner.Changed += OnRunnerChanged;
+
+    private void OnRunnerChanged()
+    {
+        if (ProgressKey is not null)
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose() => Runner.Changed -= OnRunnerChanged;
+}

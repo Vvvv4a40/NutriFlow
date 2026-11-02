@@ -1,0 +1,82 @@
+@using NutriFlow.Ui.Navigation
+@implements IAsyncDisposable
+@inject BackStack Back
+@inject ActionRunner Runner
+
+@* a secondary screen over the shell: back in the header, fields in a column, the main action pinned in the footer.
+   no aria-modal: the page under it is inert already, and webkit would hide the progress live region from voiceover *@
+<div class="nf-form @(Footer is null ? "nf-form--no-footer" : null)" role="dialog" aria-labelledby="@_titleId"
+     data-testid="@TestId" @ref="_form" @onkeydown="OnKeyDownAsync">
+    <header class="nf-form__header">
+        <IconButton Icon="AppIconKind.Previous" Description="Назад" Class="nf-form__back" TestId="form-back" OnClick="CloseAsync" />
+        <h1 id="@_titleId" class="nf-form__title" tabindex="-1" @ref="_title">@Title</h1>
+        @if (Runner.ShowsActivity)
+        {
+            <Spinner />
+        }
+    </header>
+    <div class="nf-form__fields">@ChildContent</div>
+    @if (Footer is not null)
+    {
+        <div class="nf-form__footer">@Footer</div>
+    }
+</div>
+
+@code {
+    private readonly string _titleId = "form-" + Guid.NewGuid().ToString("N")[..8];
+    private ElementReference _form;
+    private ElementReference _title;
+    private BackLayer? _layer;
+    private bool _closedByBack;
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public RenderFragment? Footer { get; set; }
+
+    // the owner removes the form from its markup here; back from the phone or the browser arrives the same way
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    protected override void OnInitialized() => Runner.Changed += OnRunnerChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _layer = await Back.PushAsync(async () =>
+        {
+            _closedByBack = true;
+            await OnClose.InvokeAsync();
+        });
+        await Back.EnterLayerAsync(_titleId, _form, _title);
+    }
+
+    private Task CloseAsync() => Runner.IsBusy ? Task.CompletedTask : Back.BackAsync();
+
+    // escape closes the form like back on the phone; keys inside a dialog never reach it, the dialog is not its child
+    private Task OnKeyDownAsync(KeyboardEventArgs args) => args.Key == "Escape" ? CloseAsync() : Task.CompletedTask;
+
+    private void OnRunnerChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public async ValueTask DisposeAsync()
+    {
+        Runner.Changed -= OnRunnerChanged;
+        await Back.LeaveLayerAsync(_titleId);
+        // a form the app closed itself (after saving) gives its history entry back
+        if (!_closedByBack && _layer is not null)
+        {
+            await _layer.RemoveAsync();
+        }
+    }
+}

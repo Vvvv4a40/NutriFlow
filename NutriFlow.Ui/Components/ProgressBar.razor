@@ -1,0 +1,22 @@
+@using System.Globalization
+@* svg percentages instead of a style width: the csp of the app forbids inline styles *@
+<svg class="nf-progress @PressableBase.ToneClass(Tone)" width="100%" height="6" aria-hidden="true" focusable="false">
+    <rect class="nf-progress__track" width="100%" height="6" rx="3" />
+    @if (Fraction > 0)
+    {
+        <rect class="nf-progress__fill" width="@(Math.Round(Fraction * 100, 2).ToString(CultureInfo.InvariantCulture))%" height="6" rx="3" />
+    }
+</svg>
+
+@code {
+    [Parameter]
+    public decimal Value { get; set; }
+
+    [Parameter]
+    public decimal? Maximum { get; set; }
+
+    [Parameter]
+    public Tone Tone { get; set; } = Tone.Accent;
+
+    private double Fraction => Maximum is > 0m ? (double)Math.Clamp(Value / Maximum.Value, 0m, 1m) : 0;
+}

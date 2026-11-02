@@ -1,0 +1,41 @@
+@using NutriFlow.Ui.Dialogs
+@using NutriFlow.Ui.Navigation
+@implements IDisposable
+@inject ActionRunner Runner
+@inject BackStack Back
+
+@ChildContent
+@if (Runner.IsBusy)
+{
+    @* blocks taps while an action runs instead of disabling controls, so nothing flickers *@
+    <div class="nf-blocker" aria-hidden="true"></div>
+}
+<div class="nf-visually-hidden" aria-live="polite" data-testid="progress-announcement">@Runner.ProgressText</div>
+<DialogHost />
+
+@code {
+    private bool _inputBlocked;
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized() => Runner.Changed += OnRunnerChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Back.StartAsync();
+        }
+
+        if (_inputBlocked != Runner.IsBusy)
+        {
+            _inputBlocked = Runner.IsBusy;
+            await Back.SetInputBlockedAsync(_inputBlocked);
+        }
+    }
+
+    private void OnRunnerChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Runner.Changed -= OnRunnerChanged;
+}

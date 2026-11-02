@@ -1,0 +1,12 @@
+<h1 class="nf-title @Class" data-testid="@TestId">@ChildContent</h1>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+}

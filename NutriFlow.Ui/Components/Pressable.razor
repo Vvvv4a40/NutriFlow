@@ -1,0 +1,23 @@
+@inherits PressableBase
+@* one pressable target with one spoken description over custom content, like Ui.Pressable on android *@
+<button type="button" class="nf-pressable @Class" aria-label="@Description" aria-description="@Hint" data-testid="@TestId"
+        disabled="@(!Enabled)" @onclick="ClickAsync">
+    @ChildContent
+</button>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Description { get; set; } = "";
+
+    [Parameter]
+    public string? Hint { get; set; }
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    [Parameter]
+    public string? Class { get; set; }
+}

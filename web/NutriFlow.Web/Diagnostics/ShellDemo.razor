@@ -1,0 +1,127 @@
+@* development-only frame to try the shell, forms, dialogs, back and the action runner before the real screens exist *@
+@using NutriFlow.Ui
+@inject ActionRunner Runner
+@inject ThemeManager Themes
+
+<AppShell Title="@TitleText" ProfileName="Проверка" @bind-Selected="_tab" OnProfile="ChooseProfileAsync">
+    <ActionBar>
+        @if (_tab == ShellTab.Diary)
+        {
+            <ActionButton Text="Записать еду" TestId="demo-add" OnClick="() => _tab = ShellTab.Input" />
+        }
+    </ActionBar>
+    <ChildContent>
+        @switch (_tab)
+        {
+            case ShellTab.Diary:
+                <ComponentShowcase />
+                break;
+            case ShellTab.Products:
+                <RowList>
+                    @foreach (string product in _products)
+                    {
+                        <Row Title="@product" Subtitle="150 г · ручной ввод" Icon="AppIconKind.Products"
+                             Description="150 граммов, ручной ввод" OnClick="() => ChooseActionAsync(product)" />
+                    }
+                </RowList>
+                @if (_products.Count == 0)
+                {
+                    <EmptyState Icon="AppIconKind.Products" Title="Продуктов нет" Message="Все продукты удалены. Перезагрузите страницу, чтобы вернуть пример." />
+                }
+                break;
+            case ShellTab.Input:
+                <BodyText>Здесь будет запись еды. Пока — проверка формы.</BodyText>
+                <ActionButton Text="Открыть форму" TestId="demo-open-form" OnClick="() => _formOpen = true" />
+                break;
+            case ShellTab.Dishes:
+                <EmptyState Icon="AppIconKind.Dishes" Title="Своих блюд пока нет" Message="Соберите блюдо из продуктов — оно появится здесь.">
+                    <Action><ActionButton Text="Собрать блюдо" OnClick="() => _formOpen = true" /></Action>
+                </EmptyState>
+                break;
+            case ShellTab.Settings:
+                <StorageCheck />
+                break;
+        }
+    </ChildContent>
+</AppShell>
+
+@if (_formOpen)
+{
+    <FormPage Title="Запись еды" TestId="demo-form" OnClose="() => _formOpen = false">
+        <ChildContent>
+            <TextArea Placeholder="Опишите, что съели" @bind-Value="_text" TestId="input-text" />
+            <Field Label="Вес, г" Number="true" @bind-Value="_weight" />
+            <GhostButton Text="Показать ошибку" TestId="demo-error" OnClick="FailAsync" />
+            <GhostButton Text="Вложенная форма" OnClick="() => _nestedOpen = true" />
+        </ChildContent>
+        <Footer>
+            <ActionButton Text="Разобрать описание" ProgressKey="parse" TestId="demo-parse" OnClick="ParseAsync" />
+        </Footer>
+    </FormPage>
+}
+
+@if (_nestedOpen)
+{
+    <FormPage Title="Порция продукта" OnClose="() => _nestedOpen = false">
+        <ChildContent>
+            <Field Label="Съедено, г" Number="true" @bind-Value="_weight" />
+        </ChildContent>
+        <Footer>
+            <ActionButton Text="Сохранить" OnClick="() => _nestedOpen = false" />
+        </Footer>
+    </FormPage>
+}
+
+@code {
+    private readonly List<string> _products = ["Гречка", "Куриная грудка", "Творог 5 %"];
+    private ShellTab _tab = ShellTab.Diary;
+    private bool _formOpen;
+    private bool _nestedOpen;
+    private string? _text;
+    private string? _weight;
+
+    private string TitleText => _tab switch
+    {
+        ShellTab.Products => "Продукты",
+        ShellTab.Input => "Запись еды",
+        ShellTab.Dishes => "Блюда",
+        ShellTab.Settings => "Настройки",
+        _ => "Дневник"
+    };
+
+    protected override Task OnInitializedAsync() => Themes.ApplyAsync(Themes.Current.Id);
+
+    private Task ChooseProfileAsync() => Runner.RunAsync(async () =>
+    {
+        string? choice = await Runner.ChooseAsync("Профили на этом устройстве", "Отмена", null, "1. Проверка ✓", "Создать профиль");
+        if (choice == "Создать профиль")
+        {
+            await Runner.AlertAsync("Профили", "Создание профиля появится в шаге 5.", "Понятно");
+        }
+    });
+
+    private Task ChooseActionAsync(string product) => Runner.RunAsync(async () =>
+    {
+        string? choice = await Runner.ChooseAsync($"{product}, 150 г", "Отмена", "Удалить", "Изменить вес");
+        if (choice == "Удалить" && await Runner.ConfirmAsync("Удалить запись?", $"«{product}» исчезнет из списка.", "Удалить", "Оставить", destructive: true))
+        {
+            _products.Remove(product);
+        }
+        else if (choice == "Изменить вес")
+        {
+            _formOpen = true;
+        }
+    });
+
+    private Task ParseAsync() => Runner.RunAsync(async () =>
+    {
+        Runner.ShowProgress("parse", "Разбираю описание…");
+        await Task.Delay(1500);
+        _formOpen = false;
+        // blazor renders a handler only at its first await and at its end; the form has to leave before the dialog
+        StateHasChanged();
+        await Runner.AlertAsync("Готово", "Так будет выглядеть успешный разбор.", "Понятно");
+    });
+
+    private Task FailAsync() => Runner.RunAsync(() => throw new InvalidOperationException("Укажите вес продукта."));
+}

@@ -474,12 +474,20 @@
           "NutriFlow.Infrastructure": "[1.0.0, )"
         }
       },
+      "nutriflow.ui": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.AspNetCore.Components.Web": "[10.0.12, )",
+          "NutriFlow.Mobile.Core": "[1.0.0, )"
+        }
+      },
       "nutriflow.web": {
         "type": "Project",
         "dependencies": {
           "Bit.Bsqlite": "[10.7.0, )",
           "Microsoft.AspNetCore.Components.WebAssembly": "[10.0.12, )",
           "NutriFlow.Mobile.Core": "[1.0.0, )",
+          "NutriFlow.Ui": "[1.0.0, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[2.1.12, )",
           "SQLitePCLRaw.lib.e_sqlite3": "[2.1.12, )",
           "SQLitePCLRaw.provider.e_sqlite3": "[2.1.12, )"

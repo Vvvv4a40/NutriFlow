@@ -1,0 +1,30 @@
+@* toggle buttons in a group, so tab reaches every option without the arrow-key contract of a radio group *@
+<div class="nf-segmented" role="group" aria-label="@Label">
+    @for (int index = 0; index < Options.Count; index++)
+    {
+        int current = index;
+        bool active = index == Selected;
+        <button type="button" aria-pressed="@(active ? "true" : "false")" disabled="@(!Enabled)"
+                class="nf-segmented__option @(active ? "nf-segmented__option--active" : null)"
+                data-testid="@Options[index].TestId" @onclick="() => SelectedChanged.InvokeAsync(current)">
+            @Options[index].Text
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SegmentedOption> Options { get; set; } = [];
+
+    [Parameter]
+    public int Selected { get; set; }
+
+    [Parameter]
+    public EventCallback<int> SelectedChanged { get; set; }
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    [Parameter]
+    public string? Label { get; set; }
+}

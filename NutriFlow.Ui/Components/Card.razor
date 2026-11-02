@@ -1,0 +1,15 @@
+<section class="nf-card @Class" data-testid="@TestId" aria-label="@Label">@ChildContent</section>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

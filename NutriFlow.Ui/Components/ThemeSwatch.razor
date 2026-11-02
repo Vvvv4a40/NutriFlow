@@ -1,0 +1,18 @@
+@* a circle split between the two colours of a theme pair; the selected one gets an outer ring (ThemeSwatch.cs on android) *@
+<svg class="nf-swatch @(Selected ? "nf-swatch--selected" : null)" width="56" height="56" viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+    <circle cx="28" cy="28" r="21" fill="@Theme.SwatchBase" />
+    <path d="M42.85 13.15 A21 21 0 0 1 13.15 42.85 Z" fill="@Theme.SwatchAccent" />
+    <circle cx="28" cy="28" r="21" fill="none" class="nf-swatch__edge" />
+    @if (Selected)
+    {
+        <circle cx="28" cy="28" r="26" fill="none" class="nf-swatch__ring" />
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired]
+    public ThemePalette Theme { get; set; } = ThemePalette.Find(null);
+
+    [Parameter]
+    public bool Selected { get; set; }
+}

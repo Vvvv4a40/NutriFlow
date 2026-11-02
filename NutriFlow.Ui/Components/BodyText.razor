@@ -1,0 +1,16 @@
+<p class="nf-text @(Muted ? "nf-text--muted" : null) @(Strong ? "nf-text--strong" : null) @Class">@ChildContent</p>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public bool Muted { get; set; }
+
+    // medium weight at 16, the Strong label of the android app
+    [Parameter]
+    public bool Strong { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

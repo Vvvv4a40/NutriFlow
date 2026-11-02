@@ -1,0 +1,55 @@
+<div class="nf-field @Class">
+    @if (Label is not null)
+    {
+        <label class="nf-field__label" for="@_id">@Label</label>
+    }
+    <div class="nf-picker">
+        <select id="@_id" class="nf-field__input nf-picker__select" data-testid="@TestId" @onchange="OnChangeAsync">
+            @if (Placeholder is not null)
+            {
+                <option value="" disabled selected="@(Value is null)">@Placeholder</option>
+            }
+            else if (Value is null)
+            {
+                @* without it the browser would show the first option as chosen while nothing is *@
+                <option value="" disabled selected hidden></option>
+            }
+            @foreach (PickerOption option in Options)
+            {
+                <option value="@option.Value" selected="@(option.Value == Value)">@option.Text</option>
+            }
+        </select>
+        <AppIcon Kind="AppIconKind.Expand" Size="18" Class="nf-picker__chevron" />
+    </div>
+</div>
+
+@code {
+    private readonly string _id = "picker-" + Guid.NewGuid().ToString("N")[..8];
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<PickerOption> Options { get; set; } = [];
+
+    [Parameter]
+    public string? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter]
+    public string? Placeholder { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private Task OnChangeAsync(ChangeEventArgs args)
+    {
+        Value = args.Value?.ToString();
+        return ValueChanged.InvokeAsync(Value);
+    }
+}

@@ -1,0 +1,110 @@
+@using Microsoft.JSInterop
+@using NutriFlow.Ui.Navigation
+@implements IAsyncDisposable
+@inject DialogService Dialogs
+@inject BackStack Back
+@inject IJSRuntime JS
+
+@if (Dialogs.Current is { } request)
+{
+    <dialog @key="request" @ref="_element" class="nf-dialog @(request.Sheet ? "nf-dialog--sheet" : null)"
+            aria-labelledby="nf-dialog-title" aria-describedby="@(request.Message is null ? null : "nf-dialog-message")"
+            data-testid="@(request.Sheet ? "action-sheet" : "dialog")">
+        <h2 id="nf-dialog-title" class="nf-dialog__title">@request.Title</h2>
+        @if (request.Message is not null)
+        {
+            <p id="nf-dialog-message" class="nf-text nf-dialog__message">@request.Message</p>
+        }
+        <div class="nf-dialog__actions">
+            @if (!request.Sheet)
+            {
+                @* the safe answer comes first, so the modal focus lands on it *@
+                <button type="button" class="nf-dialog__button" @onclick="() => AnswerAsync(request, null)">@request.Cancel</button>
+            }
+            @foreach (DialogButton button in request.Buttons)
+            {
+                <button type="button" class="nf-dialog__button @RoleClass(button.Role)" @onclick="() => AnswerAsync(request, button.Text)">@button.Text</button>
+            }
+            @if (request.Sheet)
+            {
+                <button type="button" class="nf-dialog__button nf-dialog__button--cancel" @onclick="() => AnswerAsync(request, null)">@request.Cancel</button>
+            }
+        </div>
+    </dialog>
+}
+
+@code {
+    private ElementReference _element;
+    private DialogRequest? _shown;
+    private BackLayer? _layer;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<DialogHost>? _reference;
+
+    protected override void OnInitialized() => Dialogs.Changed += OnChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        DialogRequest? current = Dialogs.Current;
+        if (current is null || current == _shown)
+        {
+            return;
+        }
+
+        _shown = current;
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/NutriFlow.Ui/dialog.mjs");
+        _reference ??= DotNetObjectReference.Create(this);
+        await _module.InvokeVoidAsync("open", _element, _reference);
+        // the system back answers with cancel even while the action that asked is still running
+        _layer = await Back.PushAsync(async () =>
+        {
+            _layer = null;
+            // closing it before blazor removes it lets the browser return the focus to the control that opened it
+            await _module.InvokeVoidAsync("close", _element);
+            Dialogs.Resolve(current, null);
+        }, closesWhileBusy: true);
+    }
+
+    [JSInvokable]
+    public Task CancelAsync() => Dialogs.Current is { } request ? AnswerAsync(request, null) : Task.CompletedTask;
+
+    private async Task AnswerAsync(DialogRequest request, string? answer)
+    {
+        BackLayer? layer = _layer;
+        _layer = null;
+        if (_module is not null)
+        {
+            await _module.InvokeVoidAsync("close", _element);
+        }
+
+        Dialogs.Resolve(request, answer);
+        if (layer is not null)
+        {
+            await layer.RemoveAsync();
+        }
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static string? RoleClass(DialogButtonRole role) => role switch
+    {
+        DialogButtonRole.Primary => "nf-dialog__button--primary",
+        DialogButtonRole.Destructive => "nf-dialog__button--destructive",
+        _ => null
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        Dialogs.Changed -= OnChanged;
+        _reference?.Dispose();
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+    }
+}

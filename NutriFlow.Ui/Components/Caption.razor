@@ -1,0 +1,12 @@
+<p class="nf-caption @(Tone is { } tone ? PressableBase.ToneClass(tone) : null) @Class">@ChildContent</p>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public Tone? Tone { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

@@ -1,0 +1,115 @@
+@using System.Globalization
+@using NutriFlow.Ui.Navigation
+@implements IAsyncDisposable
+@inject ActionRunner Runner
+@inject BackStack Back
+
+@* header with the section title and the profile avatar, the screen, the pinned action and the bottom navigation *@
+<div class="nf-shell">
+    <header class="nf-shell__header">
+        <h1 class="nf-title nf-shell__title" data-testid="screen-title">@Title</h1>
+        @if (Runner.ShowsActivity)
+        {
+            <Spinner />
+        }
+        <button type="button" class="nf-shell__avatar" data-testid="profile-switcher"
+                aria-label="@(ProfileName is null ? "Локальные профили" : $"Профиль: {ProfileName}")"
+                aria-description="Сменить или создать профиль" @onclick="() => OnProfile.InvokeAsync()">
+            <span aria-hidden="true">@Initial</span>
+        </button>
+    </header>
+    <main class="nf-shell__body">@ChildContent</main>
+    <div class="nf-shell__bottom">
+        @if (ActionBar is not null)
+        {
+            <div class="nf-shell__action-bar">@ActionBar</div>
+        }
+        <nav class="nf-nav" aria-label="Разделы">
+            @NavTab(ShellTab.Diary, "Дневник", AppIconKind.Diary, "tab-diary")
+            @NavTab(ShellTab.Products, "Продукты", AppIconKind.Products, "tab-products")
+            <div class="nf-nav__add-slot">
+                @* logging food is the most frequent task, so the central button opens it directly *@
+                <button type="button" class="nf-nav__add" data-testid="add-food" aria-label="Добавить еду"
+                        aria-description="Описать еду текстом или голосом, выбрать продукт или блюдо"
+                        aria-current="@(Selected == ShellTab.Input ? "page" : null)" @onclick="() => SelectAsync(ShellTab.Input)">
+                    <AppIcon Kind="AppIconKind.Plus" Size="28" />
+                </button>
+            </div>
+            @NavTab(ShellTab.Dishes, "Блюда", AppIconKind.Dishes, "tab-dishes")
+            @NavTab(ShellTab.Settings, "Настройки", AppIconKind.Settings, "tab-settings")
+        </nav>
+    </div>
+</div>
+
+@code {
+    private BackLayer? _sectionLayer;
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public string? ProfileName { get; set; }
+
+    [Parameter]
+    public EventCallback OnProfile { get; set; }
+
+    [Parameter]
+    public ShellTab Selected { get; set; }
+
+    [Parameter]
+    public EventCallback<ShellTab> SelectedChanged { get; set; }
+
+    [Parameter]
+    public RenderFragment? ActionBar { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string Initial => string.IsNullOrEmpty(ProfileName) ? "?" : ProfileName[..1].ToUpper(CultureInfo.CurrentCulture);
+
+    private RenderFragment NavTab(ShellTab tab, string text, AppIconKind icon, string testId) => __builder =>
+    {
+        bool selected = Selected == tab;
+        @* aria-current already says which section is open, an extra description would only repeat it *@
+        <button type="button" class="nf-nav__tab @(selected ? "nf-nav__tab--selected" : null)" data-testid="@testId"
+                aria-current="@(selected ? "page" : null)" aria-label="@text" @onclick="() => SelectAsync(tab)">
+            <span class="nf-nav__indicator" aria-hidden="true"><AppIcon Kind="icon" Size="22" /></span>
+            <span class="nf-nav__caption" aria-hidden="true">@text</span>
+        </button>
+    };
+
+    protected override void OnInitialized() => Runner.Changed += OnRunnerChanged;
+
+    // every section except the diary is one step deep: the system back returns to the diary, as on android
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Selected != ShellTab.Diary && _sectionLayer is null)
+        {
+            _sectionLayer = await Back.PushAsync(() =>
+            {
+                _sectionLayer = null;
+                return SelectedChanged.InvokeAsync(ShellTab.Diary);
+            });
+        }
+        else if (Selected == ShellTab.Diary && _sectionLayer is not null)
+        {
+            BackLayer layer = _sectionLayer;
+            _sectionLayer = null;
+            await layer.RemoveAsync();
+        }
+    }
+
+    private Task SelectAsync(ShellTab tab) =>
+        Runner.IsBusy || tab == Selected ? Task.CompletedTask : SelectedChanged.InvokeAsync(tab);
+
+    private void OnRunnerChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public async ValueTask DisposeAsync()
+    {
+        Runner.Changed -= OnRunnerChanged;
+        if (_sectionLayer is not null)
+        {
+            await _sectionLayer.RemoveAsync();
+        }
+    }
+}

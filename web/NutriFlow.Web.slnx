@@ -2,6 +2,8 @@
   <Project Path="../NutriFlow.Domain/NutriFlow.Domain.csproj" />
   <Project Path="../NutriFlow.Infrastructure/NutriFlow.Infrastructure.csproj" />
   <Project Path="../mobile/NutriFlow.Mobile.Core/NutriFlow.Mobile.Core.csproj" />
+  <Project Path="../NutriFlow.Ui/NutriFlow.Ui.csproj" />
+  <Project Path="../NutriFlow.Ui.Tests/NutriFlow.Ui.Tests.csproj" />
   <Project Path="NutriFlow.Web/NutriFlow.Web.csproj" />
   <Project Path="NutriFlow.Web.Tests/NutriFlow.Web.Tests.csproj" />
 </Solution>

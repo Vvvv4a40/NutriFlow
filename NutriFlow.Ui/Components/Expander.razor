@@ -1,0 +1,31 @@
+@* details on demand; the expanded state is announced through aria-expanded *@
+<div class="nf-expander @Class">
+    <button type="button" class="nf-expander__toggle" aria-expanded="@(_open ? "true" : "false")" aria-controls="@_id"
+            data-testid="@TestId" @onclick="() => _open = !_open">
+        <span>@Title</span>
+        <AppIcon Kind="AppIconKind.Expand" Size="18" Class="@(_open ? "nf-expander__chevron nf-expander__chevron--open" : "nf-expander__chevron")" />
+    </button>
+    <div id="@_id" class="nf-expander__content" hidden="@(!_open)">
+        @if (_open)
+        {
+            @ChildContent
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string _id = "details-" + Guid.NewGuid().ToString("N")[..8];
+    private bool _open;
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

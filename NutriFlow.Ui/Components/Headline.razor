@@ -1,0 +1,13 @@
+<h2 class="nf-headline @(Small ? "nf-headline--small" : null) @Class">@ChildContent</h2>
+
+@code {
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    // 19 instead of 20, as in empty states
+    [Parameter]
+    public bool Small { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

@@ -1,0 +1,17 @@
+@inherits PressableBase
+
+<button type="button" class="nf-icon-button @Class" aria-label="@Description" title="@Description" data-testid="@TestId"
+        @onclick="ClickAsync">
+    <AppIcon Kind="Icon" />
+</button>
+
+@code {
+    [Parameter, EditorRequired]
+    public AppIconKind Icon { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Description { get; set; } = "";
+
+    [Parameter]
+    public string? Class { get; set; }
+}

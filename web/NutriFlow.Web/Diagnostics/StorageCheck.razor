@@ -10,18 +10,18 @@
 @inject PersistentDirectory Files
 @inject BrowserPlatform Platform
 
-<section class="notice" data-testid="storage-check">
-    <p class="caption">Проверка хранилища · только в разработке</p>
-    <p class="text" data-testid="storage-profiles">Профилей: @_profileCount · выбран: @(_selected?.Name ?? "нет")</p>
-    <p class="text" data-testid="storage-data">Продуктов: @_productCount · черновик: «@_draft» · тема: @_theme</p>
-    <p class="caption" data-testid="storage-persisted">Защита от очистки браузером: @(_persisted ? "есть" : "нет")</p>
-    <button class="action" type="button" data-testid="storage-create-profile" @onclick="CreateProfileAsync">Создать профиль</button>
-    <button class="action" type="button" data-testid="storage-write" disabled="@(_selected is null)" @onclick="WriteAsync">Записать продукт, черновик и тему</button>
+<Card TestId="storage-check" Label="Проверка хранилища">
+    <Overline>Проверка хранилища · только в разработке</Overline>
+    <p class="nf-text" data-testid="storage-profiles">Профилей: @_profileCount · выбран: @(_selected?.Name ?? "нет")</p>
+    <p class="nf-text" data-testid="storage-data">Продуктов: @_productCount · черновик: «@_draft» · тема: @_theme</p>
+    <p class="nf-caption" data-testid="storage-persisted">Защита от очистки браузером: @(_persisted ? "есть" : "нет")</p>
+    <ActionButton Text="Создать профиль" TestId="storage-create-profile" OnClick="CreateProfileAsync" />
+    <ActionButton Text="Записать продукт, черновик и тему" Secondary="true" TestId="storage-write" Enabled="@(_selected is not null)" OnClick="WriteAsync" />
     @if (_error is not null)
     {
-        <p class="text" role="alert">@_error</p>
+        <p class="nf-caption nf-tone-danger" role="alert">@_error</p>
     }
-</section>
+</Card>
 
 @code {
     private int _profileCount;

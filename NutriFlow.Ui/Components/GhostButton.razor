@@ -1,0 +1,21 @@
+@inherits PressableBase
+
+<button type="button" class="nf-button nf-button--ghost @(Danger ? "nf-button--danger" : null) @Class"
+        disabled="@(!Enabled)" aria-label="@Description" data-testid="@TestId" @onclick="ClickAsync">@Text</button>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    [Parameter]
+    public bool Danger { get; set; }
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    [Parameter]
+    public string? Description { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

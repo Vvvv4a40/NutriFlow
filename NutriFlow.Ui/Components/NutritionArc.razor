@@ -1,0 +1,31 @@
+@* the diary arc: progress of calories to the goal, coloured by the energy share of each macro; numbers live outside *@
+<svg class="nf-arc @Class" viewBox="0 0 320 176" aria-hidden="true" focusable="false" data-testid="diary-arcs">
+    <path class="nf-arc__track" d="@_geometry.Track.Data" stroke-width="@_geometry.StrokeText" stroke-linecap="round" />
+    @foreach (ArcPath path in _geometry.Fill)
+    {
+        <path class="nf-arc__fill nf-tone-@path.Tone" d="@path.Data" stroke-width="@_geometry.StrokeText" />
+    }
+    @foreach (ArcCap cap in _geometry.Caps)
+    {
+        <circle class="nf-arc__cap nf-tone-@cap.Tone" cx="@cap.XText" cy="@cap.YText" r="@cap.RadiusText" />
+    }
+    @if (_geometry.Exceeded is { } exceeded)
+    {
+        <path class="nf-arc__exceeded" d="@exceeded.Data" stroke-width="3" stroke-linecap="round" />
+    }
+</svg>
+
+@code {
+    private ArcGeometry _geometry = ArcGeometry.Create(new NutritionResponse(0, 0, 0, 0), null);
+
+    [Parameter, EditorRequired]
+    public NutritionResponse Consumed { get; set; } = new(0, 0, 0, 0);
+
+    [Parameter]
+    public NutritionResponse? Goal { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    protected override void OnParametersSet() => _geometry = ArcGeometry.Create(Consumed, Goal);
+}

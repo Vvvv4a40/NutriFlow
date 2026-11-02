@@ -1,0 +1,1132 @@
+/* components of NutriFlow.Ui. Theme colours are css custom properties: the defaults below are the default theme
+   «Терракота и лён», ThemeManager replaces them with the profile theme. Sizes match mobile/NutriFlow.Mobile/Ui.cs. */
+
+:root {
+    --background: #EDE2D1;
+    --surface: #F6EEE2;
+    --surface-raised: #E3D5C0;
+    --surface-pressed: #D4CBC0;
+    --stroke: #E2DACE;
+    --text-primary: #2D211B;
+    --muted: #65574B;
+    --subtle: #685A4E;
+    --highlight: #963F1B;
+    --accent: #963F1B;
+    --accent-fill: #A2461F;
+    --accent-pressed: #AF603E;
+    --accent-soft: #E5CCBB;
+    --on-accent: #FFFFFF;
+    --field-stroke: #827466;
+    --protein: #3F6286;
+    --fat: #946C1C;
+    --carbs: #6E5A8E;
+    --success: #276842;
+    --warning: #865000;
+    --danger: #A8283E;
+    --nav-background: #A2461F;
+    --nav-foreground: #F6E3D3;
+    --nav-pressed: #A64E28;
+    --nav-selected: #EDE2D1;
+    --nav-selected-icon: #963F1B;
+    --nav-selected-text: #FFF7EE;
+    --fab-background: #EDE2D1;
+    --fab-foreground: #963F1B;
+    --fab-pressed: #DFC8B4;
+    --date-background: #A2461F;
+    --date-foreground: #FFF7EE;
+    --date-pressed: #AD5B38;
+
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --font-medium: 500;
+    --screen-padding: 20px;
+    --block-gap: 16px;
+    --card-radius: 22px;
+    --card-padding: 18px;
+    --button-radius: 16px;
+    --field-radius: 14px;
+    --touch-target: 48px;
+}
+
+/* text */
+
+.nf-title {
+    margin: 0;
+    color: var(--highlight);
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+}
+
+.nf-headline {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+}
+
+.nf-headline--small {
+    font-size: 1.1875rem;
+}
+
+.nf-text {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+}
+
+.nf-text--muted {
+    color: var(--muted);
+}
+
+.nf-text--strong {
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+}
+
+.nf-caption {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+}
+
+.nf-overline {
+    margin: 0;
+    color: var(--highlight);
+    font-size: 0.75rem;
+    font-weight: var(--font-medium);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* tones: one colour per role, used through currentColor by dots, tiles, badges, bars and arcs */
+
+.nf-tone-accent { color: var(--accent); }
+.nf-tone-muted { color: var(--muted); }
+.nf-tone-success { color: var(--success); }
+.nf-tone-warning { color: var(--warning); }
+.nf-tone-danger { color: var(--danger); }
+.nf-tone-protein { color: var(--protein); }
+.nf-tone-fat { color: var(--fat); }
+.nf-tone-carbs { color: var(--carbs); }
+
+.nf-icon {
+    display: block;
+    flex: none;
+}
+
+/* buttons */
+
+.nf-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--touch-target);
+    min-height: 52px;
+    padding: 12px 18px;
+    border: 0;
+    border-radius: var(--button-radius);
+    font: inherit;
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.nf-button--primary {
+    background: var(--accent-fill);
+    color: var(--on-accent);
+}
+
+.nf-button--primary:active:not(:disabled) {
+    background: var(--accent-pressed);
+}
+
+.nf-button--secondary {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.nf-button--secondary:active:not(:disabled) {
+    background: var(--surface-pressed);
+}
+
+.nf-button--ghost {
+    min-height: var(--touch-target);
+    padding: 10px 12px;
+    background: transparent;
+    color: var(--accent);
+}
+
+.nf-button--ghost:active:not(:disabled) {
+    background: var(--surface-raised);
+}
+
+.nf-button--danger {
+    color: var(--danger);
+}
+
+.nf-button:disabled {
+    background: var(--surface-raised);
+    color: var(--subtle);
+    cursor: default;
+}
+
+.nf-button--ghost:disabled {
+    background: transparent;
+}
+
+.nf-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--touch-target);
+    height: var(--touch-target);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.nf-icon-button:active {
+    background: var(--surface-pressed);
+}
+
+.nf-chip {
+    min-height: var(--touch-target);
+    padding: 10px 16px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.nf-chip:active {
+    background: var(--surface-pressed);
+}
+
+.nf-chip--selected,
+.nf-chip--selected:active {
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.nf-segmented {
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--stroke);
+    border-radius: 16px;
+    background: var(--surface);
+}
+
+.nf-segmented__option {
+    min-height: var(--touch-target);
+    padding: 10px 8px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.9375rem;
+    font-weight: var(--font-medium);
+    cursor: pointer;
+}
+
+.nf-segmented__option:active:not(:disabled) {
+    background: var(--surface-raised);
+}
+
+.nf-segmented__option:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.nf-segmented__option--active,
+.nf-segmented__option--active:active:not(:disabled) {
+    background: var(--surface-pressed);
+    color: var(--text-primary);
+}
+
+.nf-pressable {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
+
+.nf-pressable:active:not(:disabled) {
+    background: var(--surface-pressed);
+}
+
+.nf-pressable:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* fields */
+
+.nf-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nf-field__label {
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-weight: var(--font-medium);
+}
+
+.nf-field__input {
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 14px;
+    border: 1px solid var(--field-stroke);
+    border-radius: var(--field-radius);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: inherit;
+    /* 16 px and more keeps ios from zooming into a focused field */
+    font-size: max(1rem, 16px);
+}
+
+.nf-field__input::placeholder {
+    color: var(--subtle);
+    opacity: 1;
+}
+
+.nf-field__input:focus {
+    border-color: var(--accent);
+    outline: 1px solid var(--accent);
+}
+
+.nf-field__input--multiline {
+    resize: vertical;
+    line-height: 1.4;
+}
+
+.nf-picker {
+    position: relative;
+}
+
+.nf-picker__select {
+    padding-right: 44px;
+    appearance: none;
+}
+
+.nf-picker__chevron {
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    color: var(--subtle);
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.nf-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: var(--touch-target);
+    cursor: pointer;
+}
+
+.nf-switch-row__text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.nf-switch {
+    position: relative;
+    flex: none;
+    width: 52px;
+    height: 32px;
+    margin: 0;
+    border-radius: 999px;
+    background: var(--surface-pressed);
+    /* the outline keeps the track visible on every card, so the thumb position reads as the state */
+    box-shadow: inset 0 0 0 2px var(--field-stroke);
+    appearance: none;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.nf-switch::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: transform 0.15s, background-color 0.15s;
+}
+
+.nf-switch:checked {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.nf-switch:checked::after {
+    background: var(--accent);
+    transform: translateX(20px);
+}
+
+/* containers */
+
+.nf-card,
+.nf-panel {
+    border: 1px solid var(--stroke);
+    border-radius: var(--card-radius);
+    background: var(--surface);
+}
+
+.nf-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: var(--card-padding);
+}
+
+.nf-list {
+    overflow: hidden;
+}
+
+/* a hairline between rows, inset by 16 px on both sides */
+.nf-list > * + * {
+    background-image: linear-gradient(var(--stroke), var(--stroke));
+    background-position: top center;
+    background-repeat: no-repeat;
+    background-size: calc(100% - 32px) 1px;
+}
+
+.nf-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-height: var(--touch-target);
+    padding: 14px 16px;
+    border: 0;
+    background-color: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.nf-row:active {
+    background-color: var(--surface-pressed);
+}
+
+.nf-row__text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.nf-row__title {
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    overflow-wrap: anywhere;
+    hyphens: auto;
+}
+
+.nf-row__subtitle {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+    hyphens: auto;
+}
+
+.nf-row__end {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-end;
+    text-align: end;
+}
+
+.nf-row__value {
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+}
+
+.nf-row__value-caption {
+    color: var(--muted);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.nf-row__chevron {
+    color: var(--subtle);
+}
+
+.nf-icon-tile {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+    background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.nf-icon-tile--large {
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+}
+
+.nf-badge {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 10px;
+    background: color-mix(in srgb, currentColor 15%, transparent);
+    font-size: 0.75rem;
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+}
+
+/* muted text on a tinted badge is the darker muted colour, not subtle: small text keeps 4.5:1 */
+.nf-badge.nf-tone-muted {
+    color: var(--muted);
+}
+
+.nf-progress {
+    display: block;
+}
+
+.nf-progress__track {
+    fill: var(--surface-pressed);
+}
+
+.nf-progress__fill {
+    fill: currentColor;
+}
+
+.nf-expander {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nf-expander__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: var(--touch-target);
+    padding: 8px 0;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.9375rem;
+    font-weight: var(--font-medium);
+    text-align: start;
+    cursor: pointer;
+}
+
+.nf-expander__chevron {
+    color: var(--subtle);
+    transition: transform 0.15s;
+}
+
+.nf-expander__chevron--open {
+    transform: rotate(180deg);
+}
+
+.nf-expander__content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nf-empty {
+    align-items: center;
+    gap: 10px;
+    padding: 24px 26px;
+    text-align: center;
+}
+
+.nf-empty__message {
+    font-size: 0.875rem;
+}
+
+.nf-empty__action {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    margin-top: 6px;
+}
+
+/* nutrition */
+
+.nf-macros {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px 14px;
+    color: var(--text-primary);
+    font-size: 0.8125rem;
+}
+
+.nf-macro {
+    white-space: nowrap;
+}
+
+.nf-nutrition {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.nf-nutrition__calories {
+    margin: 0;
+}
+
+.nf-nutrition__number {
+    color: var(--text-primary);
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+.nf-nutrition__unit {
+    color: var(--muted);
+    font-size: 0.9375rem;
+}
+
+.nf-arc {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.nf-arc__track {
+    fill: none;
+    stroke: var(--surface-pressed);
+}
+
+.nf-arc__fill {
+    fill: none;
+    stroke: currentColor;
+}
+
+.nf-arc__cap {
+    fill: currentColor;
+}
+
+.nf-arc__exceeded {
+    fill: none;
+    stroke: var(--danger);
+}
+
+.nf-swatch {
+    display: block;
+    flex: none;
+}
+
+.nf-swatch__edge {
+    stroke: var(--stroke);
+    stroke-width: 1;
+}
+
+.nf-swatch__ring {
+    stroke: var(--text-primary);
+    stroke-width: 2.5;
+}
+
+/* keyboard focus is visible on every theme: the accent passes 3:1 against all surfaces */
+
+.nf-button:focus-visible,
+.nf-icon-button:focus-visible,
+.nf-chip:focus-visible,
+.nf-segmented__option:focus-visible,
+.nf-pressable:focus-visible,
+.nf-row:focus-visible,
+.nf-expander__toggle:focus-visible,
+.nf-switch:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.nf-row:focus-visible,
+.nf-pressable:focus-visible {
+    outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nf-switch,
+    .nf-switch::after,
+    .nf-expander__chevron {
+        transition: none;
+    }
+}
+
+/* shell: header, screen, pinned action and bottom navigation */
+
+.nf-shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+}
+
+.nf-shell__header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 8px var(--screen-padding);
+    background: var(--background);
+}
+
+.nf-shell__title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nf-shell__avatar {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: var(--touch-target);
+    height: var(--touch-target);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+}
+
+.nf-shell__avatar > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    /* the initial keeps its size with large system text, its meaning is in the label */
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.nf-shell__avatar:active {
+    background: var(--surface-pressed);
+}
+
+.nf-shell__body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--block-gap);
+    padding: 4px var(--screen-padding) 32px;
+}
+
+.nf-shell__bottom {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+}
+
+.nf-shell__action-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px var(--screen-padding);
+    border-top: 1px solid var(--stroke);
+    background: var(--background);
+}
+
+.nf-nav {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-items: center;
+    padding: 6px 6px calc(env(safe-area-inset-bottom) + 8px);
+    background: var(--nav-background);
+}
+
+/* a panel in the page colour needs a hairline to separate it, a coloured one does not */
+[data-flat-nav] .nf-nav {
+    box-shadow: inset 0 1px 0 var(--stroke);
+}
+
+.nf-nav__tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 64px;
+    padding: 6px 0;
+    border: 0;
+    border-radius: 18px;
+    background: transparent;
+    color: var(--nav-foreground);
+    font: inherit;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.nf-nav__tab:active {
+    background: var(--nav-pressed);
+}
+
+.nf-nav__indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 30px;
+    border-radius: 15px;
+}
+
+.nf-nav__caption {
+    max-width: 100%;
+    overflow: hidden;
+    /* captions keep their size, the icon and the label carry the meaning */
+    font-size: 12px;
+    font-weight: var(--font-medium);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nf-nav__tab--selected .nf-nav__indicator {
+    background: var(--nav-selected);
+    color: var(--nav-selected-icon);
+}
+
+.nf-nav__tab--selected .nf-nav__caption {
+    color: var(--nav-selected-text);
+}
+
+.nf-nav__add-slot {
+    display: flex;
+    justify-content: center;
+}
+
+.nf-nav__add {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--fab-background);
+    box-shadow: 0 4px 16px color-mix(in srgb, var(--fab-background) 28%, transparent);
+    color: var(--fab-foreground);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.nf-nav__add:active {
+    background: var(--fab-pressed);
+}
+
+.nf-nav__tab:focus-visible,
+.nf-nav__add:focus-visible {
+    outline: 3px solid var(--nav-foreground);
+    outline-offset: 2px;
+}
+
+.nf-shell__avatar:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 0;
+}
+
+/* form page: a secondary screen over the shell */
+
+.nf-form {
+    position: fixed;
+    inset: 0;
+    /* navigation.mjs measures the on-screen keyboard, so the pinned footer stays above it on ios */
+    bottom: var(--keyboard-inset, 0px);
+    z-index: 500;
+    display: flex;
+    flex-direction: column;
+    max-width: var(--column-width, 480px);
+    margin: 0 auto;
+    background: var(--background);
+}
+
+.nf-form__header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: calc(env(safe-area-inset-top) + 6px) 16px 6px 6px;
+}
+
+.nf-form__back {
+    color: var(--text-primary);
+}
+
+.nf-form__title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 1.25rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nf-form__title:focus {
+    outline: none;
+}
+
+.nf-form__fields {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 18px;
+    padding: 8px var(--screen-padding) 32px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.nf-form--no-footer .nf-form__fields {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 32px);
+}
+
+.nf-form__footer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px var(--screen-padding) calc(env(safe-area-inset-bottom) + 16px);
+    border-top: 1px solid var(--stroke);
+    background: var(--background);
+}
+
+/* dialogs and action sheets */
+
+.nf-dialog {
+    width: min(400px, calc(100vw - 32px));
+    max-width: none;
+    padding: 24px 20px 12px;
+    border: 0;
+    border-radius: var(--card-radius);
+    background: var(--surface);
+    color: var(--text-primary);
+}
+
+.nf-dialog::backdrop {
+    background: rgb(0 0 0 / 0.45);
+}
+
+.nf-dialog__title {
+    margin: 0 4px 8px;
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.nf-dialog__message {
+    margin: 0 4px 12px;
+}
+
+.nf-dialog__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+.nf-dialog__button {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    padding: 10px 14px;
+    border: 0;
+    border-radius: 14px;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    cursor: pointer;
+}
+
+.nf-dialog__button:active {
+    background: var(--surface-raised);
+}
+
+.nf-dialog__button--primary {
+    font-weight: 700;
+}
+
+.nf-dialog__button--destructive {
+    color: var(--danger);
+}
+
+.nf-dialog__button:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 0;
+}
+
+.nf-dialog--sheet {
+    width: min(480px, 100vw);
+    margin: auto auto 0;
+    padding: 20px 8px calc(env(safe-area-inset-bottom) + 8px);
+    border-radius: var(--card-radius) var(--card-radius) 0 0;
+}
+
+.nf-dialog--sheet .nf-dialog__title {
+    margin: 0 12px 8px;
+    color: var(--muted);
+    font-size: 0.875rem;
+    font-weight: var(--font-medium);
+}
+
+.nf-dialog--sheet .nf-dialog__actions {
+    flex-direction: column;
+    gap: 0;
+}
+
+.nf-dialog--sheet .nf-dialog__button {
+    width: 100%;
+    padding: 14px 16px;
+    color: var(--text-primary);
+    text-align: start;
+}
+
+.nf-dialog--sheet .nf-dialog__button--destructive {
+    color: var(--danger);
+}
+
+.nf-dialog--sheet .nf-dialog__button--cancel {
+    margin-top: 6px;
+    border-top: 1px solid var(--stroke);
+    border-radius: 0 0 14px 14px;
+    color: var(--muted);
+    text-align: center;
+}
+
+/* hover only where a pointer can hover: on touch screens it would stay after the tap */
+@media (hover: hover) {
+    .nf-button--primary:hover:not(:disabled) {
+        background: var(--accent-pressed);
+    }
+
+    .nf-button--secondary:hover:not(:disabled),
+    .nf-icon-button:hover,
+    .nf-chip:hover,
+    .nf-pressable:hover:not(:disabled),
+    .nf-row:hover,
+    .nf-shell__avatar:hover,
+    .nf-segmented__option--active:hover:not(:disabled) {
+        background: var(--surface-pressed);
+    }
+
+    .nf-button--ghost:hover:not(:disabled),
+    .nf-segmented__option:hover:not(:disabled):not(.nf-segmented__option--active),
+    .nf-dialog__button:hover {
+        background: var(--surface-raised);
+    }
+
+    .nf-chip--selected:hover {
+        background: var(--accent-soft);
+    }
+
+    .nf-nav__tab:hover {
+        background: var(--nav-pressed);
+    }
+
+    .nf-nav__add:hover {
+        background: var(--fab-pressed);
+    }
+}
+
+/* busy state */
+
+.nf-blocker {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+}
+
+.nf-spinner {
+    display: inline-block;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border: 2.5px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: nf-spin 0.8s linear infinite;
+}
+
+@keyframes nf-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* the spinner still says that work goes on, only slower; progress text carries the rest */
+@media (prefers-reduced-motion: reduce) {
+    .nf-spinner {
+        animation-duration: 2.4s;
+    }
+}
+
+.nf-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}

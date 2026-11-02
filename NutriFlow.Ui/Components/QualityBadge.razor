@@ -1,0 +1,17 @@
+@* exact and verified data carry no badge; an estimate never passes for exact data *@
+@switch (Quality)
+{
+    case "Exact" or "Verified":
+        break;
+    case "Estimated":
+        <Badge Text="≈ оценка" SpokenText="оценочные данные" Tone="Tone.Warning" />
+        break;
+    default:
+        <Badge Text="не проверено" Tone="Tone.Muted" />
+        break;
+}
+
+@code {
+    [Parameter]
+    public string? Quality { get; set; }
+}

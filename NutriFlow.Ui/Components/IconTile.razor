@@ -1,0 +1,15 @@
+<span class="nf-icon-tile @(Large ? "nf-icon-tile--large" : null) @PressableBase.ToneClass(Tone)" aria-hidden="true">
+    <AppIcon Kind="Icon" Size="@(Large ? 31 : 22)" />
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public AppIconKind Icon { get; set; }
+
+    [Parameter]
+    public Tone Tone { get; set; } = Tone.Accent;
+
+    // 56 instead of 40, as in empty states
+    [Parameter]
+    public bool Large { get; set; }
+}

@@ -1,0 +1,69 @@
+@inherits PressableBase
+
+<button type="button" class="nf-row @(Icon is null ? "nf-row--plain" : null)" aria-label="@AccessibleName"
+        aria-description="@Hint" data-testid="@TestId" @onclick="ClickAsync">
+    @if (Icon is { } icon)
+    {
+        <IconTile Icon="icon" />
+    }
+    <span class="nf-row__text">
+        <span class="nf-row__title">@Title</span>
+        @if (SubtitleContent is not null)
+        {
+            <span class="nf-row__subtitle">@SubtitleContent</span>
+        }
+        else if (!string.IsNullOrEmpty(Subtitle))
+        {
+            <span class="nf-row__subtitle">@Subtitle</span>
+        }
+    </span>
+    @if (Trailing is not null || TrailingCaption is not null)
+    {
+        <span class="nf-row__end">
+            @if (Trailing is not null)
+            {
+                <span class="nf-row__value">@Trailing</span>
+            }
+            @if (TrailingCaption is not null)
+            {
+                <span class="nf-row__value-caption">@TrailingCaption</span>
+            }
+        </span>
+    }
+    else
+    {
+        <AppIcon Kind="AppIconKind.Next" Size="18" Class="nf-row__chevron" />
+    }
+</button>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    [Parameter]
+    public RenderFragment? SubtitleContent { get; set; }
+
+    [Parameter]
+    public string? Trailing { get; set; }
+
+    [Parameter]
+    public string? TrailingCaption { get; set; }
+
+    [Parameter]
+    public AppIconKind? Icon { get; set; }
+
+    // what a screen reader says for the whole row, with nutrition in words
+    [Parameter, EditorRequired]
+    public string Description { get; set; } = "";
+
+    // voice control finds a row by its visible title, so the spoken name always starts with it
+    private string AccessibleName => Description.StartsWith(Title, StringComparison.CurrentCultureIgnoreCase)
+        ? Description
+        : $"{Title}, {Description}";
+
+    [Parameter]
+    public string? Hint { get; set; }
+}

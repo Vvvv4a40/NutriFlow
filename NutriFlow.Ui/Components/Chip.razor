@@ -1,0 +1,15 @@
+@inherits PressableBase
+
+<button type="button" class="nf-chip @(Selected ? "nf-chip--selected" : null)" aria-pressed="@(Selected ? "true" : "false")"
+        aria-label="@Description" data-testid="@TestId" @onclick="ClickAsync">@Text</button>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    [Parameter]
+    public bool Selected { get; set; }
+
+    [Parameter]
+    public string? Description { get; set; }
+}

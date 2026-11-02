@@ -1,0 +1,156 @@
+@* development-only showcase of NutriFlow.Ui in every theme, for screenshots and keyboard checks *@
+@implements IDisposable
+@inject ThemeManager Themes
+
+<section class="showcase" data-testid="component-showcase" aria-label="Витрина компонентов">
+    <Overline>Витрина компонентов · только в разработке</Overline>
+
+    <div class="showcase__themes">
+        @foreach (ThemePalette theme in ThemePalette.All)
+        {
+            <Pressable Class="showcase__theme" Description="@($"Тема «{theme.Name}»")" TestId="@($"showcase-theme-{theme.Id}")"
+                       OnClick="() => Themes.ApplyAsync(theme.Id)">
+                <ThemeSwatch Theme="theme" Selected="@(theme == Themes.Current)" />
+                <span class="nf-caption">@theme.Name</span>
+            </Pressable>
+        }
+    </div>
+
+    <Card Label="Текст">
+        <Title>Дневник</Title>
+        <Headline>Заголовок карточки</Headline>
+        <Overline>Надзаголовок секции</Overline>
+        <BodyText>Основной текст: гречка 150 г, куриная грудка 120 г и длинное название продукта, которое переносится на следующую строку.</BodyText>
+        <BodyText Strong="true">Ваша порция</BodyText>
+        <BodyText Muted="true">Приглушённый текст</BodyText>
+        <Caption>Подпись 13 px</Caption>
+        <Caption Tone="Tone.Danger">Не удалось связаться с Groq. Проверьте интернет и повторите.</Caption>
+    </Card>
+
+    <Card Label="Кнопки">
+        <ActionButton Text="Записать в дневник" OnClick="Noop" />
+        <ActionButton Text="Выбрать из галереи" Secondary="true" OnClick="Noop" />
+        <ActionButton Text="Недоступно" Enabled="false" OnClick="Noop" />
+        <div class="showcase__inline">
+            <GhostButton Text="Изменить" OnClick="Noop" />
+            <GhostButton Text="Удалить" Danger="true" OnClick="Noop" />
+            <IconButton Icon="AppIconKind.Previous" Description="Предыдущий день" OnClick="Noop" />
+            <IconButton Icon="AppIconKind.Next" Description="Следующий день" OnClick="Noop" />
+            <IconButton Icon="AppIconKind.More" Description="Ещё" OnClick="Noop" />
+        </div>
+        <div class="showcase__inline">
+            @foreach (string preset in _presets)
+            {
+                <Chip Text="@preset" Selected="@(preset == _preset)" OnClick="() => _preset = preset" />
+            }
+        </div>
+        <Segmented Label="Что записываем" Options="_modes" @bind-Selected="_mode" />
+    </Card>
+
+    <Card Label="Поля">
+        <Field Label="Название" Placeholder="Например, творог 5 %" @bind-Value="_name" />
+        <Field Label="Вес, г" Number="true" Hint="Можно с запятой: 12,5" @bind-Value="_weight" />
+        <TextArea Placeholder="Опишите, что съели" @bind-Value="_text" />
+        <PickerField Label="Продукт" Options="_products" Placeholder="Выберите продукт" @bind-Value="_product" />
+        <SwitchRow Text="Значения сверены с этикеткой" Hint="Без отметки данные считаются оценкой" @bind-Checked="_checked" />
+        <Caption>@WeightText</Caption>
+    </Card>
+
+    <Card Label="КБЖУ">
+        <NutritionBlock Caption="Всё блюдо" Value="_dish" />
+        <NutritionBlock Caption="Пока пусто" />
+        <div class="showcase__bars">
+            <ProgressBar Value="60" Maximum="120" Tone="Tone.Protein" />
+            <ProgressBar Value="70" Maximum="60" Tone="Tone.Fat" />
+            <ProgressBar Value="0" Maximum="250" Tone="Tone.Carbs" />
+        </div>
+        <div class="showcase__inline">
+            <QualityBadge Quality="Estimated" />
+            <QualityBadge Quality="Unknown" />
+            <Badge Text="Записано" Tone="Tone.Success" />
+            <Badge Text="Сверх цели" Tone="Tone.Danger" />
+        </div>
+    </Card>
+
+    <RowList>
+        <Row Title="Гречка с курицей" Icon="AppIconKind.Dishes" Trailing="612 ккал" TrailingCaption="350 г"
+             Description="@($"Гречка с курицей, 350 граммов, {NutritionText.SpokenNutrition(_dish)}")" OnClick="Noop">
+            <SubtitleContent><MacroLine Protein="_dish.ProteinGrams" Fat="_dish.FatGrams" Carbs="_dish.CarbohydratesGrams" /></SubtitleContent>
+        </Row>
+        <Row Title="Творог 5 %" Subtitle="На 100 г · ручной ввод" Icon="AppIconKind.Products" Description="на 100 граммов, ручной ввод" OnClick="Noop" />
+        <Row Title="Без значка и с очень длинным названием продукта, которое не помещается в строку" Description="без значка" OnClick="Noop" />
+    </RowList>
+
+    <Card Label="Подробности">
+        <Expander Title="Источники и история">
+            <Caption>Ручной ввод · точные данные</Caption>
+            <Caption>Расчёт обновлён после уточнения веса.</Caption>
+        </Expander>
+    </Card>
+
+    <EmptyState Icon="AppIconKind.Dishes" Title="Своих блюд пока нет"
+                Message="Соберите блюдо из продуктов или опишите его словами — оно появится здесь.">
+        <Action><ActionButton Text="Собрать блюдо" OnClick="Noop" /></Action>
+    </EmptyState>
+
+    <Card Label="Дуга">
+        <div class="showcase__arcs">
+            <figure>
+                <NutritionArc Consumed="new NutritionResponse(640, 30, 20, 80)" />
+                <figcaption class="nf-caption">Без цели</figcaption>
+            </figure>
+            <figure>
+                <NutritionArc Consumed="_dish" Goal="new NutritionResponse(2000, 0, 0, 0)" />
+                <figcaption class="nf-caption">612 из 2000</figcaption>
+            </figure>
+            <figure>
+                <NutritionArc Consumed="new NutritionResponse(2350, 120, 90, 260)" Goal="new NutritionResponse(2000, 0, 0, 0)" />
+                <figcaption class="nf-caption">Сверх цели</figcaption>
+            </figure>
+        </div>
+    </Card>
+
+    <Card Label="Иконки">
+        <div class="showcase__icons">
+            @foreach (AppIconKind icon in Enum.GetValues<AppIconKind>())
+            {
+                <span class="showcase__icon"><IconTile Icon="icon" /><span class="nf-caption">@icon</span></span>
+            }
+        </div>
+    </Card>
+</section>
+
+@code {
+    private static readonly string[] _presets = ["Баланс", "Больше белка", "Меньше углеводов"];
+    private static readonly IReadOnlyList<SegmentedOption> _modes = [new("В дневник"), new("Создать блюдо")];
+    private static readonly IReadOnlyList<PickerOption> _products = [new("1", "Гречка"), new("2", "Куриная грудка"), new("3", "Творог 5 %")];
+    private readonly NutritionResponse _dish = new(612.5m, 41.2m, 18.6m, 70.4m);
+    private string _preset = "Баланс";
+    private int _mode;
+    private string? _name;
+    private string? _weight;
+    private string? _text;
+    private string? _product;
+    private bool _checked;
+
+    private string WeightText
+    {
+        get
+        {
+            try
+            {
+                return NutritionText.Amount(NutritionText.ParseNumber(_weight, "Вес", positive: true)) + " г";
+            }
+            catch (ArgumentException exception)
+            {
+                return exception.Message;
+            }
+        }
+    }
+
+    private static Task Noop() => Task.CompletedTask;
+
+    protected override void OnInitialized() => Themes.Changed += StateHasChanged;
+
+    public void Dispose() => Themes.Changed -= StateHasChanged;
+}
