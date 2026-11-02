@@ -1,0 +1,113 @@
+@using System.Globalization
+@inject LocalMealClient Meals
+@inject ActionRunner Runner
+
+@* calories and linked macro shares of the day goal (EditGoalPageAsync in MainPage.Goal.cs) *@
+<FormPage Title="Цель на день" TestId="goal-form" OnClose="OnClose">
+    <ChildContent>
+        <Caption>Цель для дневника за @Date.ToString("d MMMM", CultureInfo.GetCultureInfo("ru-RU"))</Caption>
+        <Card Class="nf-goal-calories">
+            <Overline>Калории</Overline>
+            <Field @ref="_calories" Number="true" Class="nf-field--hero" AccessibleLabel="Калории в день" EnterKeyHint="done"
+                   Hint="ккал в день" Error="@_error" TestId="goal-calories" Value="@_editor.CaloriesText" ValueChanged="OnCaloriesChanged"
+                   OnEnter="SaveAsync" />
+        </Card>
+
+        <Overline>Баланс БЖУ</Overline>
+        <div class="nf-chips" role="group" aria-label="Готовые наборы">
+            @foreach (GoalPreset preset in GoalEditor.Presets)
+            {
+                <Chip Text="@preset.Name" Selected="@(preset == _editor.Preset)" Description="@preset.Description"
+                      OnClick="() => _editor.ApplyPreset(preset)" />
+            }
+        </div>
+        <Card Label="Доли калорий">
+            @Slider(NutritionMacro.Protein, "Белки", Tone.Protein, "protein")
+            @Slider(NutritionMacro.Fat, "Жиры", Tone.Fat, "fat")
+            @Slider(NutritionMacro.Carbohydrates, "Углеводы", Tone.Carbs, "carbs")
+            <Caption Class="nf-goal-macros__note"><span id="@_noteId">Доли калорий связаны: когда меняете одну, две другие подстраиваются.</span></Caption>
+        </Card>
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Сохранить цель" TestId="goal-save" OnClick="SaveAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private readonly string _noteId = "goal-note-" + Guid.NewGuid().ToString("N")[..8];
+    private GoalEditor _editor = new(null);
+    private Field? _calories;
+    private string? _error;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    [Parameter]
+    public DateOnly Date { get; set; }
+
+    [Parameter]
+    public NutritionResponse? Goal { get; set; }
+
+    [Parameter]
+    public EventCallback OnSaved { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override void OnInitialized() => _editor = new GoalEditor(Goal);
+
+    private RenderFragment Slider(NutritionMacro macro, string name, Tone tone, string id) => __builder =>
+    {
+        decimal percent = _editor.Percent(macro);
+        decimal? grams = _editor.Grams(macro);
+        string percentText = percent.ToString("0", CultureInfo.CurrentCulture);
+        string inputId = $"goal-{id}-{_noteId}";
+        <div class="nf-goal-macro">
+            <div class="nf-goal-macro__caption">
+                <span class="nf-dot @PressableBase.ToneClass(tone)" aria-hidden="true"></span>
+                <label class="nf-text nf-text--strong" for="@inputId">@name</label>
+                <span class="nf-goal-macro__value" data-testid="@($"goal-{id}-value")" aria-hidden="true">
+                    <span class="nf-goal-macro__grams">@(grams is { } value ? $"{NutritionText.MacroAmount(value)} г" : "—")</span>
+                    <span class="nf-goal-macro__percent">@percentText%</span>
+                </span>
+            </div>
+            <input type="range" id="@inputId" class="nf-slider @PressableBase.ToneClass(tone)" min="0" max="100" step="1"
+                   value="@percent.ToString("0.##", CultureInfo.InvariantCulture)" data-testid="@($"goal-{id}")"
+                   aria-valuetext="@(grams is { } spoken ? $"{percentText} процентов, {NutritionText.MacroAmount(spoken)} граммов" : $"{percentText} процентов")"
+                   aria-describedby="@_noteId" @oninput="args => OnShareChanged(macro, args)" />
+        </div>
+    };
+
+    private void OnCaloriesChanged(string? value)
+    {
+        _editor.CaloriesText = value;
+        _error = null;
+    }
+
+    private void OnShareChanged(NutritionMacro macro, ChangeEventArgs args)
+    {
+        if (decimal.TryParse(args.Value?.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out decimal percent))
+        {
+            _editor.SetShare(macro, percent);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_editor.ToGoal() is not { } goal)
+        {
+            _error = "Введите калории больше нуля, например 2000.";
+            StateHasChanged();
+            await Task.Yield();
+            await _calories!.FocusAsync();
+            return;
+        }
+
+        await Runner.RunAsync(async () =>
+        {
+            await Meals.SetDailyGoalAsync(ProfileId, Date, goal);
+            await OnSaved.InvokeAsync();
+            await OnClose.InvokeAsync();
+        });
+    }
+}

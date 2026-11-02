@@ -31,6 +31,11 @@ public sealed class ActionRunner
 
     public string? ProgressText { get; private set; }
 
+    // the live region of UiRoot reads it; every call is a new message, even with the same text
+    public string? Announcement { get; private set; }
+
+    public int AnnouncementNumber { get; private set; }
+
     public event Action? Changed;
 
     public async Task RunAsync(Func<Task> action)
@@ -73,6 +78,15 @@ public sealed class ActionRunner
     {
         ProgressKey = key;
         ProgressText = text;
+        Changed?.Invoke();
+    }
+
+    // for a change screen readers would miss, like an error on the field that already has the focus
+    public void Announce(string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        Announcement = text;
+        AnnouncementNumber++;
         Changed?.Invoke();
     }
 

@@ -120,6 +120,23 @@ public sealed class ActionRunnerTests
     }
 
     // the fake timer ignores cancellation, like a timer that already fired: the runner itself must drop late spinners
+    [Fact]
+    public void RepeatedAnnouncementIsANewMessage()
+    {
+        ActionRunner runner = Create();
+        int changes = 0;
+        runner.Changed += () => changes++;
+
+        runner.Announce("Введите имя.");
+        int first = runner.AnnouncementNumber;
+        runner.Announce("Введите имя.");
+
+        Assert.Equal("Введите имя.", runner.Announcement);
+        Assert.Equal(first + 1, runner.AnnouncementNumber);
+        Assert.Equal(2, changes);
+        Assert.Throws<ArgumentException>(() => runner.Announce(" "));
+    }
+
     private ActionRunner Create() => new(_dialogs, _ =>
     {
         TaskCompletionSource delay = new(TaskCreationOptions.RunContinuationsAsynchronously);

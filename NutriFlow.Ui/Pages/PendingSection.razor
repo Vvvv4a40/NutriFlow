@@ -1,0 +1,30 @@
+@* sections whose screens come with the next steps of the web app; each points to what already works *@
+@switch (Tab)
+{
+    case ShellTab.Products:
+        <EmptyState Icon="AppIconKind.Products" Title="Продукты появятся в следующей версии" TestId="pending-products"
+                    Message="Каталог, поиск и продукты по штрихкоду готовятся. А пока задайте цель на день в дневнике.">
+            <Action><ActionButton Text="Открыть дневник" Secondary="true" TestId="pending-open-diary" OnClick="OnOpenDiary" /></Action>
+        </EmptyState>
+        break;
+    case ShellTab.Dishes:
+        <EmptyState Icon="AppIconKind.Dishes" Title="Блюда появятся в следующей версии" TestId="pending-dishes"
+                    Message="Свои блюда из продуктов и описанные словами готовятся. А пока задайте цель на день в дневнике.">
+            <Action><ActionButton Text="Открыть дневник" Secondary="true" TestId="pending-open-diary" OnClick="OnOpenDiary" /></Action>
+        </EmptyState>
+        break;
+    default:
+        <EmptyState Icon="AppIconKind.Microphone" Title="Запись еды появится в следующей версии" TestId="pending-input"
+                    Message="Описание текстом, голосом и по фото этикетки готовится. А пока задайте цель на день — дневник покажет, сколько осталось.">
+            <Action><ActionButton Text="Открыть дневник" Secondary="true" TestId="pending-open-diary" OnClick="OnOpenDiary" /></Action>
+        </EmptyState>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ShellTab Tab { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenDiary { get; set; }
+}

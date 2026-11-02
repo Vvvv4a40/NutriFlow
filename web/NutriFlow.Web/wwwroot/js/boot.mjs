@@ -1,5 +1,7 @@
+import { captureInstallPrompt } from "./platform.mjs";
 import { chooseStartupScreen } from "./startup.mjs";
 
+captureInstallPrompt(window);
 const screen = await chooseStartupScreen();
 if (screen === "app") {
     await Blazor.start({ applicationCulture: "ru-RU" });

@@ -1,0 +1,35 @@
+@inject IAppHost Host
+
+@* profile, theme, recognition and data (MainPage.Settings.cs) *@
+<SectionHeader Title="Профиль" />
+<RowList>
+    <Row Title="@Profile.Name" Subtitle="Профили не видят данные друг друга" Icon="AppIconKind.User"
+         Description="@($"{Profile.Name}. Сменить или создать профиль")" TestId="settings-profile" OnClick="OnChooseProfile" />
+</RowList>
+
+<SectionHeader Title="Тема" />
+<ThemePicker />
+
+<SectionHeader Title="Распознавание" />
+<GroqCard ProfileId="Profile.Id" />
+
+<SectionHeader Title="Данные" />
+<DataCard />
+
+@if (DeveloperTools is not null)
+{
+    @DeveloperTools(Profile.Id)
+}
+
+<p class="nf-caption nf-settings__version" data-testid="settings-version">@Host.VersionText</p>
+
+@code {
+    [Parameter, EditorRequired]
+    public LocalProfile Profile { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback OnChooseProfile { get; set; }
+
+    [Parameter]
+    public RenderFragment<Guid>? DeveloperTools { get; set; }
+}

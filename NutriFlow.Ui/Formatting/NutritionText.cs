@@ -55,16 +55,16 @@ public static class NutritionText
     };
 
     // fields accept a comma or a dot as the decimal separator
-    public static decimal ParseNumber(string? text, string name, bool positive = false)
+    public static decimal ParseNumber(string? text, string name, bool positive = false) =>
+        TryParseNumber(text, positive, out decimal number)
+            ? number
+            : throw new ArgumentException($"{name}: введите {(positive ? "положительное" : "неотрицательное")} число.");
+
+    public static bool TryParseNumber(string? text, bool positive, out decimal number)
     {
         string value = (text ?? "").Trim().Replace(',', '.');
-        if (!decimal.TryParse(value, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
-                CultureInfo.InvariantCulture, out decimal number) || number < 0 || (positive && number == 0))
-        {
-            throw new ArgumentException($"{name}: введите {(positive ? "положительное" : "неотрицательное")} число.");
-        }
-
-        return number;
+        return decimal.TryParse(value, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture, out number) && number >= 0 && (!positive || number > 0);
     }
 
     public static string RequireName(string? text, string label)

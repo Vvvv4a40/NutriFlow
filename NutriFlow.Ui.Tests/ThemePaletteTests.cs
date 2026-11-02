@@ -42,6 +42,25 @@ public sealed partial class ThemePaletteTests
         AssertContrast(theme.FieldStroke, theme.SurfaceRaised, 3, id);
     }
 
+    // the same split as Theme.IsDark on android: native controls of these themes get the dark colour scheme
+    [Fact]
+    public void DarkThemesAreTheThreeWithADarkBackground() =>
+        Assert.Equal(["indigo", "taiga", "dark"], ThemePalette.All.Where(theme => theme.IsDark).Select(theme => theme.Id));
+
+    // the eaten and goal tiles of the diary: SurfaceRaised at 55 % over the panel (.nf-stat), as on android
+    [Theory]
+    [MemberData(nameof(Themes))]
+    public void DiaryTileTextKeepsWcagContrast(string id)
+    {
+        ThemePalette theme = ThemePalette.Find(id);
+        string tile = Blend(theme.SurfaceRaised, theme.Surface, 0.55);
+
+        AssertContrast(theme.TextPrimary, tile, 4.5, id);
+        AssertContrast(theme.Muted, tile, 4.5, id);
+        AssertContrast(theme.Highlight, tile, 4.5, id);
+        AssertContrast(theme.Accent, tile, 4.5, id);
+    }
+
     [Fact]
     public void CssDefaultsAreTheDefaultTheme()
     {
@@ -60,6 +79,14 @@ public sealed partial class ThemePaletteTests
     {
         double ratio = Contrast(foreground, background);
         Assert.True(ratio >= minimum, $"{theme}: {foreground} on {background} is {ratio:0.00}:1, needs {minimum}:1");
+    }
+
+    // color-mix in srgb: each channel weighted, then rounded like the browser does
+    private static string Blend(string top, string bottom, double share)
+    {
+        static int Channel(string hex, int start) => int.Parse(hex[start..(start + 2)], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        int Mix(int start) => (int)Math.Round(Channel(top, start) * share + Channel(bottom, start) * (1 - share));
+        return $"#{Mix(1):X2}{Mix(3):X2}{Mix(5):X2}";
     }
 
     private static double Contrast(string first, string second)

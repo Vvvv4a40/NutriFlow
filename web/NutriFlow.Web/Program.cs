@@ -3,6 +3,7 @@ using Bit.Bsqlite.Storage.Opfs;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using NutriFlow.Mobile.Core;
 using NutriFlow.Ui;
+using NutriFlow.Ui.Hosting;
 using NutriFlow.Web;
 using NutriFlow.Web.Services;
 
@@ -29,10 +30,13 @@ builder.Services.AddScoped(services => new LocalMealClient(
     services.GetRequiredService<LocalProfileStore>(),
     openDatabase: services.GetRequiredService<WebProfileDatabase>().OpenAsync));
 builder.Services.AddSingleton<WebProfileSettings>();
+builder.Services.AddSingleton<IProfileSettings>(services => services.GetRequiredService<WebProfileSettings>());
 builder.Services.AddSingleton<BrowserPlatform>();
+builder.Services.AddSingleton<IAppHost, WebAppHost>();
 builder.Services.AddNutriFlowUi();
 
 WebAssemblyHost host = builder.Build();
 // the profile folder has to be back in memory before LocalProfileStore reads it
 await host.Services.GetRequiredService<PersistentDirectory>().RestoreAsync();
+await host.Services.GetRequiredService<BrowserPlatform>().StartAsync();
 await host.RunAsync();

@@ -11,6 +11,13 @@
     <div class="nf-blocker" aria-hidden="true"></div>
 }
 <div class="nf-visually-hidden" aria-live="polite" data-testid="progress-announcement">@Runner.ProgressText</div>
+@* a fresh element per message, so the same error said twice is read twice *@
+<div class="nf-visually-hidden" aria-live="assertive" data-testid="announcement">
+    @if (Runner.Announcement is not null)
+    {
+        <span @key="Runner.AnnouncementNumber">@Runner.Announcement</span>
+    }
+</div>
 <DialogHost />
 
 @code {

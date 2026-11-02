@@ -1,0 +1,33 @@
+@implements IDisposable
+@inject ThemeManager Themes
+@inject ProfileState Profiles
+@inject ActionRunner Runner
+
+@* eight fixed themes, the choice belongs to the profile (ThemePicker in MainPage.Settings.cs) *@
+<Card TestId="settings-themes">
+    <div class="nf-theme-picker">
+        @foreach (ThemePalette theme in ThemePalette.All)
+        {
+            bool selected = theme == Themes.Current;
+            <Pressable Class="nf-theme-picker__choice" TestId="@($"settings-theme-{theme.Id}")"
+                       Description="@(selected ? $"{theme.Name}, выбрана" : theme.Name)"
+                       Hint="@(selected ? null : "Применить тему к этому профилю")" OnClick="() => SelectAsync(theme)">
+                <ThemeSwatch Theme="theme" Selected="selected" />
+                <span class="nf-theme-picker__name @(selected ? "nf-theme-picker__name--selected" : null)">@theme.Name</span>
+            </Pressable>
+        }
+    </div>
+    <Caption Class="nf-theme-picker__note">У каждого профиля своя тема.</Caption>
+</Card>
+
+@code {
+    protected override void OnInitialized() => Themes.Changed += OnThemeChanged;
+
+    private Task SelectAsync(ThemePalette theme) => theme == Themes.Current
+        ? Task.CompletedTask
+        : Runner.RunAsync(() => Profiles.SaveThemeAsync(theme.Id));
+
+    private void OnThemeChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Themes.Changed -= OnThemeChanged;
+}

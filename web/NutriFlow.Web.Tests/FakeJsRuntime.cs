@@ -9,6 +9,8 @@ internal sealed class FakeJsRuntime : IJSRuntime
 
     public FakeStorageModule Storage { get; } = new();
 
+    public FakePlatformModule Platform { get; } = new();
+
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
         InvokeAsync<TValue>(identifier, CancellationToken.None, args);
 
@@ -21,6 +23,7 @@ internal sealed class FakeJsRuntime : IJSRuntime
             "localStorage.setItem" => Set((string)values[0]!, (string)values[1]!),
             "localStorage.removeItem" => Remove((string)values[0]!),
             "import" when (string?)values[0] == "./js/storage.mjs" => Storage,
+            "import" when (string?)values[0] == "./js/platform.mjs" => Platform,
             _ => throw new InvalidOperationException($"Unexpected call: {identifier}")
         };
         return ValueTask.FromResult((TValue)result!);
@@ -80,6 +83,51 @@ internal sealed class FakeStorageModule : IJSObjectReference
                 Files.Remove(path);
                 Removals.Add(path);
                 result = null;
+                break;
+            default:
+                throw new InvalidOperationException($"Unexpected call: {identifier}");
+        }
+
+        return ValueTask.FromResult((TValue)result!);
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+// platform.mjs: installation as chrome offers it and the persistent storage flag
+internal sealed class FakePlatformModule : IJSObjectReference
+{
+    public bool InstallAvailable { get; set; }
+
+    public string InstallOutcome { get; set; } = "accepted";
+
+    public bool Persisted { get; set; }
+
+    public int PersistenceRequests { get; private set; }
+
+    public object? Watcher { get; private set; }
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+        InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+    {
+        object? result;
+        switch (identifier)
+        {
+            case "watchInstall":
+                Watcher = args![0];
+                result = InstallAvailable;
+                break;
+            case "promptInstall":
+                result = InstallAvailable ? InstallOutcome : "unavailable";
+                break;
+            case "isPersisted":
+                result = Persisted;
+                break;
+            case "requestPersistence":
+                PersistenceRequests++;
+                result = Persisted;
                 break;
             default:
                 throw new InvalidOperationException($"Unexpected call: {identifier}");

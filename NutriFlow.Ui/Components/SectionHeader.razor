@@ -1,0 +1,22 @@
+@* a section heading over a list or card, with an optional summary on the right («3 записи · 1 240 ккал») *@
+<div class="nf-section-header @Class">
+    <Overline>@Title</Overline>
+    @if (Detail is not null)
+    {
+        <span class="nf-section-header__detail" data-testid="@DetailTestId">@Detail</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public string? Detail { get; set; }
+
+    [Parameter]
+    public string? DetailTestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

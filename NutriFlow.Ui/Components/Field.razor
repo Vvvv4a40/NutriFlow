@@ -1,13 +1,21 @@
-@* a labelled text field; numbers take a comma or a dot and are parsed with NutritionText.ParseNumber *@
+@inject ActionRunner Runner
+@* a labelled text field; numbers take a comma or a dot and are parsed with NutritionText.TryParseNumber.
+   an error stays under the field until the owner clears it, usually in @bind-Value:after *@
 <div class="nf-field @Class">
     @if (Label is not null)
     {
         <label class="nf-field__label" for="@_id">@Label</label>
     }
-    <input id="@_id" class="nf-field__input" type="text" value="@Value" placeholder="@Placeholder"
+    <input id="@_id" class="nf-field__input" type="@(Password ? "password" : "text")" value="@Value" placeholder="@Placeholder"
            inputmode="@(Number ? "decimal" : null)" enterkeyhint="@EnterKeyHint" maxlength="@MaxLength"
-           autocomplete="off" spellcheck="@(Number ? "false" : null)" aria-describedby="@(Hint is null ? null : _id + "-hint")"
-           data-testid="@TestId" @oninput="OnInputAsync" />
+           autocomplete="off" autocapitalize="@(Plain ? "off" : null)" autocorrect="@(Plain ? "off" : null)"
+           spellcheck="@(Number || Plain ? "false" : null)"
+           aria-label="@AccessibleLabel" aria-invalid="@(Error is null ? null : "true")" aria-describedby="@DescribedBy"
+           data-testid="@TestId" @ref="_input" @oninput="OnInputAsync" @onkeydown="OnKeyDownAsync" />
+    @if (Error is not null)
+    {
+        <p id="@(_id + "-error")" class="nf-field__error" data-testid="@(TestId is null ? null : TestId + "-error")">@Error</p>
+    }
     @if (Hint is not null)
     {
         <p id="@(_id + "-hint")" class="nf-caption">@Hint</p>
@@ -16,9 +24,14 @@
 
 @code {
     private readonly string _id = "field-" + Guid.NewGuid().ToString("N")[..8];
+    private ElementReference _input;
 
     [Parameter]
     public string? Label { get; set; }
+
+    // a spoken name for a field without a visible label, like the calories of the goal under their own heading
+    [Parameter]
+    public string? AccessibleLabel { get; set; }
 
     [Parameter]
     public string? Value { get; set; }
@@ -32,8 +45,18 @@
     [Parameter]
     public bool Number { get; set; }
 
+    // keys and model names: no capitals, spelling or masking help from the keyboard
+    [Parameter]
+    public bool Plain { get; set; }
+
+    [Parameter]
+    public bool Password { get; set; }
+
     [Parameter]
     public string? Hint { get; set; }
+
+    [Parameter]
+    public string? Error { get; set; }
 
     [Parameter]
     public int? MaxLength { get; set; }
@@ -41,15 +64,44 @@
     [Parameter]
     public string? EnterKeyHint { get; set; }
 
+    // the main action of a one-field form, so enter on a hardware keyboard does what the footer button does
+    [Parameter]
+    public EventCallback OnEnter { get; set; }
+
     [Parameter]
     public string? TestId { get; set; }
 
     [Parameter]
     public string? Class { get; set; }
 
+    private string? DescribedBy => (Error, Hint) switch
+    {
+        (null, null) => null,
+        (not null, null) => _id + "-error",
+        (null, not null) => _id + "-hint",
+        _ => $"{_id}-error {_id}-hint"
+    };
+
+    public ValueTask FocusAsync() => _input.FocusAsync();
+
     private Task OnInputAsync(ChangeEventArgs args)
     {
         Value = args.Value?.ToString();
         return ValueChanged.InvokeAsync(Value);
+    }
+
+    // the focus stays on this field, so a screen reader would not hear an error that appears under it
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key != "Enter" || args.IsComposing || !OnEnter.HasDelegate)
+        {
+            return;
+        }
+
+        await OnEnter.InvokeAsync();
+        if (Error is not null)
+        {
+            Runner.Announce(Error);
+        }
     }
 }

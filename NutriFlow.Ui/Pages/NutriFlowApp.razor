@@ -1,0 +1,143 @@
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject ProfileState Profiles
+@inject ActionRunner Runner
+@inject IJSRuntime Js
+
+@* the whole app: the welcome screen without profiles, otherwise the shell with the sections of the current profile *@
+@if (_loadError is not null)
+{
+    <main class="nf-welcome nf-welcome--error" data-testid="startup-error">
+        <div class="nf-welcome__intro">
+            <h1 class="nf-title">Не удалось открыть данные профиля</h1>
+            <BodyText>@_loadError</BodyText>
+        </div>
+        <div class="nf-welcome__space"></div>
+        <div class="nf-welcome__actions">
+            <ActionButton Text="Повторить" TestId="startup-retry" OnClick="LoadAsync" />
+        </div>
+    </main>
+}
+else if (!_loaded)
+{
+    @* profiles.json is in memory already, this lasts a few milliseconds *@
+}
+else if (Profiles.Current is not { } profile)
+{
+    <WelcomeScreen OnStart="() => _creatingProfile = true" />
+}
+else
+{
+    <AppShell @ref="_shell" Title="@TitleText" ProfileName="@profile.Name" Selected="_tab" SelectedChanged="SelectTabAsync" OnProfile="ChooseProfileAsync">
+        <ChildContent>
+            @switch (_tab)
+            {
+                case ShellTab.Diary:
+                    <DiaryScreen @key="profile.Id" Profile="profile" Date="_date" DateChanged="date => _date = date"
+                                 OnAddFood="() => SelectTabAsync(ShellTab.Input)" />
+                    break;
+                case ShellTab.Settings:
+                    <SettingsScreen @key="profile.Id" Profile="profile" OnChooseProfile="ChooseProfileAsync" DeveloperTools="DeveloperTools" />
+                    break;
+                default:
+                    <PendingSection Tab="_tab" OnOpenDiary="() => SelectTabAsync(ShellTab.Diary)" />
+                    break;
+            }
+        </ChildContent>
+    </AppShell>
+}
+
+@if (_creatingProfile)
+{
+    <ProfileForm OnClose="() => _creatingProfile = false" />
+}
+
+@code {
+    private bool _loaded;
+    private string? _loadError;
+    private bool _creatingProfile;
+    private AppShell? _shell;
+    private Guid? _shownProfileId;
+    private bool _focusShell;
+    private ShellTab _tab = ShellTab.Diary;
+    private DateOnly _date = Today;
+
+    // host tools shown at the end of the settings, for example test data in development
+    [Parameter]
+    public RenderFragment<Guid>? DeveloperTools { get; set; }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private string TitleText => _tab switch
+    {
+        ShellTab.Products => "Продукты",
+        ShellTab.Input => "Запись еды",
+        ShellTab.Dishes => "Блюда",
+        ShellTab.Settings => "Настройки",
+        _ => "Дневник"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Profiles.Changed += OnProfileChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _loadError = null;
+            await Profiles.LoadAsync();
+            _loaded = true;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            _loadError = DiaryText.LoadFailed;
+        }
+    }
+
+    private async Task SelectTabAsync(ShellTab tab)
+    {
+        _tab = tab;
+        // every section starts at its top, as on the phone
+        await Js.InvokeVoidAsync("scrollTo", 0, 0);
+    }
+
+    private Task ChooseProfileAsync() => Runner.RunAsync(async () =>
+    {
+        ProfileChoices choices = new(await Profiles.ListAsync(), Profiles.Current?.Id);
+        string? choice = await Runner.ChooseAsync("Профили на этом устройстве", "Отмена", null, choices.Buttons);
+        if (choice == ProfileChoices.Create)
+        {
+            _creatingProfile = true;
+        }
+        else if (choices.Find(choice) is { } selected && selected.Id != Profiles.Current?.Id)
+        {
+            await Profiles.SelectAsync(selected.Id);
+        }
+    });
+
+    // the control that had the focus left with the old screen (the welcome start button, the profile row of the
+    // settings recreated for the new profile); the shell title takes it once the form is closed
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusShell && !_creatingProfile && _shell is not null)
+        {
+            _focusShell = false;
+            await _shell.FocusTitleAsync();
+        }
+    }
+
+    // another profile starts at today, like a fresh start of the phone app
+    private void OnProfileChanged()
+    {
+        _focusShell |= _loaded && Profiles.Current is not null && Profiles.Current.Id != _shownProfileId;
+        _shownProfileId = Profiles.Current?.Id;
+        _date = Today;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Profiles.Changed -= OnProfileChanged;
+}

@@ -1,0 +1,35 @@
+@implements IDisposable
+@inject IAppHost Host
+@inject ActionRunner Runner
+
+@* where the diary lives and what can erase it; backup and restore join this card in step 8 *@
+<Card TestId="settings-data">
+    <BodyText TestId="settings-storage-note">@Host.StorageNote</BodyText>
+    @if (_persisted == false)
+    {
+        @* installed apps usually get persistent storage, so installation is the way out where it is offered *@
+        <Notice TestId="settings-storage-volatile" Action="@(Host.CanInstall ? Install : null)">
+            Браузер может удалить данные при нехватке места.@(Host.CanInstall ? " Установите приложение, чтобы защитить их." : null)
+        </Notice>
+    }
+    else if (Host.CanInstall)
+    {
+        <ActionButton Text="Установить приложение" Secondary="true" TestId="settings-install" OnClick="() => AppInstall.RunAsync(Runner, Host)" />
+    }
+</Card>
+
+@code {
+    private bool? _persisted;
+
+    private RenderFragment Install => @<GhostButton Text="Установить приложение" TestId="settings-install" OnClick="() => AppInstall.RunAsync(Runner, Host)" />;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Host.Changed += OnHostChanged;
+        _persisted = await Host.IsStoragePersistentAsync();
+    }
+
+    private void OnHostChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Host.Changed -= OnHostChanged;
+}

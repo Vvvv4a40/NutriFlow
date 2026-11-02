@@ -1,24 +1,10 @@
 @using Microsoft.AspNetCore.Components.WebAssembly.Hosting
-@inject AppInfo Info
 @inject IWebAssemblyHostEnvironment Environment
 
-@if (Environment.IsDevelopment())
-{
-    <UiRoot>
-        <NutriFlow.Web.Diagnostics.ShellDemo />
-    </UiRoot>
-}
-else
-{
-    <main class="screen" data-testid="web-shell">
-        <Title>NutriFlow</Title>
-        <BodyText>Веб-версия запущена. Дневник, продукты и блюда появятся в следующих сборках.</BodyText>
-        @if (Info.IsTest)
-        {
-            <Card TestId="test-channel">
-                <Caption>Тестовая версия: данные с этого адреса не перенесутся в постоянную версию.</Caption>
-            </Card>
-        }
-        <Caption>@Info.VersionText</Caption>
-    </main>
+<UiRoot>
+    <NutriFlowApp DeveloperTools="@(Environment.IsDevelopment() ? _developerTools : null)" />
+</UiRoot>
+
+@code {
+    private readonly RenderFragment<Guid> _developerTools = profileId => @<DeveloperTools ProfileId="profileId" />;
 }

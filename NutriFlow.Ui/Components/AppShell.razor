@@ -7,7 +7,7 @@
 @* header with the section title and the profile avatar, the screen, the pinned action and the bottom navigation *@
 <div class="nf-shell">
     <header class="nf-shell__header">
-        <h1 class="nf-title nf-shell__title" data-testid="screen-title">@Title</h1>
+        <h1 class="nf-title nf-shell__title" tabindex="-1" data-testid="screen-title" @ref="_title">@Title</h1>
         @if (Runner.ShowsActivity)
         {
             <Spinner />
@@ -43,6 +43,7 @@
 
 @code {
     private BackLayer? _sectionLayer;
+    private ElementReference _title;
 
     [Parameter, EditorRequired]
     public string Title { get; set; } = "";
@@ -98,6 +99,9 @@
             await layer.RemoveAsync();
         }
     }
+
+    // for a shell that replaced the screen holding the focus, like the welcome screen after the first profile
+    public ValueTask FocusTitleAsync() => _title.FocusAsync();
 
     private Task SelectAsync(ShellTab tab) =>
         Runner.IsBusy || tab == Selected ? Task.CompletedTask : SelectedChanged.InvokeAsync(tab);

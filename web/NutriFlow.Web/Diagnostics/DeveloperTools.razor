@@ -1,0 +1,60 @@
+@* development only: diary entries before food logging arrives in step 6, and the component showcase in every theme *@
+@using NutriFlow.Web.Services
+@inject LocalMealClient Meals
+@inject WebProfileSettings Settings
+@inject ThemeManager Themes
+@inject ActionRunner Runner
+
+<SectionHeader Title="Для разработки" />
+<Card TestId="developer-tools">
+    <Caption>Видно только в режиме разработки.</Caption>
+    <ActionButton Text="Добавить тестовую запись" Secondary="true" TestId="dev-add-entry" OnClick="AddEntryAsync" />
+    @if (_added is not null)
+    {
+        <Caption TestId="dev-added">@_added</Caption>
+    }
+    <ActionButton Text="Открыть витрину компонентов" Secondary="true" TestId="dev-showcase" OnClick="() => _showcase = true" />
+</Card>
+
+@if (_showcase)
+{
+    <FormPage Title="Витрина компонентов" TestId="dev-showcase-form" OnClose="CloseShowcaseAsync">
+        <ComponentShowcase />
+    </FormPage>
+}
+
+@code {
+    private static readonly ProductResponse[] Samples =
+    [
+        Sample("Гречка отварная", 110m, 3.6m, 1.3m, 21.3m),
+        Sample("Куриная грудка", 165m, 31m, 3.6m, 0m),
+        Sample("Творог 5 %", 121m, 17.2m, 5m, 1.8m),
+        Sample("Овсянка на воде", 88m, 3m, 1.7m, 15m)
+    ];
+
+    private bool _showcase;
+    private string? _added;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    private static ProductResponse Sample(string name, decimal calories, decimal protein, decimal fat, decimal carbs) =>
+        new($"{name} (тест)", calories, protein, fat, carbs, "ManualInput", "Exact", "Ручной ввод", null, null);
+
+    // the same path as a manual portion on the phone: product, preview, confirmation
+    private Task AddEntryAsync() => Runner.RunAsync(async () =>
+    {
+        ProductResponse product = Samples[Random.Shared.Next(Samples.Length)];
+        await Meals.AddProductAsync(ProfileId, product);
+        MealSessionResponse session = await Meals.CreateManualMealAsync(ProfileId, product, 150m, DateOnly.FromDateTime(DateTime.Today));
+        await Meals.ConfirmAsync(ProfileId, session.Id, session.PreviewToken);
+        _added = $"Добавлено за сегодня: {product.Name}, 150 г.";
+    });
+
+    // the showcase switches themes freely, the profile keeps its own
+    private async Task CloseShowcaseAsync()
+    {
+        _showcase = false;
+        await Themes.ApplyAsync(await Settings.GetThemeAsync(ProfileId));
+    }
+}

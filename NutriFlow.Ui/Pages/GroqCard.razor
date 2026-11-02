@@ -1,0 +1,138 @@
+@inject IProfileSettings Settings
+@inject ActionRunner Runner
+
+@* the personal groq key and models of the profile (RenderSettingsAsync in MainPage.Settings.cs) *@
+@* the section heading «Распознавание» names the card, a region label would only repeat it *@
+<Card TestId="settings-groq">
+    <div class="nf-provider">
+        <IconTile Icon="AppIconKind.Sparkle" />
+        <span class="nf-provider__text">
+            <span class="nf-provider__title">
+                <span class="nf-text nf-text--strong">Groq</span>
+                @if (_loaded)
+                {
+                    <span data-testid="settings-key-status">
+                        <Badge Text="@(_hasKey ? "Подключено" : "Нет ключа")" Tone="@(_hasKey ? Tone.Success : Tone.Warning)" />
+                    </span>
+                }
+            </span>
+            <span class="nf-caption">Текст, фото этикеток и голос</span>
+        </span>
+    </div>
+    <hr class="nf-divider" />
+    @if (_loaded)
+    {
+        <Field @ref="_keyField" Label="@(_hasKey ? "Новый ключ Groq" : "Ключ Groq")" Password="true" Plain="true"
+               Placeholder="@(_hasKey ? "Вставьте новый ключ, чтобы заменить" : "gsk_…")" Error="@_keyError" TestId="settings-api-key"
+               Hint="@(_hasKey ? "Пустое поле оставит текущий ключ. Ключ хранится только в этом профиле." : "Ключ личный и хранится только в этом профиле. Текст, фото и аудио для распознавания отправляются в Groq.")"
+               @bind-Value="_key" @bind-Value:after="() => _keyError = null" />
+        <a class="nf-button nf-button--ghost nf-link" href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer"
+           data-testid="settings-key-console">Получить ключ на console.groq.com<span class="nf-visually-hidden">, откроется в браузере</span></a>
+        <Expander Title="Модели" TestId="settings-model-toggle" @bind-Expanded="_modelsOpen">
+            <Field @ref="_textField" Label="Модель для текста" Plain="true" Error="@_textError" TestId="settings-model-text"
+                   @bind-Value="_textModel" @bind-Value:after="() => _textError = null" />
+            <Field @ref="_visionField" Label="Модель для фото" Plain="true" Error="@_visionError" TestId="settings-model-photo"
+                   @bind-Value="_visionModel" @bind-Value:after="() => _visionError = null" />
+            <Field @ref="_speechField" Label="Модель для голоса" Plain="true" Error="@_speechError" TestId="settings-model-speech"
+                   @bind-Value="_speechModel" @bind-Value:after="() => _speechError = null" />
+        </Expander>
+        <ActionButton Text="@(_hasKey ? "Сохранить изменения" : "Подключить")" Secondary="_hasKey" TestId="settings-save" OnClick="SaveAsync" />
+        @if (_hasKey)
+        {
+            <GhostButton Text="Удалить ключ" Danger="true" Class="nf-groq__remove" TestId="settings-key-remove" OnClick="RemoveAsync" />
+        }
+    }
+</Card>
+
+@code {
+    private const string ModelRequired = "Введите название модели.";
+    private Field? _keyField;
+    private Field? _textField;
+    private Field? _visionField;
+    private Field? _speechField;
+    private bool _loaded;
+    private bool _hasKey;
+    private bool _modelsOpen;
+    private bool _focusKey;
+    private string? _key;
+    private string? _textModel;
+    private string? _visionModel;
+    private string? _speechModel;
+    private string? _keyError;
+    private string? _textError;
+    private string? _visionError;
+    private string? _speechError;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hasKey = await Settings.HasGroqAsync(ProfileId);
+        _textModel = await Settings.GetTextModelAsync(ProfileId);
+        _visionModel = await Settings.GetVisionModelAsync(ProfileId);
+        _speechModel = await Settings.GetSpeechModelAsync(ProfileId);
+        _loaded = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        string key = (_key ?? "").Trim();
+        _keyError = !_hasKey && key.Length == 0 ? "Вставьте личный ключ Groq." : null;
+        _textError = string.IsNullOrWhiteSpace(_textModel) ? ModelRequired : null;
+        _visionError = string.IsNullOrWhiteSpace(_visionModel) ? ModelRequired : null;
+        _speechError = string.IsNullOrWhiteSpace(_speechModel) ? ModelRequired : null;
+        if (_keyError is not null || _textError is not null || _visionError is not null || _speechError is not null)
+        {
+            await FocusFirstErrorAsync();
+            return;
+        }
+
+        await Runner.RunAsync(async () =>
+        {
+            await Settings.SaveGroqAsync(ProfileId, key, _textModel!.Trim(), _visionModel!.Trim(), _speechModel!.Trim());
+            _key = null;
+            _hasKey = true;
+            StateHasChanged();
+            await Runner.AlertAsync("Сохранено", "Настройки применены к этому профилю.", "Готово");
+        });
+    }
+
+    private Task RemoveAsync() => Runner.RunAsync(async () =>
+    {
+        if (await Runner.ConfirmAsync("Удалить ключ?",
+                "Распознавание текста, фото и голоса в этом профиле перестанет работать, пока не добавите ключ снова.",
+                "Удалить", "Оставить", destructive: true))
+        {
+            await Settings.RemoveGroqAsync(ProfileId);
+            _hasKey = false;
+            _focusKey = true;
+        }
+    });
+
+    // «Удалить ключ» that held the focus is gone with the key, the next step is to paste a new one
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusKey && _keyField is not null)
+        {
+            _focusKey = false;
+            await _keyField.FocusAsync();
+        }
+    }
+
+    private async Task FocusFirstErrorAsync()
+    {
+        // a model error is inside the collapsed details, which render their fields only when open
+        _modelsOpen |= _textError is not null || _visionError is not null || _speechError is not null;
+        StateHasChanged();
+        await Task.Yield();
+        Field? field = _keyError is not null ? _keyField
+            : _textError is not null ? _textField
+            : _visionError is not null ? _visionField
+            : _speechField;
+        if (field is not null)
+        {
+            await field.FocusAsync();
+        }
+    }
+}

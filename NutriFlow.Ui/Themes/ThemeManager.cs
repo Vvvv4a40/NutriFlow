@@ -16,7 +16,7 @@ public sealed class ThemeManager(IJSRuntime js)
     {
         ThemePalette theme = ThemePalette.Find(id);
         await (await GetModuleAsync()).InvokeVoidAsync("applyTheme", theme.Id, theme.CssVariables(), theme.Background,
-            theme.NavBackground == theme.Background);
+            theme.NavBackground == theme.Background, theme.IsDark);
         if (theme != Current)
         {
             Current = theme;

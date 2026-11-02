@@ -14,6 +14,24 @@ public sealed class NutritionTextTests
         Assert.Equal("13", NutritionText.MacroAmount(12.5m));
     }
 
+    [Theory]
+    [InlineData("12,5", false, true, 12.5)]
+    [InlineData(" 150.25 ", true, true, 150.25)]
+    [InlineData("0", false, true, 0)]
+    [InlineData("0", true, false, 0)]
+    [InlineData("-3", false, false, 0)]
+    [InlineData("", false, false, 0)]
+    [InlineData("1 200", false, false, 0)]
+    [InlineData("сто", true, false, 0)]
+    public void FieldNumbersTakeACommaOrADot(string text, bool positive, bool valid, double expected)
+    {
+        Assert.Equal(valid, NutritionText.TryParseNumber(text, positive, out decimal number));
+        if (valid)
+        {
+            Assert.Equal((decimal)expected, number);
+        }
+    }
+
     [Fact]
     public void ShortAndSpokenNutritionMatchTheAndroidTexts()
     {

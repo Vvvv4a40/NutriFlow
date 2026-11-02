@@ -12,8 +12,26 @@ public static class UiErrors
         JSException when exception.Message.Contains("QuotaExceededError", StringComparison.Ordinal) =>
             "Не удалось сохранить: в браузере закончилось место. Освободите место на устройстве и повторите.",
         IOException => "Не удалось прочитать или сохранить файл. Проверьте свободное место и повторите.",
-        ArgumentException or InvalidOperationException when exception.Message.Any(c => c is >= 'А' and <= 'я') => exception.Message,
+        ArgumentException argument when IsRussian(argument.Message) => WithoutParameterName(argument),
+        InvalidOperationException when IsRussian(exception.Message) => exception.Message,
         // the dialog title already says «Не удалось выполнить действие»
         _ => "Проверьте введённые данные и повторите."
     };
+
+    private static bool IsRussian(string message) => message.Any(c => c is >= 'А' and <= 'я');
+
+    // the message of ArgumentException ends with the parameter name, as «(Parameter 'name')» or, in a trimmed
+    // browser build, «Arg_ParamName_Name, name»; the same suffix built for an empty message finds either form
+    private static string WithoutParameterName(ArgumentException exception)
+    {
+        if (exception.ParamName is null)
+        {
+            return exception.Message;
+        }
+
+        string suffix = new ArgumentException("", exception.ParamName).Message;
+        return exception.Message.EndsWith(suffix, StringComparison.Ordinal)
+            ? exception.Message[..^suffix.Length]
+            : exception.Message;
+    }
 }

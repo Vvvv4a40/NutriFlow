@@ -1,0 +1,99 @@
+@* the arc with what is left in its centre, eaten and goal tiles, then the macro bars (DiarySummary in MainPage.Diary.cs) *@
+<section class="nf-panel nf-diary-summary" aria-label="Итоги дня" data-testid="diary-summary">
+    <div class="nf-diary-hero">
+        <NutritionArc Consumed="Consumed" Goal="_goal" />
+        <div class="nf-diary-hero__center">
+            <p class="nf-diary-hero__value @(_headline.Exceeded ? "nf-diary-hero__value--exceeded" : null)"
+               data-testid="@(_goal is null ? "diary-calories" : "diary-headline")">
+                <span aria-hidden="true">@_headline.Value</span>
+                <span class="nf-visually-hidden">@_headline.Spoken</span>
+            </p>
+            <p class="nf-caption nf-diary-hero__caption" aria-hidden="true">@_headline.Caption</p>
+        </div>
+    </div>
+
+    <div class="nf-diary-stats">
+        @if (_goal is not null)
+        {
+            <div class="nf-stat" data-testid="diary-calories">
+                <span class="nf-overline" aria-hidden="true">Съедено</span>
+                <span class="nf-stat__amount" aria-hidden="true">
+                    <span class="nf-stat__value">@NutritionText.Kilocalories(Consumed.Calories)</span><span class="nf-caption">ккал</span>
+                </span>
+                <span class="nf-visually-hidden">Съедено @NutritionText.Amount(Consumed.Calories) килокалорий</span>
+            </div>
+        }
+        @* one button in both states: after the first goal is saved the focus comes back to the same element.
+           without a goal the centre of the arc already shows what was eaten, the goal prompt takes the whole row *@
+        <Pressable Class="@(_goal is null ? "nf-stat nf-stat--action nf-stat--wide" : "nf-stat nf-stat--action")" TestId="diary-goal"
+                   OnClick="OnEditGoal" Hint="Калории и доли белков, жиров и углеводов"
+                   Description="@(_goal is { } target ? $"Цель {NutritionText.Amount(target.Calories)} килокалорий. Изменить цель" : "Сколько осталось? Задать цель")">
+            <span class="nf-stat__text">
+                @if (_goal is { } current)
+                {
+                    <span class="nf-overline">Цель</span>
+                    <span class="nf-stat__amount">
+                        <span class="nf-stat__value">@NutritionText.Kilocalories(current.Calories)</span><span class="nf-caption">ккал</span>
+                    </span>
+                }
+                else
+                {
+                    <span class="nf-overline">Сколько осталось?</span>
+                    <span class="nf-stat__value nf-stat__value--prompt">Задать цель</span>
+                }
+            </span>
+            <AppIcon Kind="@(_goal is null ? AppIconKind.Target : AppIconKind.Edit)" Size="18" Class="nf-stat__icon" />
+        </Pressable>
+    </div>
+
+    <hr class="nf-divider" />
+
+    <div class="nf-diary-macros">
+        @Macro("Белки", Consumed.ProteinGrams, _goal?.ProteinGrams, Tone.Protein, "protein")
+        @Macro("Жиры", Consumed.FatGrams, _goal?.FatGrams, Tone.Fat, "fat")
+        @Macro("Углеводы", Consumed.CarbohydratesGrams, _goal?.CarbohydratesGrams, Tone.Carbs, "carbs")
+    </div>
+</section>
+
+@code {
+    private NutritionResponse? _goal;
+    private DiaryHeadline _headline = DiaryText.Headline(new NutritionResponse(0, 0, 0, 0), null);
+
+    [Parameter, EditorRequired]
+    public NutritionResponse Consumed { get; set; } = new(0, 0, 0, 0);
+
+    [Parameter]
+    public NutritionResponse? Goal { get; set; }
+
+    [Parameter]
+    public EventCallback OnEditGoal { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        _goal = DiaryText.EffectiveGoal(Goal);
+        _headline = DiaryText.Headline(Consumed, Goal);
+    }
+
+    private static RenderFragment Macro(string name, decimal consumed, decimal? goal, Tone tone, string id) => __builder =>
+    {
+        MacroProgressText text = DiaryText.Macro(name, consumed, goal);
+        <div class="nf-macro-progress" data-testid="@($"diary-{id}")">
+            <div class="nf-macro-progress__caption">
+                <span class="nf-dot @PressableBase.ToneClass(tone)" aria-hidden="true"></span>
+                <span class="nf-text" aria-hidden="true">@name</span>
+                <span class="nf-macro-progress__amount" aria-hidden="true">
+                    <span class="nf-macro-progress__eaten">@text.Amount</span><span class="nf-macro-progress__goal">@text.Goal</span>
+                    @if (text.Excess is not null)
+                    {
+                        <span class="nf-macro-progress__excess">@text.Excess</span>
+                    }
+                </span>
+                <span class="nf-visually-hidden">@text.Description</span>
+            </div>
+            @if (goal is not null)
+            {
+                <ProgressBar Value="consumed" Maximum="goal" Tone="tone" />
+            }
+        </div>
+    };
+}

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace NutriFlow.Ui.Themes;
 
 // the eight themes of the android app (mobile/NutriFlow.Mobile/Theme.cs, approved by the founder on 30.10.2026);
@@ -122,6 +124,20 @@ public sealed class ThemePalette(string id, string name, string swatchBase, stri
     public required string DateBackground { get; init; }
     public required string DateForeground { get; init; }
     public required string DatePressed { get; init; }
+
+    // native controls follow it: the empty track of a slider, the date picker, scroll bars (Theme.IsDark on android)
+    public bool IsDark => Luminance(Background) < 0.179;
+
+    private static double Luminance(string hex)
+    {
+        static double Channel(string value)
+        {
+            double channel = int.Parse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture) / 255d;
+            return channel <= 0.03928 ? channel / 12.92 : Math.Pow((channel + 0.055) / 1.055, 2.4);
+        }
+
+        return 0.2126 * Channel(hex[1..3]) + 0.7152 * Channel(hex[3..5]) + 0.0722 * Channel(hex[5..7]);
+    }
 
     // css custom properties of the theme, listed by hand because the trimmer removes what reflection would need
     public IReadOnlyDictionary<string, string> CssVariables() => new Dictionary<string, string>

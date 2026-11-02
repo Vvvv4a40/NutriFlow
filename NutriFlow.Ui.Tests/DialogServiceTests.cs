@@ -74,6 +74,10 @@ public sealed class DialogServiceTests
         { new JSException("QuotaExceededError: The quota has been exceeded."), "Не удалось сохранить: в браузере закончилось место. Освободите место на устройстве и повторите." },
         { new IOException("disk"), "Не удалось прочитать или сохранить файл. Проверьте свободное место и повторите." },
         { new ArgumentException("Вес: введите положительное число."), "Вес: введите положительное число." },
+        // LocalProfileStore passes nameof(name); the user should not see «(Parameter 'name')»
+        { new ArgumentException("Профиль с таким названием уже существует.", "name"), "Профиль с таким названием уже существует." },
+        { new InvalidOperationException("На этом устройстве уже создано 30 профилей."), "На этом устройстве уже создано 30 профилей." },
+        { new ArgumentNullException("name"), "Проверьте введённые данные и повторите." },
         { new InvalidOperationException("Sequence contains no elements"), "Проверьте введённые данные и повторите." }
     };
 }

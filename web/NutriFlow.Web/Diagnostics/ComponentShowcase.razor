@@ -50,6 +50,8 @@
     <Card Label="Поля">
         <Field Label="Название" Placeholder="Например, творог 5 %" @bind-Value="_name" />
         <Field Label="Вес, г" Number="true" Hint="Можно с запятой: 12,5" @bind-Value="_weight" />
+        <Field Label="Вес порции, г" Number="true" Value="0" Error="Введите вес в граммах больше нуля, например 150." />
+        <Notice>Тестовая версия: данные с этого адреса не перенесутся в постоянную версию.</Notice>
         <TextArea Placeholder="Опишите, что съели" @bind-Value="_text" />
         <PickerField Label="Продукт" Options="_products" Placeholder="Выберите продукт" @bind-Value="_product" />
         <SwitchRow Text="Значения сверены с этикеткой" Hint="Без отметки данные считаются оценкой" @bind-Checked="_checked" />

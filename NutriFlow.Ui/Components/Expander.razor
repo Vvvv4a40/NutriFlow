@@ -1,12 +1,12 @@
 @* details on demand; the expanded state is announced through aria-expanded *@
 <div class="nf-expander @Class">
-    <button type="button" class="nf-expander__toggle" aria-expanded="@(_open ? "true" : "false")" aria-controls="@_id"
-            data-testid="@TestId" @onclick="() => _open = !_open">
+    <button type="button" class="nf-expander__toggle" aria-expanded="@(Expanded ? "true" : "false")" aria-controls="@_id"
+            data-testid="@TestId" @onclick="ToggleAsync">
         <span>@Title</span>
-        <AppIcon Kind="AppIconKind.Expand" Size="18" Class="@(_open ? "nf-expander__chevron nf-expander__chevron--open" : "nf-expander__chevron")" />
+        <AppIcon Kind="AppIconKind.Expand" Size="18" Class="@(Expanded ? "nf-expander__chevron nf-expander__chevron--open" : "nf-expander__chevron")" />
     </button>
-    <div id="@_id" class="nf-expander__content" hidden="@(!_open)">
-        @if (_open)
+    <div id="@_id" class="nf-expander__content" hidden="@(!Expanded)">
+        @if (Expanded)
         {
             @ChildContent
         }
@@ -15,7 +15,6 @@
 
 @code {
     private readonly string _id = "details-" + Guid.NewGuid().ToString("N")[..8];
-    private bool _open;
 
     [Parameter, EditorRequired]
     public string Title { get; set; } = "";
@@ -23,9 +22,22 @@
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 
+    // bound by a form that has to open the details itself, for example to show an error in a hidden field
+    [Parameter]
+    public bool Expanded { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ExpandedChanged { get; set; }
+
     [Parameter]
     public string? TestId { get; set; }
 
     [Parameter]
     public string? Class { get; set; }
+
+    private Task ToggleAsync()
+    {
+        Expanded = !Expanded;
+        return ExpandedChanged.InvokeAsync(Expanded);
+    }
 }

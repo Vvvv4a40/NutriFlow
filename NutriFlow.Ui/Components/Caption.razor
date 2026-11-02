@@ -1,4 +1,4 @@
-<p class="nf-caption @(Tone is { } tone ? PressableBase.ToneClass(tone) : null) @Class">@ChildContent</p>
+<p class="nf-caption @(Tone is { } tone ? PressableBase.ToneClass(tone) : null) @Class" data-testid="@TestId">@ChildContent</p>
 
 @code {
     [Parameter]
@@ -9,4 +9,7 @@
 
     [Parameter]
     public string? Class { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
 }

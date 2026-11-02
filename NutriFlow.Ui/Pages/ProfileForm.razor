@@ -1,0 +1,56 @@
+@inject ProfileState Profiles
+@inject ActionRunner Runner
+
+@* a new local profile (CreateProfilePageAsync in MainPage.xaml.cs); it becomes the current one *@
+<FormPage Title="Новый профиль" TestId="profile-form" OnClose="OnClose">
+    <ChildContent>
+        <h2 class="nf-title">Как вас зовут?</h2>
+        <BodyText Muted="true">Имя видно только вам и помогает различать профили на этом устройстве.</BodyText>
+        <Field @ref="_field" Label="Имя" MaxLength="80" EnterKeyHint="done" Error="@_error" TestId="profile-name"
+               @bind-Value="_name" @bind-Value:after="() => _error = null" OnEnter="CreateAsync" />
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Продолжить" TestId="profile-create" OnClick="CreateAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private Field? _field;
+    private string? _name;
+    private string? _error;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private async Task CreateAsync()
+    {
+        string name = (_name ?? "").Trim();
+        string? rejected = name.Length == 0 ? "Введите имя." : null;
+        if (rejected is null)
+        {
+            await Runner.RunAsync(async () =>
+            {
+                try
+                {
+                    await Profiles.CreateAsync(name);
+                }
+                // a duplicate or too long name belongs to the field, not to a dialog
+                catch (ArgumentException exception)
+                {
+                    rejected = UiErrors.Describe(exception);
+                    return;
+                }
+
+                await OnClose.InvokeAsync();
+            });
+        }
+
+        if (rejected is not null)
+        {
+            _error = rejected;
+            StateHasChanged();
+            await Task.Yield();
+            await _field!.FocusAsync();
+        }
+    }
+}

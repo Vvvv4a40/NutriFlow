@@ -1,11 +1,12 @@
 using Microsoft.JSInterop;
 using NutriFlow.Mobile.Core;
+using NutriFlow.Ui.Hosting;
 
 namespace NutriFlow.Web.Services;
 
 // the browser counterpart of ProfileSettings in NutriFlow.Mobile: same keys and defaults, kept in localStorage.
 // The Groq key is stored in plain localStorage too; the strict csp without third-party scripts is its protection.
-public sealed class WebProfileSettings(IJSRuntime js)
+public sealed class WebProfileSettings(IJSRuntime js) : IProfileSettings
 {
     public const string DefaultTheme = "terracotta";
     private static readonly GroqSettings Defaults = new("default");

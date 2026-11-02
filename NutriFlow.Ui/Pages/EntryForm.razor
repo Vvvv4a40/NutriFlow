@@ -1,0 +1,64 @@
+@using NutriFlow.Domain
+@inject LocalMealClient Meals
+@inject ActionRunner Runner
+
+@* a new weight for a diary entry; nutrition is recalculated from the confirmed snapshot (EditEntryPageAsync on android) *@
+<FormPage Title="Изменить запись" TestId="entry-form" OnClose="OnClose">
+    <ChildContent>
+        <Headline>@Entry.Name</Headline>
+        <NutritionBlock Caption="Сейчас" Value="Entry.Nutrition" />
+        <Field @ref="_field" Label="Вес порции, г" Number="true" EnterKeyHint="done" Error="@_error" TestId="entry-weight"
+               Hint="КБЖУ пересчитаются по сохранённому составу." @bind-Value="_weight" @bind-Value:after="() => _error = null"
+               OnEnter="SaveAsync" />
+        <SwitchRow Text="Новый вес указан примерно" TestId="entry-estimated" @bind-Checked="_estimated" @bind-Checked:after="() => _qualityChanged = true" />
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Сохранить" TestId="entry-save" OnClick="SaveAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private Field? _field;
+    private string? _weight;
+    private string? _error;
+    private bool _estimated;
+    private bool _qualityChanged;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    [Parameter, EditorRequired]
+    public MealEntryResponse Entry { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback OnSaved { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override void OnInitialized() => _weight = NutritionText.Amount(Entry.WeightInGrams);
+
+    private async Task SaveAsync()
+    {
+        if (!NutritionText.TryParseNumber(_weight, positive: true, out decimal weight))
+        {
+            _error = "Введите вес в граммах больше нуля, например 150.";
+            StateHasChanged();
+            await Task.Yield();
+            await _field!.FocusAsync();
+            return;
+        }
+
+        await Runner.RunAsync(async () =>
+        {
+            if (weight != Entry.WeightInGrams || _qualityChanged)
+            {
+                await Meals.UpdateEntryAsync(ProfileId, Entry.Id, Entry.Revision, weight,
+                    _estimated ? DataQuality.Estimated : DataQuality.Exact);
+                await OnSaved.InvokeAsync();
+            }
+
+            await OnClose.InvokeAsync();
+        });
+    }
+}
