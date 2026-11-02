@@ -88,19 +88,30 @@ jobs:
       - name: Audit vulnerable packages
         run: dotnet list NutriFlow.sln package --include-transitive --vulnerable --no-restore
 
-      # the web lock file pins packages that follow the sdk patch (ILLink.Tasks, WebAssembly.Pack)
+      - name: Build Docker image
+        run: docker build --pull --tag nutriflow:ci .
+
+      # the web lock file pins packages that follow the sdk patch (ILLink.Tasks, WebAssembly.Pack);
+      # these steps rewrite global.json, so they stay after everything that reads it, the docker build included
       - name: Set up .NET SDK for the web app
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.401'
 
+      - name: Select exact SDK for the web app
+        run: |
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync("global.json", "utf8"));
+            config.sdk.version = "10.0.401";
+            config.sdk.rollForward = "disable";
+            writeFileSync("global.json", JSON.stringify(config, null, 2) + "\n");
+          '
+          test "$(dotnet --version)" = '10.0.401'
+
       - name: Verify web app
         run: |
-          test "$(dotnet --version)" = '10.0.401'
           dotnet restore web/NutriFlow.Web.slnx --locked-mode --warnaserror
           dotnet test web/NutriFlow.Web.slnx --configuration Release --no-restore --warnaserror
           dotnet format web/NutriFlow.Web.slnx --no-restore --verify-no-changes
           dotnet list web/NutriFlow.Web.slnx package --include-transitive --vulnerable --no-restore
-
-      - name: Build Docker image
-        run: docker build --pull --tag nutriflow:ci .
