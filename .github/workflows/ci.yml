@@ -91,10 +91,13 @@ jobs:
       - name: Build Docker image
         run: docker build --pull --tag nutriflow:ci .
 
-      # the web lock file pins packages that follow the sdk patch (ILLink.Tasks, WebAssembly.Pack);
+      # the web lock file pins packages that follow the sdk (ILLink.Tasks, WebAssembly.Pack); workload manifests that
+      # the runner image installed for a newer sdk would raise WebAssembly.Pack, so this sdk goes to a clean folder.
       # these steps rewrite global.json, so they stay after everything that reads it, the docker build included
       - name: Set up .NET SDK for the web app
         uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-web
         with:
           dotnet-version: '10.0.401'
 

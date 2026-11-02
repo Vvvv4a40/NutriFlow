@@ -38,9 +38,12 @@ jobs:
         with:
           persist-credentials: false
 
-      # the web lock file pins packages that follow the sdk patch (ILLink.Tasks, WebAssembly.Pack)
+      # the web lock file pins packages that follow the sdk (ILLink.Tasks, WebAssembly.Pack); workload manifests that
+      # the runner image installed for a newer sdk would raise WebAssembly.Pack, so this sdk goes to a clean folder
       - name: Set up exact .NET SDK
         uses: actions/setup-dotnet@v6
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet-web
         with:
           dotnet-version: '10.0.401'
 
