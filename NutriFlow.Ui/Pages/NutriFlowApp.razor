@@ -45,14 +45,20 @@ else
                     <DiaryScreen @key="profile.Id" Profile="profile" Date="_date" DateChanged="date => _date = date"
                                  OnAddFood="() => SelectTabAsync(ShellTab.Input)" />
                     break;
+                case ShellTab.Products:
+                    <ProductsScreen @key="profile.Id" Profile="profile" Date="_date" OnStarted="OpenStartedAsync" />
+                    break;
                 case ShellTab.Input:
-                    <CaptureScreen @key="profile.Id" Profile="profile" Date="_date" OnOpenSettings="() => SelectTabAsync(ShellTab.Settings)" />
+                    <CaptureScreen @key="profile.Id" Profile="profile" Date="_date" FocusPreview="_focusPreview"
+                                   OnOpenSettings="() => SelectTabAsync(ShellTab.Settings)"
+                                   OnOpenProducts="() => SelectTabAsync(ShellTab.Products)" OnOpenDishes="() => SelectTabAsync(ShellTab.Dishes)" />
+                    break;
+                case ShellTab.Dishes:
+                    <DishesScreen @key="profile.Id" Profile="profile" Date="_date" OnStarted="OpenStartedAsync"
+                                  OnOpenInput="() => SelectTabAsync(ShellTab.Input)" />
                     break;
                 case ShellTab.Settings:
                     <SettingsScreen @key="profile.Id" Profile="profile" OnChooseProfile="ChooseProfileAsync" DeveloperTools="DeveloperTools" />
-                    break;
-                default:
-                    <PendingSection Tab="_tab" OnOpenDiary="() => SelectTabAsync(ShellTab.Diary)" />
                     break;
             }
         </ChildContent>
@@ -72,6 +78,7 @@ else
     private Guid? _shownProfileId;
     private bool _focusShell;
     private string? _announcement;
+    private bool _focusPreview;
     private ShellTab _tab = ShellTab.Diary;
     private DateOnly _date = Today;
 
@@ -144,7 +151,15 @@ else
         }
     });
 
-    // the diary with the new entry is already on screen, so only a dish or a problem with the saved input needs a dialog
+    // a calculation made in the catalog or the dishes: the food input shows it for the confirmation
+    private async Task OpenStartedAsync()
+    {
+        _focusPreview = true;
+        await SelectTabAsync(ShellTab.Input);
+    }
+
+    // the diary with the new entry or the dishes with the new dish are already on screen,
+    // so only a problem with the saved input needs a dialog
     private async Task OnConfirmedAsync(ConfirmMealSessionResponse result)
     {
         if (result.SavedDish is null)
@@ -155,20 +170,26 @@ else
         await SelectTabAsync(result.SavedDish is null ? ShellTab.Diary : ShellTab.Dishes);
         _focusShell = true;
         StateHasChanged();
-        if (result.SavedDish is null && Capture.DraftProblem is null)
+        string message = result.SavedDish is { } dish ? $"Блюдо «{dish.Name}» сохранено" : "Запись добавлена в дневник";
+        if (Capture.DraftProblem is { } problem)
         {
-            _announcement = "Запись добавлена в дневник";
+            await Runner.AlertAsync("Сохранено", $"{message}. {problem}", "Готово");
             return;
         }
 
-        string message = result.SavedDish is null ? "Запись добавлена в дневник." : "Блюдо сохранено в профиле. Порции из него можно будет записывать в дневник со следующей версии.";
-        await Runner.AlertAsync("Сохранено", Capture.DraftProblem is { } problem ? $"{message} {problem}" : message, "Готово");
+        _announcement = message;
     }
 
     // the control that had the focus left with the old screen (the welcome start button, the profile row of the
     // settings recreated for the new profile); the shell title takes it once the form is closed
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // the input screen took the flag when it was created
+        if (_focusPreview && _tab == ShellTab.Input)
+        {
+            _focusPreview = false;
+        }
+
         if (_focusShell && !_creatingProfile && _shell is not null)
         {
             _focusShell = false;

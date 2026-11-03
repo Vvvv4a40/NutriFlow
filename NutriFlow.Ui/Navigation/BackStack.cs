@@ -50,10 +50,11 @@ public sealed class BackStack : IAsyncDisposable
     }
 
     // closesWhileBusy: a dialog shown by a running action can be dismissed, a form under a running action cannot
-    public async Task<BackLayer> PushAsync(Func<Task> onBack, bool closesWhileBusy = false)
+    // canLeave: a layer with unsaved work asks first; false keeps it open
+    public async Task<BackLayer> PushAsync(Func<Task> onBack, bool closesWhileBusy = false, Func<Task<bool>>? canLeave = null)
     {
         ArgumentNullException.ThrowIfNull(onBack);
-        BackLayer layer = new(this, onBack, closesWhileBusy);
+        BackLayer layer = new(this, onBack, closesWhileBusy, canLeave);
         _layers.Add(layer);
         await WaitForStepAsync();
         await _pushEntry();
@@ -131,7 +132,15 @@ public sealed class BackStack : IAsyncDisposable
             return;
         }
 
-        _layers.RemoveAt(_layers.Count - 1);
+        if (top.CanLeave is not null && !await top.CanLeave())
+        {
+            // the question was a dialog layer of its own; its entry has to be gone before this one comes back
+            await WaitForStepAsync();
+            await _pushEntry();
+            return;
+        }
+
+        _layers.Remove(top);
         await top.OnBack();
     }
 
@@ -185,12 +194,15 @@ public sealed class BackLayer
 {
     private readonly BackStack _stack;
 
-    internal BackLayer(BackStack stack, Func<Task> onBack, bool closesWhileBusy)
+    internal BackLayer(BackStack stack, Func<Task> onBack, bool closesWhileBusy, Func<Task<bool>>? canLeave)
     {
         _stack = stack;
         OnBack = onBack;
         ClosesWhileBusy = closesWhileBusy;
+        CanLeave = canLeave;
     }
+
+    internal Func<Task<bool>>? CanLeave { get; }
 
     internal Func<Task> OnBack { get; }
 

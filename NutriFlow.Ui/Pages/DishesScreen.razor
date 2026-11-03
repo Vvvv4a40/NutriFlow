@@ -1,0 +1,121 @@
+@using NutriFlow.Domain
+@inject LocalMealClient Meals
+@inject CaptureState Capture
+@inject ActionRunner Runner
+
+@* saved dishes: build one from products or describe it, a portion of a saved one (RenderDishesAsync in MainPage.Dishes.cs) *@
+<SectionHeader Title="Добавить блюдо" />
+<div class="nf-methods">
+    <Pressable Class="nf-method" Description="Собрать блюдо" Hint="Из продуктов каталога и готового веса" TestId="dish-create-manual"
+               OnClick="() => _building = true">
+        <IconTile Icon="AppIconKind.Dishes" />
+        <span class="nf-method__title">Собрать блюдо</span>
+    </Pressable>
+    <Pressable Class="nf-method" Description="Описать словами" Hint="Ингредиенты и готовый вес текстом или голосом"
+               TestId="dish-create-text" OnClick="DescribeAsync">
+        <IconTile Icon="AppIconKind.Sparkle" />
+        <span class="nf-method__title">Описать словами</span>
+    </Pressable>
+</div>
+
+@if (_loadError is not null)
+{
+    <div role="alert">
+        <EmptyState Icon="AppIconKind.Warning" Title="Не удалось открыть блюда" Message="@_loadError" TestId="dish-error">
+            <Action><ActionButton Text="Повторить" TestId="dish-retry" OnClick="LoadAsync" /></Action>
+        </EmptyState>
+    </div>
+}
+else if (_dishes is { Count: 0 })
+{
+    <EmptyState Icon="AppIconKind.Dishes" Title="Нет блюд" TestId="dish-catalog-empty"
+                Message="Сохраните блюдо, которое готовите часто: состав и готовый вес посчитаются один раз, а порции добавляются в пару касаний." />
+}
+else if (_dishes is { } dishes)
+{
+    <SectionHeader Title="Мои блюда" Detail="@CatalogText.Dishes(dishes.Count)" DetailTestId="dish-results-count" />
+    <RowList TestId="dish-results">
+        @foreach (SavedDishResponse dish in dishes)
+        {
+            <Row @key="dish.Id" Title="@dish.Name" Trailing="@CatalogText.Per100Calories(dish.NutritionPer100Grams.Calories, dish.NutritionQuality)"
+                 TrailingCaption="ккал / 100 г" Description="@CatalogText.DishDescription(dish)" Hint="Состав и порция"
+                 TestId="saved-dish" OnClick="() => OpenAsync(dish)">
+                <SubtitleContent>
+                    <MacroLine Protein="dish.NutritionPer100Grams.ProteinGrams" Fat="dish.NutritionPer100Grams.FatGrams"
+                               Carbs="dish.NutritionPer100Grams.CarbohydratesGrams" />
+                </SubtitleContent>
+            </Row>
+        }
+    </RowList>
+}
+
+@if (_open is { } detail)
+{
+    <DishPortionForm ProfileId="Profile.Id" Detail="detail" Date="Date" OnStarted="OnStarted" OnClose="() => _open = null" />
+}
+
+@if (_building)
+{
+    <DishBuilderForm ProfileId="Profile.Id" Date="Date" OnStarted="OnStarted" OnClose="() => _building = false" />
+}
+
+@code {
+    private IReadOnlyList<SavedDishResponse>? _dishes;
+    private string? _loadError;
+    private SavedDishDetailResponse? _open;
+    private bool _building;
+
+    [Parameter, EditorRequired]
+    public LocalProfile Profile { get; set; } = null!;
+
+    // the day shown in the diary; a portion goes there
+    [Parameter]
+    public DateOnly Date { get; set; }
+
+    // a calculation is ready: the host opens the food input with it
+    [Parameter]
+    public EventCallback OnStarted { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenInput { get; set; }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loadError = null;
+        try
+        {
+            _dishes = await Meals.GetSavedDishesAsync(Profile.Id);
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            _loadError = DiaryText.LoadFailed;
+        }
+    }
+
+    // the composition is read once the dish is chosen, as on android
+    private Task OpenAsync(SavedDishResponse dish) => Runner.RunAsync(async () =>
+    {
+        _open = await Meals.FindSavedDishAsync(Profile.Id, dish.Id)
+            ?? throw new InvalidOperationException("Блюдо не найдено. Откройте раздел «Блюда» заново.");
+    });
+
+    // a described dish is the food input in the dish mode; an unfinished record comes first
+    private Task DescribeAsync() => Runner.RunAsync(async () =>
+    {
+        await Capture.LoadAsync(Profile.Id);
+        if (Capture.Blocked || Capture.Session is not null || !string.IsNullOrWhiteSpace(Capture.Text))
+        {
+            await Runner.AlertAsync("Сначала завершите текущую запись",
+                "Открою её: подтвердите или начните заново, затем опишите блюдо.", "Понятно");
+        }
+        else
+        {
+            Capture.SetPurpose(MealSessionPurpose.CreateDish);
+        }
+
+        await OnOpenInput.InvokeAsync();
+    });
+}

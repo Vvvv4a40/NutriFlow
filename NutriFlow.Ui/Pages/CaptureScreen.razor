@@ -21,7 +21,8 @@ else
 {
     @if (Capture.Session is { } session)
     {
-        <SessionPreview @ref="_preview" Session="session" OnAddProduct="name => _newProduct = name" OnAnswer="FocusEditorAsync" />
+        <SessionPreview @ref="_preview" Session="session" OnAddProduct="name => _newProduct = name" OnAnswer="FocusEditorAsync"
+                        OnRefresh="RefreshAsync" />
     }
 
     @if (Capture.Blocked)
@@ -56,7 +57,7 @@ else
         @if (!_hasGroq)
         {
             <Notice Icon="AppIconKind.Key" TestId="input-key-notice">
-                <ChildContent>Чтобы разобрать описание, добавьте личный ключ Groq в настройках профиля.</ChildContent>
+                <ChildContent>@CaptureText.NoKey</ChildContent>
                 <Action><GhostButton Text="Открыть настройки" TestId="input-key-settings" OnClick="OnOpenSettings" /></Action>
             </Notice>
         }
@@ -88,16 +89,41 @@ else
                           ProgressKey="capture-submit" TestId="input-submit" OnClick="SubmitAsync" />
         </div>
 
-        @if (Capture.Session is not null)
+        @if (Capture.Session is null)
+        {
+            @* the manual ways need no Groq: a catalog product, a saved dish or a dish built from products *@
+            <SectionHeader Title="Или без описания" />
+            <RowList TestId="input-alternatives">
+                @if (Capture.Purpose == MealSessionPurpose.CreateDish)
+                {
+                    <Row Title="Собрать из продуктов" Subtitle="Ингредиенты из каталога и готовый вес" Icon="AppIconKind.Dishes"
+                         Description="Собрать из продуктов, ингредиенты из каталога и готовый вес" TestId="input-manual-dish"
+                         OnClick="() => _buildingDish = true" />
+                }
+                else
+                {
+                    <Row Title="Продукт из каталога" Subtitle="Найти и указать вес порции" Icon="AppIconKind.Products"
+                         Description="Продукт из каталога, найти и указать вес порции" TestId="input-manual-product" OnClick="OnOpenProducts" />
+                    <Row Title="Моё блюдо" Subtitle="Порция сохранённого блюда" Icon="AppIconKind.Dishes"
+                         Description="Моё блюдо, порция сохранённого блюда" TestId="input-saved-dishes" OnClick="OnOpenDishes" />
+                }
+            </RowList>
+        }
+        else
         {
             <GhostButton Text="Начать запись заново" Danger="true" Class="nf-capture-restart" TestId="draft-restart" OnClick="RestartAsync" />
         }
     }
 }
 
+@if (_buildingDish)
+{
+    <DishBuilderForm ProfileId="Profile.Id" Date="Date" OnStarted="OnDishStartedAsync" OnClose="() => _buildingDish = false" />
+}
+
 @if (_newProduct is { } productName)
 {
-    <ProductForm ProfileId="Profile.Id" InitialName="@productName" OnSaved="OnProductSavedAsync" OnClose="() => _newProduct = null" />
+    <ProductForm ProfileId="Profile.Id" InitialName="@productName" ExactName="true" OnSaved="OnProductSavedAsync" OnClose="() => _newProduct = null" />
 }
 
 @code {
@@ -112,6 +138,7 @@ else
     private bool _hasGroq = true;
     private string? _error;
     private string? _newProduct;
+    private bool _buildingDish;
     private TextArea? _editor;
     private SessionPreview? _preview;
     private bool _focusPreview;
@@ -128,10 +155,21 @@ else
     [Parameter]
     public EventCallback OnOpenSettings { get; set; }
 
+    [Parameter]
+    public EventCallback OnOpenProducts { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenDishes { get; set; }
+
+    // the host opened this screen for a calculation made elsewhere: its status is read first
+    [Parameter]
+    public bool FocusPreview { get; set; }
+
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
 
     protected override async Task OnInitializedAsync()
     {
+        _focusPreview = FocusPreview;
         Capture.Changed += OnCaptureChanged;
         await LoadAsync();
     }
@@ -213,6 +251,19 @@ else
     {
         await Capture.RefreshAsync();
         _focusPreview = true;
+    }
+
+    private Task RefreshAsync() => Runner.RunAsync(async () =>
+    {
+        await Capture.RefreshAsync();
+        _focusPreview = true;
+    });
+
+    // the dish built from products is a calculation on this same screen
+    private Task OnDishStartedAsync()
+    {
+        _focusPreview = true;
+        return Task.CompletedTask;
     }
 
     private Task RetrySaveAsync() => Runner.RunAsync(Capture.RetrySaveAsync);

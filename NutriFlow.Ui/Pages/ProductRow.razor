@@ -1,0 +1,21 @@
+@* a catalog product in a list: per 100 g on the right, macros under the name (ProductRow in MainPage.ProductCards.cs) *@
+<Row Title="@Product.Name" Trailing="@CatalogText.Per100Calories(Product.Calories, Product.DataQuality)" TrailingCaption="ккал / 100 г"
+     Description="@CatalogText.ProductDescription(Product)" Hint="@Hint" TestId="@TestId" OnClick="OnClick">
+    <SubtitleContent>
+        <MacroLine Protein="Product.ProteinGrams" Fat="Product.FatGrams" Carbs="Product.CarbohydratesGrams" />
+    </SubtitleContent>
+</Row>
+
+@code {
+    [Parameter, EditorRequired]
+    public ProductResponse Product { get; set; } = null!;
+
+    [Parameter]
+    public string? Hint { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public EventCallback OnClick { get; set; }
+}

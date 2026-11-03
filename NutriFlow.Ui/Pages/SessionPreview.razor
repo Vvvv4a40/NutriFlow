@@ -48,6 +48,15 @@
                     </li>
                 }
             </ul>
+            @* a product added in the catalog, not from this preview, reaches the calculation only after a refresh *@
+            @if (issues.Any(issue => issue.Code == "product_not_found"))
+            {
+                <div class="nf-preview-refresh">
+                    <Caption>Добавили продукт в разделе «Продукты»?</Caption>
+                    <GhostButton Text="Обновить расчёт" Description="Обновить расчёт после добавления продуктов" Class="nf-issues__action"
+                                 TestId="draft-refresh" OnClick="OnRefresh" />
+                </div>
+            }
         }
     </Card>
 }
@@ -89,6 +98,9 @@
     // the name of an ingredient without nutrition, for a new catalog product
     [Parameter]
     public EventCallback<string> OnAddProduct { get; set; }
+
+    [Parameter]
+    public EventCallback OnRefresh { get; set; }
 
     // the clarification field is below the dishes: this brings the focus there
     [Parameter]

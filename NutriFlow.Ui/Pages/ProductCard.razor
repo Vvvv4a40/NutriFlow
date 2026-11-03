@@ -1,0 +1,37 @@
+@* nutrition per 100 g of a catalog product with its source on demand (ProductNutritionCard in MainPage.ProductCards.cs) *@
+<Card TestId="@TestId">
+    <NutritionBlock Caption="На 100 г" Value="Per100" Estimated="@(Product.DataQuality == "Estimated")" />
+    <div class="nf-badges">
+        @if (!string.IsNullOrWhiteSpace(Product.SourceKind))
+        {
+            <Caption>@NutritionText.Source(Product.SourceKind)</Caption>
+        }
+        <QualityBadge Quality="@Product.DataQuality" />
+    </div>
+    <Expander Title="Источник данных" TestId="@(TestId is null ? null : TestId + "-source")">
+        <div class="nf-history">
+            @if (!string.IsNullOrWhiteSpace(Product.SourceName))
+            {
+                <Caption>Источник: @Product.SourceName</Caption>
+            }
+            @if (!string.IsNullOrWhiteSpace(Product.Barcode))
+            {
+                <Caption Class="nf-break-all">Штрихкод: @Product.Barcode</Caption>
+            }
+            @if (!string.IsNullOrWhiteSpace(Product.SourceReference))
+            {
+                <Caption Class="nf-break-all">Данные источника: @Product.SourceReference</Caption>
+            }
+        </div>
+    </Expander>
+</Card>
+
+@code {
+    [Parameter, EditorRequired]
+    public ProductResponse Product { get; set; } = null!;
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    private NutritionResponse Per100 => new(Product.Calories, Product.ProteinGrams, Product.FatGrams, Product.CarbohydratesGrams);
+}

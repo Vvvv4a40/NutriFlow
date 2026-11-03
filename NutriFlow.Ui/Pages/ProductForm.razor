@@ -4,6 +4,10 @@
 @* a catalog product typed in from the package (ProductEditorPageAsync in MainPage.Products.cs, without the label photo) *@
 <FormPage Title="Новый продукт" TestId="product-form" OnClose="OnClose">
     <ChildContent>
+        @if (Reason is not null)
+        {
+            <Notice Icon="AppIconKind.Products" Tone="Tone.Accent" TestId="product-form-reason">@Reason</Notice>
+        }
         <BodyText Muted="true">Перенесите значения на 100 г с упаковки или из другого известного источника.</BodyText>
         <Field @ref="_nameField" Label="Название" Placeholder="Например, Творог 5% «Простоквашино»" MaxLength="200"
                Error="@_errors.GetValueOrDefault(NameKey)" Hint="@NameHint" TestId="product-name"
@@ -17,8 +21,9 @@
                        ValueChanged="value => OnNutrientChanged(field.Key, value)" />
             }
         </div>
-        <Field Label="Штрихкод" Placeholder="Необязательно" Number="true" Plain="true" MaxLength="32" TestId="product-barcode"
-               @bind-Value="_barcode" />
+        <Field @ref="_barcodeField" Label="Штрихкод" Placeholder="Необязательно" Digits="true" Plain="true" MaxLength="32"
+               Error="@_errors.GetValueOrDefault(BarcodeKey)" TestId="product-barcode"
+               @bind-Value="_barcode" @bind-Value:after="() => _errors.Remove(BarcodeKey)" />
         <SwitchRow Text="Значения приблизительные" Hint="Например, взяты по похожему продукту" TestId="product-estimated"
                    @bind-Checked="_estimated" />
     </ChildContent>
@@ -29,6 +34,7 @@
 
 @code {
     private const string NameKey = "name";
+    private const string BarcodeKey = "barcode";
 
     private sealed record NutrientField(string Key, string Label, string Error);
 
@@ -44,6 +50,7 @@
     private readonly Dictionary<string, string?> _values = [];
     private readonly Dictionary<string, string> _errors = [];
     private Field? _nameField;
+    private Field? _barcodeField;
     private string? _name;
     private string? _barcode;
     private bool _estimated;
@@ -51,9 +58,19 @@
     [Parameter, EditorRequired]
     public Guid ProfileId { get; set; }
 
-    // the ingredient that had no nutrition in the preview
     [Parameter]
     public string? InitialName { get; set; }
+
+    // the name is an ingredient of the preview without nutrition: the calculation looks for exactly this name
+    [Parameter]
+    public bool ExactName { get; set; }
+
+    [Parameter]
+    public string? InitialBarcode { get; set; }
+
+    // why the form opened instead of the screen the user asked for, for example an empty catalog
+    [Parameter]
+    public string? Reason { get; set; }
 
     [Parameter]
     public EventCallback<ProductResponse> OnSaved { get; set; }
@@ -62,10 +79,14 @@
     public EventCallback OnClose { get; set; }
 
     // the calculation matches products by their exact name, another name would leave the ingredient without nutrition
-    private string? NameHint => InitialName is null ? null
+    private string? NameHint => !ExactName || InitialName is null ? null
         : $"Расчёт найдёт продукт по названию «{InitialName}». Другое название в расчёт не подставится.";
 
-    protected override void OnInitialized() => _name = InitialName;
+    protected override void OnInitialized()
+    {
+        _name = InitialName;
+        _barcode = InitialBarcode;
+    }
 
     private void OnNutrientChanged(string key, string? value)
     {
@@ -93,6 +114,11 @@
             {
                 _errors[field.Key] = field.Error;
             }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_barcode) && CatalogText.BarcodeProblem(_barcode) is { } barcodeProblem)
+        {
+            _errors[BarcodeKey] = barcodeProblem;
         }
 
         if (_errors.Count > 0)
@@ -131,7 +157,8 @@
         await Task.Yield();
         Field? first = _errors.ContainsKey(NameKey)
             ? _nameField
-            : Nutrients.Where(field => _errors.ContainsKey(field.Key)).Select(field => _fields.GetValueOrDefault(field.Key)).FirstOrDefault();
+            : Nutrients.Where(field => _errors.ContainsKey(field.Key)).Select(field => _fields.GetValueOrDefault(field.Key)).FirstOrDefault()
+              ?? (_errors.ContainsKey(BarcodeKey) ? _barcodeField : null);
         if (first is not null)
         {
             await first.FocusAsync();

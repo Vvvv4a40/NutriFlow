@@ -7,9 +7,9 @@
         <label class="nf-field__label" for="@_id">@Label</label>
     }
     <input id="@_id" class="nf-field__input" type="@(Password ? "password" : "text")" value="@Value" placeholder="@Placeholder"
-           inputmode="@(Number ? "decimal" : null)" enterkeyhint="@EnterKeyHint" maxlength="@MaxLength"
+           inputmode="@(Digits ? "numeric" : Number ? "decimal" : null)" enterkeyhint="@EnterKeyHint" maxlength="@MaxLength"
            autocomplete="off" autocapitalize="@(Plain ? "off" : null)" autocorrect="@(Plain ? "off" : null)"
-           spellcheck="@(Number || Plain ? "false" : null)"
+           spellcheck="@(Number || Digits || Plain ? "false" : null)"
            aria-label="@AccessibleLabel" aria-invalid="@(Error is null ? null : "true")" aria-describedby="@DescribedBy"
            data-testid="@TestId" @ref="_input" @oninput="OnInputAsync" @onkeydown="OnKeyDownAsync" />
     @if (Error is not null)
@@ -44,6 +44,10 @@
 
     [Parameter]
     public bool Number { get; set; }
+
+    // only digits, like a barcode: the keyboard has no decimal separator
+    [Parameter]
+    public bool Digits { get; set; }
 
     // keys and model names: no capitals, spelling or masking help from the keyboard
     [Parameter]

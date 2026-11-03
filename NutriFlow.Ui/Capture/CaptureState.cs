@@ -341,6 +341,31 @@ public sealed class CaptureState : IDisposable
         }
     }
 
+    // a calculation made without Groq (a catalog product, a saved dish, a dish from products) replaces the current
+    // one and the typed text only once it is ready (CanStartDraftAsync + SetSessionAsync on android); false when
+    // the user keeps them
+    public async Task<bool> StartAsync(Func<Guid, Task<MealSessionResponse>> create, Func<Task<bool>> confirmReplace)
+    {
+        Guid profileId = RequireProfile();
+        RequireUnblocked();
+        await FlushAsync();
+        if ((Session is not null || !string.IsNullOrWhiteSpace(Text)) && !await confirmReplace())
+        {
+            return false;
+        }
+
+        MealSessionResponse session = await create(profileId);
+        await _settings.SaveSessionIdAsync(profileId, session.Id);
+        if (ProfileId == profileId)
+        {
+            UseSession(session);
+            await ClearSubmittedInputAsync(profileId);
+        }
+
+        Changed?.Invoke();
+        return true;
+    }
+
     public async Task RefreshAsync()
     {
         Guid profileId = RequireProfile();
@@ -504,7 +529,7 @@ public sealed class CaptureState : IDisposable
     {
         if (Blocked)
         {
-            throw new InvalidOperationException("Сначала восстановите или удалите сохранённый ввод.");
+            throw new InvalidOperationException(CaptureText.Blocked);
         }
     }
 

@@ -42,6 +42,10 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
+    // asked before back, escape or the back control close the form; false keeps it, for example with unsaved work
+    [Parameter]
+    public Func<Task<bool>>? CanLeave { get; set; }
+
     [Parameter]
     public string? TestId { get; set; }
 
@@ -58,7 +62,7 @@
         {
             _closedByBack = true;
             await OnClose.InvokeAsync();
-        });
+        }, canLeave: CanLeave);
         await Back.EnterLayerAsync(_titleId, _form, _title);
     }
 

@@ -1,0 +1,363 @@
+@using NutriFlow.Domain
+@using NutriFlow.Ui.Catalog
+@implements IDisposable
+@inject LocalMealClient Meals
+@inject CaptureState Capture
+@inject ActionRunner Runner
+
+@* a dish from catalog products and its final weight (ManualDishPageAsync in MainPage.Dishes.cs). The ingredient is found
+   by the same live search as the catalog instead of a list of every product, and a missing one is added on the spot *@
+<FormPage Title="Блюдо из продуктов" TestId="dish-builder" CanLeave="CanLeaveAsync" OnClose="OnClose">
+    <ChildContent>
+        <BodyText Muted="true">Добавьте ингредиенты из каталога с весом до приготовления, затем укажите вес готового блюда — КБЖУ на 100 г посчитаются по нему.</BodyText>
+        <Field @ref="_nameField" Label="Название блюда" Placeholder="Например, Плов" MaxLength="200" Error="@_errors.GetValueOrDefault(NameKey)"
+               TestId="dish-name" @bind-Value="_name" @bind-Value:after="() => _errors.Remove(NameKey)" />
+
+        <Card Class="nf-dish-ingredient" TestId="dish-ingredient">
+            <Overline>Ингредиент</Overline>
+            @if (_selected is null)
+            {
+                <Field @ref="_searchField" Label="Продукт из каталога" Placeholder="Начните вводить название" MaxLength="200" EnterKeyHint="search"
+                       Error="@_errors.GetValueOrDefault(IngredientKey)" TestId="dish-ingredient-search"
+                       Value="@_search.Query" ValueChanged="OnQueryChanged" OnEnter="() => _search.SearchNowAsync()" />
+                <p class="nf-visually-hidden" role="status">@Summary</p>
+                @if (_search.Failed)
+                {
+                    <Notice Tone="Tone.Danger" TestId="dish-ingredient-search-error">
+                        <ChildContent>Не удалось открыть каталог. Данные не удалены — повторите поиск.</ChildContent>
+                        <Action><GhostButton Text="Повторить поиск" OnClick="() => _search.SearchNowAsync()" /></Action>
+                    </Notice>
+                }
+                else if (_search.Results is { Count: 0 } && _search.ResultsQuery.Length == 0)
+                {
+                    <Notice Icon="AppIconKind.Products" Tone="Tone.Accent" TestId="dish-catalog-products-empty">
+                        <ChildContent>В каталоге пока нет продуктов. Добавьте первый ингредиент с упаковки.</ChildContent>
+                        <Action><GhostButton Text="Добавить продукт" TestId="dish-ingredient-new" OnClick="() => _newProduct = string.Empty" /></Action>
+                    </Notice>
+                }
+                else if (_search.Results is { Count: 0 })
+                {
+                    <div class="nf-dish-ingredient__empty">
+                        <Caption>@CatalogText.NothingFound(_search.ResultsQuery)</Caption>
+                        <GhostButton Text="@($"Добавить «{_search.ResultsQuery}»")" Class="nf-issues__action" TestId="dish-ingredient-new"
+                                     OnClick="() => _newProduct = _search.ResultsQuery" />
+                    </div>
+                }
+                else if (_search.Results is { } products)
+                {
+                    <RowList TestId="dish-ingredient-results">
+                        @foreach (ProductResponse product in products.Take(ShownResults))
+                        {
+                            <ProductRow @key="product" Product="product" Hint="@OptionHint(product)" TestId="dish-ingredient-option"
+                                        OnClick="() => SelectAsync(product)" />
+                        }
+                    </RowList>
+                    @if (products.Count > ShownResults)
+                    {
+                        <Caption>Ещё @(products.Count - ShownResults) — уточните название.</Caption>
+                    }
+                }
+            }
+            else
+            {
+                <div class="nf-dish-ingredient__chosen" data-testid="dish-ingredient-chosen">
+                    <div class="nf-ingredient__text">
+                        <span class="nf-text nf-text--strong">@_selected.Name</span>
+                        <span class="nf-caption">
+                            <span aria-hidden="true">На 100 г: @NutritionText.Nutrition(_selected)</span>
+                            <span class="nf-visually-hidden">На 100 граммов: @NutritionText.SpokenNutrition(_selected)</span>
+                        </span>
+                    </div>
+                    <GhostButton Text="Изменить" Description="@($"Изменить ингредиент «{_selected.Name}»")" Class="nf-dish-ingredient__change"
+                                 TestId="dish-ingredient-change" OnClick="ChangeAsync" />
+                </div>
+                <div class="nf-field-grid">
+                    <Field @ref="_weightField" Label="Вес до готовки, г" Number="true" Error="@_errors.GetValueOrDefault(WeightKey)"
+                           TestId="dish-ingredient-weight" @bind-Value="_weight" @bind-Value:after="() => _errors.Remove(WeightKey)"
+                           OnEnter="AddIngredientAsync" />
+                    <Field @ref="_removedField" Label="Не вошло, г" Number="true" Hint="Кости, кожура, слитая вода"
+                           Error="@_errors.GetValueOrDefault(RemovedKey)" TestId="dish-ingredient-removed"
+                           @bind-Value="_removed" @bind-Value:after="() => _errors.Remove(RemovedKey)" OnEnter="AddIngredientAsync" />
+                </div>
+                <SwitchRow Text="Вес указан примерно" TestId="dish-ingredient-estimated" @bind-Checked="_ingredientEstimated" />
+                <ActionButton Text="Добавить в состав" Secondary="true" TestId="dish-ingredient-add" OnClick="AddIngredientAsync" />
+            }
+        </Card>
+
+        <div class="nf-card nf-dish-composition" role="region" aria-labelledby="dish-composition-title" tabindex="-1" data-testid="dish-composition" @ref="_composition">
+            <p id="dish-composition-title" class="nf-overline">@(_ingredients.Count == 0 ? "Состав пока пуст" : $"Состав · {_ingredients.Count}")</p>
+            @if (_ingredients.Count == 0)
+            {
+                <Caption>Выберите продукт выше, укажите его вес и нажмите «Добавить в состав».</Caption>
+            }
+            else
+            {
+                <ul class="nf-ingredients" role="list">
+                    @foreach (ManualIngredient ingredient in _ingredients)
+                    {
+                        <li class="nf-ingredient nf-dish-composition__item" data-testid="dish-composition-item">
+                            <div class="nf-ingredient__text">
+                                <span class="nf-text nf-text--strong">@ingredient.Product.Name</span>
+                                <span class="nf-caption">@CatalogText.IngredientWeight(ingredient.WeightInGrams, ingredient.RemovedWeightInGrams)</span>
+                                @if (ingredient.WeightQuality == DataQuality.Estimated)
+                                {
+                                    <span class="nf-badges"><QualityBadge Quality="Estimated" /></span>
+                                }
+                            </div>
+                            <GhostButton Text="Убрать" Danger="true" Description="@($"Убрать «{ingredient.Product.Name}» из состава")"
+                                         Class="nf-ingredient__value" TestId="dish-ingredient-remove" OnClick="() => RemoveAsync(ingredient)" />
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        <Field @ref="_finalField" Label="Вес готового блюда, г" Number="true" Error="@_errors.GetValueOrDefault(FinalKey)"
+               Hint="Взвесьте всё блюдо после готовки: КБЖУ на 100 г посчитаются по этому весу." TestId="dish-final-weight"
+               @bind-Value="_final" @bind-Value:after="() => _errors.Remove(FinalKey)" />
+        <SwitchRow Text="Готовый вес указан примерно" TestId="dish-final-estimated" @bind-Checked="_finalEstimated" />
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Посмотреть расчёт блюда" TestId="dish-preview" OnClick="PreviewAsync" />
+    </Footer>
+</FormPage>
+
+@if (_newProduct is { } productName)
+{
+    <ProductForm ProfileId="ProfileId" InitialName="@productName" Reason="@NewProductReason" OnSaved="OnProductSavedAsync"
+                 OnClose="() => _newProduct = null" />
+}
+
+@code {
+    private const int ShownResults = 6;
+    private const string NameKey = "name";
+    private const string IngredientKey = "ingredient";
+    private const string WeightKey = "weight";
+    private const string RemovedKey = "removed";
+    private const string FinalKey = "final";
+
+    private readonly List<ManualIngredient> _ingredients = [];
+    private readonly Dictionary<string, string> _errors = [];
+    private ProductSearch _search = null!;
+    private Field? _nameField;
+    private Field? _searchField;
+    private Field? _weightField;
+    private Field? _removedField;
+    private Field? _finalField;
+    private ElementReference _composition;
+    private string? _name;
+    private ProductResponse? _selected;
+    private string? _weight;
+    private string? _removed;
+    private bool _ingredientEstimated;
+    private string? _final;
+    private bool _finalEstimated;
+    private string? _newProduct;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    // the dish is created on the day shown in the diary, as on android; only its portions go to the diary
+    [Parameter]
+    public DateOnly Date { get; set; }
+
+    [Parameter]
+    public EventCallback OnStarted { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private string? NewProductReason => _search.Results is { Count: 0 } && _search.ResultsQuery.Length == 0
+        ? "В каталоге пока нет продуктов. После сохранения продукт сразу станет ингредиентом блюда."
+        : null;
+
+    private string Summary => CatalogText.SearchSummary(_search);
+
+    // the same product may go in twice, but on purpose
+    private string OptionHint(ProductResponse product)
+    {
+        decimal weight = _ingredients.Where(ingredient => ingredient.Product == product).Sum(ingredient => ingredient.WeightInGrams);
+        return weight > 0 ? $"Уже в составе, {NutritionText.Amount(weight)} г. Добавить ещё раз" : "Выбрать ингредиент";
+    }
+
+    // back, escape or the back control would drop the whole composition without a word
+    private Task<bool> CanLeaveAsync() =>
+        _ingredients.Count == 0 && _selected is null && string.IsNullOrWhiteSpace(_name) && string.IsNullOrWhiteSpace(_final)
+            ? Task.FromResult(true)
+            : Runner.ConfirmAsync("Выйти без сохранения блюда?", "Название, состав и веса не сохранятся.", "Выйти", "Остаться", destructive: true);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _search = new ProductSearch(Meals, ProfileId);
+        _search.Changed += OnSearchChanged;
+        await _search.SearchNowAsync();
+    }
+
+    private void OnQueryChanged(string? text)
+    {
+        _errors.Remove(IngredientKey);
+        _search.SetQuery(text);
+    }
+
+    private async Task SelectAsync(ProductResponse product)
+    {
+        _selected = product;
+        _errors.Remove(IngredientKey);
+        await FocusAsync(() => _weightField);
+    }
+
+    private async Task ChangeAsync()
+    {
+        _selected = null;
+        ClearIngredient();
+        await FocusAsync(() => _searchField);
+    }
+
+    // the stored product, not the typed one, is what the calculation matches
+    private async Task OnProductSavedAsync(ProductResponse product)
+    {
+        IReadOnlyList<ProductResponse> found = await Meals.SearchProductsAsync(ProfileId, product.Name);
+        _selected = found.FirstOrDefault(item => string.Equals(item.Name, product.Name, StringComparison.CurrentCultureIgnoreCase)) ?? product;
+        _errors.Remove(IngredientKey);
+        _search.SetQuery("");
+        await _search.SearchNowAsync();
+        StateHasChanged();
+        await Task.Yield();
+        if (_weightField is not null)
+        {
+            await _weightField.FocusAsync();
+        }
+    }
+
+    private Task AddIngredientAsync() => TryAddIngredientAsync(focusOnError: true);
+
+    // false leaves the error under the weight that is wrong
+    private async Task<bool> TryAddIngredientAsync(bool focusOnError)
+    {
+        ProductResponse? product = _selected;
+        _errors.Remove(WeightKey);
+        _errors.Remove(RemovedKey);
+        if (!NutritionText.TryParseNumber(_weight, positive: true, out decimal weight))
+        {
+            _errors[WeightKey] = "Введите вес до готовки в граммах, например 200.";
+        }
+
+        decimal removed = 0m;
+        if (!string.IsNullOrWhiteSpace(_removed) && !NutritionText.TryParseNumber(_removed, positive: false, out removed))
+        {
+            _errors[RemovedKey] = "Введите, сколько граммов не вошло, или оставьте поле пустым.";
+        }
+        else if (!_errors.ContainsKey(WeightKey) && removed > weight)
+        {
+            _errors[RemovedKey] = "Не вошло больше, чем весил ингредиент. Проверьте оба веса.";
+        }
+
+        if (product is null || _errors.ContainsKey(WeightKey) || _errors.ContainsKey(RemovedKey))
+        {
+            if (focusOnError)
+            {
+                await FocusAsync(() => _errors.ContainsKey(WeightKey) ? _weightField : _removedField);
+            }
+
+            return false;
+        }
+
+        DataQuality quality = _ingredientEstimated ? DataQuality.Estimated : DataQuality.Exact;
+        _ingredients.Add(new ManualIngredient(product, weight, quality, removed, quality));
+        _selected = null;
+        ClearIngredient();
+        _search.SetQuery("");
+        if (focusOnError)
+        {
+            await FocusAsync(() => _searchField);
+            Runner.Announce($"«{product.Name}» в составе, ингредиентов: {_ingredients.Count}");
+        }
+
+        return true;
+    }
+
+    private async Task RemoveAsync(ManualIngredient ingredient)
+    {
+        _ingredients.Remove(ingredient);
+        // the button that had the focus is gone with its row
+        StateHasChanged();
+        await Task.Yield();
+        await _composition.FocusAsync();
+        Runner.Announce($"«{ingredient.Product.Name}» убран из состава");
+    }
+
+    private void ClearIngredient()
+    {
+        _weight = null;
+        _removed = null;
+        _ingredientEstimated = false;
+        _errors.Remove(WeightKey);
+        _errors.Remove(RemovedKey);
+    }
+
+    private async Task PreviewAsync()
+    {
+        _errors.Clear();
+        string name = (_name ?? "").Trim();
+        if (name.Length == 0)
+        {
+            _errors[NameKey] = "Введите название блюда, например «Плов».";
+        }
+
+        // a chosen product with its weight goes in as if «Добавить в состав» was pressed; a wrong weight keeps its error
+        if (_selected is not null)
+        {
+            await TryAddIngredientAsync(focusOnError: false);
+        }
+        else if (_ingredients.Count == 0)
+        {
+            _errors[IngredientKey] = "Добавьте в состав хотя бы один продукт.";
+        }
+
+        if (!NutritionText.TryParseNumber(_final, positive: true, out decimal final))
+        {
+            _errors[FinalKey] = "Введите вес готового блюда в граммах, например 1180.";
+        }
+
+        if (_errors.Count > 0)
+        {
+            await FocusAsync(() => _errors.ContainsKey(NameKey) ? _nameField
+                : _errors.ContainsKey(WeightKey) ? _weightField
+                : _errors.ContainsKey(RemovedKey) ? _removedField
+                : _errors.ContainsKey(IngredientKey) ? _searchField
+                : _finalField);
+            return;
+        }
+
+        ManualIngredient[] ingredients = [.. _ingredients];
+        DataQuality quality = _finalEstimated ? DataQuality.Estimated : DataQuality.Exact;
+        await Runner.RunAsync(async () =>
+        {
+            if (await Capture.StartAsync(profileId => Meals.CreateManualDishAsync(profileId, name, ingredients, final, Date, quality),
+                    CatalogText.ConfirmReplace(Runner)))
+            {
+                await OnClose.InvokeAsync();
+                await OnStarted.InvokeAsync();
+            }
+        });
+    }
+
+    // the field to focus may appear only with this render
+    private async Task FocusAsync(Func<Field?> field)
+    {
+        StateHasChanged();
+        await Task.Yield();
+        if (field() is { } target)
+        {
+            await target.FocusAsync();
+        }
+    }
+
+    private void OnSearchChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        _search.Changed -= OnSearchChanged;
+        _search.Dispose();
+    }
+}

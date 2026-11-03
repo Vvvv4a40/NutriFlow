@@ -59,7 +59,7 @@ public sealed class WebProfileSettingsTests
         await settings.RemoveGroqAsync(Profile);
         Assert.False(await settings.HasGroqAsync(Profile));
         InvalidOperationException missing = await Assert.ThrowsAsync<InvalidOperationException>(() => settings.GetGroqAsync(Profile));
-        Assert.Equal("Добавьте личный ключ Groq в разделе «Настройки».", missing.Message);
+        Assert.Equal("Добавьте личный ключ Groq в разделе «Настройки». Без ключа можно записать продукт из каталога или своё блюдо.", missing.Message);
     }
 
     [Fact]

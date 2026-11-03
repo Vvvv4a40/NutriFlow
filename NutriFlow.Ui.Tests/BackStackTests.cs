@@ -113,6 +113,35 @@ public sealed class BackStackTests
     }
 
     [Fact]
+    public async Task FormWithUnsavedWorkStaysWhenTheUserKeepsIt()
+    {
+        BackStack stack = Create();
+        List<string> closed = [];
+        bool leave = false;
+        int asked = 0;
+        await stack.PushAsync(() => Close(closed, "section"));
+        await stack.PushAsync(() => Close(closed, "builder"), canLeave: () =>
+        {
+            asked++;
+            return Task.FromResult(leave);
+        });
+
+        await stack.OnPopStateAsync();
+
+        Assert.Empty(closed);
+        Assert.Equal(2, stack.Depth);
+        // the entry the browser removed comes back
+        Assert.Equal(3, _entries);
+
+        leave = true;
+        await stack.OnPopStateAsync();
+
+        Assert.Equal(["builder"], closed);
+        Assert.Equal(1, stack.Depth);
+        Assert.Equal(2, asked);
+    }
+
+    [Fact]
     public async Task BackWithoutLayersLeavesTheAppToTheBrowser()
     {
         BackStack stack = Create();

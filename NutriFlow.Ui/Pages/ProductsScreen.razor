@@ -1,0 +1,133 @@
+@using NutriFlow.Ui.Catalog
+@implements IDisposable
+@inject LocalMealClient Meals
+@inject ActionRunner Runner
+
+@* the catalog: live search, ways to add a product and a portion of the chosen one (RenderProductsAsync in MainPage.Products.cs) *@
+<Field @ref="_searchField" AccessibleLabel="Поиск продукта по названию" Placeholder="Найти продукт" MaxLength="200" EnterKeyHint="search"
+       TestId="product-search" Value="@_search.Query" ValueChanged="OnQueryChanged" OnEnter="() => _search.SearchNowAsync()" />
+
+<SectionHeader Title="Добавить продукт" />
+<div class="nf-methods">
+    <Pressable Class="nf-method" Description="Вручную" Hint="Перенести пищевую ценность с упаковки" TestId="product-add-manual"
+               OnClick="() => OpenManual(_search.Query)">
+        <IconTile Icon="AppIconKind.Edit" />
+        <span class="nf-method__title">Вручную</span>
+    </Pressable>
+    <Pressable Class="nf-method" Description="Штрихкод" Hint="Найти продукт по цифрам штрихкода в Open Food Facts"
+               TestId="product-add-barcode" OnClick="() => _barcode = true">
+        <IconTile Icon="AppIconKind.Barcode" />
+        <span class="nf-method__title">Штрихкод</span>
+    </Pressable>
+</div>
+
+@* the number of results follows typing, a screen reader hears it without leaving the field *@
+<p class="nf-visually-hidden" role="status">@Summary</p>
+@if (_search.Failed)
+{
+    <Notice Tone="Tone.Danger" TestId="product-search-error">
+        <ChildContent>Не удалось открыть каталог. Данные не удалены — повторите поиск.</ChildContent>
+        <Action><GhostButton Text="Повторить поиск" TestId="product-search-retry" OnClick="() => _search.SearchNowAsync()" /></Action>
+    </Notice>
+}
+else if (_search.Results is { } products)
+{
+    @if (products.Count == 0 && _search.ResultsQuery.Length > 0)
+    {
+        <EmptyState Icon="AppIconKind.Search" Title="Ничего не найдено" Message="@CatalogText.NothingFound(_search.ResultsQuery)"
+                    TestId="product-search-empty">
+            <Action>
+                <ActionButton Text="@($"Добавить «{_search.ResultsQuery}»")" Secondary="true" TestId="product-search-add"
+                              OnClick="() => OpenManual(_search.ResultsQuery)" />
+            </Action>
+        </EmptyState>
+    }
+    else if (products.Count == 0)
+    {
+        <EmptyState Icon="AppIconKind.Products" Title="Нет продуктов" TestId="product-catalog-empty"
+                    Message="Добавьте продукт вручную или по штрихкоду — дальше он считается без интернета." />
+    }
+    else
+    {
+        <SectionHeader Title="Каталог" Detail="@CatalogText.Products(products.Count)" DetailTestId="product-results-count" />
+        <RowList TestId="product-results">
+            @foreach (ProductResponse product in products)
+            {
+                <ProductRow @key="product" Product="product" Hint="Добавить порцию в дневник" TestId="product-row"
+                            OnClick="() => _portion = product" />
+            }
+        </RowList>
+    }
+}
+
+@if (_portion is { } chosen)
+{
+    <ProductPortionForm ProfileId="Profile.Id" Product="chosen" Date="Date" OnStarted="OnStarted" OnClose="() => _portion = null" />
+}
+
+@if (_manualName is { } name)
+{
+    <ProductForm ProfileId="Profile.Id" InitialName="@name" OnSaved="OnProductAddedAsync" OnClose="() => _manualName = null" />
+}
+
+@if (_barcode)
+{
+    <BarcodeForm ProfileId="Profile.Id" Date="Date" OnStarted="OnStarted" OnCatalogChanged="() => _search.SearchNowAsync()"
+                 OnClose="() => _barcode = false" />
+}
+
+@code {
+    private ProductSearch _search = null!;
+    private Field? _searchField;
+    private ProductResponse? _portion;
+    private string? _manualName;
+    private bool _barcode;
+
+    [Parameter, EditorRequired]
+    public LocalProfile Profile { get; set; } = null!;
+
+    // the day shown in the diary; a portion goes there
+    [Parameter]
+    public DateOnly Date { get; set; }
+
+    // a calculation is ready: the host opens the food input with it
+    [Parameter]
+    public EventCallback OnStarted { get; set; }
+
+    private string Summary => CatalogText.SearchSummary(_search);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _search = new ProductSearch(Meals, Profile.Id);
+        _search.Changed += OnSearchChanged;
+        await _search.SearchNowAsync();
+    }
+
+    private void OnQueryChanged(string? text) => _search.SetQuery(text);
+
+    // the search text is often the name of the missing product
+    private void OpenManual(string query) => _manualName = query.Trim();
+
+    private async Task OnProductAddedAsync()
+    {
+        bool openerGone = _search.Results is { Count: 0 };
+        await _search.SearchNowAsync();
+        if (openerGone && _searchField is not null)
+        {
+            // «Добавить «…»» of the empty result is gone with it
+            StateHasChanged();
+            await Task.Yield();
+            await _searchField.FocusAsync();
+        }
+
+        Runner.Announce("Продукт добавлен в каталог");
+    }
+
+    private void OnSearchChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        _search.Changed -= OnSearchChanged;
+        _search.Dispose();
+    }
+}

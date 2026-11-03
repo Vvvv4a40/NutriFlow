@@ -11,7 +11,7 @@
     else
     {
         <p class="nf-nutrition__calories">
-            <span class="nf-nutrition__number" aria-hidden="true">@NutritionText.Kilocalories(Value.Calories)</span>
+            <span class="nf-nutrition__number" aria-hidden="true">@(Estimated ? "≈ " : "")@NutritionText.Kilocalories(Value.Calories)</span>
             <span class="nf-nutrition__unit" aria-hidden="true">ккал</span>
             <span class="nf-visually-hidden">@NutritionText.Amount(Value.Calories) килокалорий</span>
         </p>
@@ -25,6 +25,10 @@
 
     [Parameter]
     public string? Caption { get; set; }
+
+    // an estimate never passes for exact data: «≈» before the number, as in the lists
+    [Parameter]
+    public bool Estimated { get; set; }
 
     [Parameter]
     public string? Class { get; set; }

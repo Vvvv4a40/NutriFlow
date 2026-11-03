@@ -1,0 +1,68 @@
+@using NutriFlow.Domain
+@inject LocalMealClient Meals
+@inject CaptureState Capture
+@inject ActionRunner Runner
+
+@* a portion of a catalog product; the calculation opens in the food input for the confirmation
+   (ProductPortionPageAsync in MainPage.Products.cs) *@
+<FormPage Title="Порция продукта" TestId="product-portion" OnClose="OnClose">
+    <ChildContent>
+        <Headline>@Product.Name</Headline>
+        <ProductCard Product="Product" TestId="product-portion-card" />
+        <Field @ref="_field" Label="Вес порции, г" Number="true" EnterKeyHint="done" Error="@_error" TestId="portion-weight"
+               Hint="@CatalogText.MealDay(Date, Today)" @bind-Value="_grams" @bind-Value:after="() => _error = null" OnEnter="PreviewAsync" />
+        <SwitchRow Text="Вес указан примерно" TestId="portion-estimated" @bind-Checked="_estimated" />
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Посмотреть расчёт" TestId="portion-preview" OnClick="PreviewAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private Field? _field;
+    private string? _grams;
+    private string? _error;
+    private bool _estimated;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    [Parameter, EditorRequired]
+    public ProductResponse Product { get; set; } = null!;
+
+    // the day shown in the diary
+    [Parameter]
+    public DateOnly Date { get; set; }
+
+    // the calculation is ready: the host opens the food input with it
+    [Parameter]
+    public EventCallback OnStarted { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    private async Task PreviewAsync()
+    {
+        if (!NutritionText.TryParseNumber(_grams, positive: true, out decimal grams))
+        {
+            _error = "Введите вес порции в граммах больше нуля, например 150.";
+            StateHasChanged();
+            await Task.Yield();
+            await _field!.FocusAsync();
+            return;
+        }
+
+        DataQuality quality = _estimated ? DataQuality.Estimated : DataQuality.Exact;
+        await Runner.RunAsync(async () =>
+        {
+            if (await Capture.StartAsync(profileId => Meals.CreateManualMealAsync(profileId, Product, grams, Date, quality),
+                    CatalogText.ConfirmReplace(Runner)))
+            {
+                await OnClose.InvokeAsync();
+                await OnStarted.InvokeAsync();
+            }
+        });
+    }
+}

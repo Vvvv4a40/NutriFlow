@@ -25,7 +25,7 @@ public sealed class WebProfileSettings(IJSRuntime js) : IProfileSettings
         string? apiKey = await GetAsync(Key(profileId, "groq-key"));
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException("Добавьте личный ключ Groq в разделе «Настройки».");
+            throw new InvalidOperationException("Добавьте личный ключ Groq в разделе «Настройки». Без ключа можно записать продукт из каталога или своё блюдо.");
         }
 
         return new GroqSettings(apiKey, await GetTextModelAsync(profileId), await GetVisionModelAsync(profileId),

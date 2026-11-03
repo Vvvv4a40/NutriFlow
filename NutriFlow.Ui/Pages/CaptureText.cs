@@ -16,8 +16,10 @@ public static class CaptureText
     public const string Saved = "Сохранено на устройстве";
     public const string SaveFailed = "Не сохранено. Повторите сохранение.";
     public const string SessionMissing = "Расчёт не найден. Начните новую запись.";
-    // until the manual input of step 7 the only way on is to repeat; the text is kept in the field and on the device
-    public const string Unreachable = "Не удалось связаться с Groq. Проверьте интернет и повторите — текст сохранён.";
+    // the text is kept in the field and on the device; a catalog product or a saved dish needs no Groq
+    public const string Unreachable = "Не удалось связаться с Groq. Проверьте интернет и повторите или добавьте запись вручную.";
+    public const string Blocked = "Сначала восстановите или удалите сохранённый текст в записи еды.";
+    public const string NoKey = "Чтобы разобрать описание, добавьте личный ключ Groq в настройках профиля. Продукт из каталога и своё блюдо можно записать и без него.";
     private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
 
     public static bool IsDish(MealSessionResponse session) => session.Purpose == nameof(MealSessionPurpose.CreateDish);
@@ -152,13 +154,13 @@ public static class CaptureText
     public static string GroqError(Exception exception) => exception switch
     {
         HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } =>
-            "Groq не принял ключ. Проверьте ключ в настройках и повторите.",
+            "Groq не принял ключ. Проверьте ключ в настройках или добавьте запись вручную.",
         HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
             "Groq временно ограничил запросы по этому ключу. Подождите минуту и повторите.",
         HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.NotFound } =>
             "Groq не принял запрос. Проверьте модель для текста в настройках и повторите.",
         HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } =>
-            "Groq сейчас не отвечает. Повторите позже — текст сохранён.",
+            "Groq сейчас не отвечает. Повторите позже или добавьте запись вручную.",
         HttpRequestException or OperationCanceledException => Unreachable,
         InvalidDataException => "Groq вернул неполный ответ. Повторите запрос.",
         _ => UiErrors.Describe(exception)
