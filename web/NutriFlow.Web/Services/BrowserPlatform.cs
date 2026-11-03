@@ -11,12 +11,19 @@ public sealed class BrowserPlatform(IJSRuntime js) : IDisposable
 
     public event Action? InstallChanged;
 
+    public event Action? Hidden;
+
     // boot.mjs keeps the install prompt from the first moments of the page; from here on it reports changes
     public async Task StartAsync()
     {
         _reference ??= DotNetObjectReference.Create(this);
-        CanInstall = await (await GetModuleAsync()).InvokeAsync<bool>("watchInstall", _reference);
+        IJSObjectReference module = await GetModuleAsync();
+        CanInstall = await module.InvokeAsync<bool>("watchInstall", _reference);
+        await module.InvokeVoidAsync("watchVisibility", _reference);
     }
+
+    [JSInvokable]
+    public void OnHidden() => Hidden?.Invoke();
 
     [JSInvokable]
     public void OnInstallAvailabilityChanged(bool available)

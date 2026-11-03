@@ -22,6 +22,9 @@ public interface IAppHost
 
     Task RequestPersistentStorageAsync();
 
+    // the app went to the background or is closing: unsaved input has to be written now
+    event Action? Hidden;
+
     // profile files changed in memory reach durable storage only here; a host that writes files directly does nothing
     Task SaveProfileFilesAsync();
 }

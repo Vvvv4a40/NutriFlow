@@ -1,0 +1,276 @@
+@using NutriFlow.Domain
+@implements IDisposable
+@inject CaptureState Capture
+@inject IProfileSettings Settings
+@inject ActionRunner Runner
+
+@* food input: the description or a clarification, its autosave and the preview of the session (MainPage.Input.cs) *@
+@if (_loadError is not null)
+{
+    <div role="alert">
+        <EmptyState Icon="AppIconKind.Warning" Title="Не удалось открыть сохранённый ввод" Message="@_loadError" TestId="input-error">
+            <Action><ActionButton Text="Повторить" TestId="input-retry" OnClick="LoadAsync" /></Action>
+        </EmptyState>
+    </div>
+}
+else if (!_loaded)
+{
+    @* the saved input of the profile is read at start, this lasts a few milliseconds *@
+}
+else
+{
+    @if (Capture.Session is { } session)
+    {
+        <SessionPreview @ref="_preview" Session="session" OnAddProduct="name => _newProduct = name" OnAnswer="FocusEditorAsync" />
+    }
+
+    @if (Capture.Blocked)
+    {
+        @* a choice about the saved text comes first, the input waits for it *@
+        <Card Class="nf-capture-recovery" TestId="input-draft-recovery">
+            <BodyText>@(Capture.DraftProblem ?? "Остался неотправленный текст другой записи.")</BodyText>
+            @if (Capture.PendingDraft is { } pending)
+            {
+                <div class="nf-capture-recovery__draft">
+                    <Caption>@CaptureText.DraftContext(pending, Today)</Caption>
+                    <BodyText Muted="true" Class="nf-capture-recovery__text" TestId="input-draft-text">@pending.Text</BodyText>
+                </div>
+                <ActionButton Text="Восстановить текст" TestId="input-draft-restore" OnClick="RestoreAsync" />
+            }
+            else
+            {
+                <ActionButton Text="Повторить чтение" Secondary="true" TestId="input-draft-reload" OnClick="ReloadAsync" />
+            }
+            <GhostButton Text="Удалить сохранённый текст" Danger="true" TestId="input-draft-discard" OnClick="DiscardAsync" />
+        </Card>
+    }
+    else
+    {
+        @if (Capture.Session is null)
+        {
+            <Segmented Label="Что записать" Options="Purposes" Selected="@(Capture.Purpose == MealSessionPurpose.CreateDish ? 1 : 0)"
+                       SelectedChanged="SelectPurpose" />
+            <Caption TestId="input-context">@CaptureText.Context(Capture.Purpose, Capture.Date, Today)</Caption>
+        }
+
+        @if (!_hasGroq)
+        {
+            <Notice Icon="AppIconKind.Key" TestId="input-key-notice">
+                <ChildContent>Чтобы разобрать описание, добавьте личный ключ Groq в настройках профиля.</ChildContent>
+                <Action><GhostButton Text="Открыть настройки" TestId="input-key-settings" OnClick="OnOpenSettings" /></Action>
+            </Notice>
+        }
+
+        <div class="nf-panel nf-composer">
+            @if (Capture.Session is not null)
+            {
+                <Overline>Уточнение</Overline>
+            }
+            <TextArea @ref="_editor" Rows="@(Capture.Session is null ? 6 : 4)" MaxLength="MealInputText.MaximumLength"
+                      AccessibleLabel="@(Capture.Session is null ? "Описание еды" : "Уточнение")"
+                      Placeholder="@CaptureText.Placeholder(Capture.Session is not null, Capture.Purpose)"
+                      Value="@Capture.Text" ValueChanged="OnTextChanged" Error="@_error"
+                      Class="nf-composer__text" TestId="input-description" />
+            @if (Capture.SaveStatus.Length > 0 || CaptureText.Counter(Capture.Text.Length) is not null)
+            {
+                <div class="nf-composer__tools">
+                    <Caption Class="nf-composer__status" Tone="@(Capture.SaveFailed ? Tone.Danger : (Tone?)null)" TestId="input-save-status">@Capture.SaveStatus</Caption>
+                    @if (Capture.SaveFailed)
+                    {
+                        <GhostButton Text="Повторить сохранение" Class="nf-composer__retry" TestId="input-draft-retry" OnClick="RetrySaveAsync" />
+                    }
+                    <Caption Class="nf-composer__count">@CaptureText.Counter(Capture.Text.Length)</Caption>
+                </div>
+            }
+            @* while the calculation waits for answers, sending them is the main step *@
+            <ActionButton Text="@(Capture.Session is null ? "Разобрать описание" : "Добавить уточнение")"
+                          Secondary="@(Capture.Session is { CanConfirm: true })"
+                          ProgressKey="capture-submit" TestId="input-submit" OnClick="SubmitAsync" />
+        </div>
+
+        @if (Capture.Session is not null)
+        {
+            <GhostButton Text="Начать запись заново" Danger="true" Class="nf-capture-restart" TestId="draft-restart" OnClick="RestartAsync" />
+        }
+    }
+}
+
+@if (_newProduct is { } productName)
+{
+    <ProductForm ProfileId="Profile.Id" InitialName="@productName" OnSaved="OnProductSavedAsync" OnClose="() => _newProduct = null" />
+}
+
+@code {
+    private static readonly SegmentedOption[] Purposes =
+    [
+        new("В дневник", "input-purpose-diary"),
+        new("Создать блюдо", "input-purpose-dish")
+    ];
+
+    private bool _loaded;
+    private string? _loadError;
+    private bool _hasGroq = true;
+    private string? _error;
+    private string? _newProduct;
+    private TextArea? _editor;
+    private SessionPreview? _preview;
+    private bool _focusPreview;
+    private bool _focusEditor;
+    private bool _saveFailed;
+
+    [Parameter, EditorRequired]
+    public LocalProfile Profile { get; set; } = null!;
+
+    // the day shown in the diary; a new description goes there
+    [Parameter]
+    public DateOnly Date { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenSettings { get; set; }
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Capture.Changed += OnCaptureChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadError = null;
+        try
+        {
+            // the warning comes before the first tap, not as an error after it
+            _hasGroq = await Settings.HasGroqAsync(Profile.Id);
+            await Capture.LoadAsync(Profile.Id);
+            Capture.Open(Date);
+            _loaded = true;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            _loadError = DiaryText.LoadFailed;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPreview && _preview is not null)
+        {
+            _focusPreview = false;
+            await _preview.FocusStatusAsync();
+        }
+
+        // the recovery card and its button are gone, the input takes the focus
+        if (_focusEditor && _editor is not null)
+        {
+            _focusEditor = false;
+            await _editor.FocusAsync();
+        }
+    }
+
+    private void SelectPurpose(int index) =>
+        Capture.SetPurpose(index == 1 ? MealSessionPurpose.CreateDish : MealSessionPurpose.Diary);
+
+    private void OnTextChanged(string? text)
+    {
+        _error = null;
+        Capture.SetText(text);
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Capture.Text) && !Capture.Blocked)
+        {
+            _error = Capture.Session is null
+                ? "Опишите, что вы съели, и вес, например: гречка 150 г."
+                : "Напишите уточнение, например ответ на вопрос выше.";
+            StateHasChanged();
+            await Task.Yield();
+            await _editor!.FocusAsync();
+            return;
+        }
+
+        await Runner.RunAsync(async () =>
+        {
+            await Capture.SubmitAsync(text => Runner.ShowProgress("capture-submit", text));
+            // the preview appears above the emptied field
+            _focusPreview = true;
+        });
+    }
+
+    private async Task FocusEditorAsync()
+    {
+        if (_editor is not null)
+        {
+            await _editor.FocusAsync();
+        }
+    }
+
+    // runs inside the action of the product form, so it does not start one of its own
+    private async Task OnProductSavedAsync()
+    {
+        await Capture.RefreshAsync();
+        _focusPreview = true;
+    }
+
+    private Task RetrySaveAsync() => Runner.RunAsync(Capture.RetrySaveAsync);
+
+    private Task RestartAsync() => Runner.RunAsync(async () =>
+    {
+        await Capture.FlushAsync();
+        if (await Runner.ConfirmAsync("Начать заново?", "Текущий расчёт не подтверждён и будет закрыт. Дневник не изменится.",
+                "Начать заново", "Оставить", destructive: true))
+        {
+            await Capture.RestartAsync();
+            Capture.Open(Date);
+            StateHasChanged();
+            await Task.Yield();
+            await _editor!.FocusAsync();
+        }
+    });
+
+    private Task RestoreAsync() => Runner.RunAsync(async () =>
+    {
+        await Capture.RestoreDraftAsync((title, message, accept) => Runner.ConfirmAsync(title, message, accept, "Оставить"));
+        _focusEditor = !Capture.Blocked;
+    });
+
+    private Task ReloadAsync() => Runner.RunAsync(async () =>
+    {
+        await Capture.ReloadDraftAsync();
+        _focusEditor = !Capture.Blocked;
+    });
+
+    private Task DiscardAsync() => Runner.RunAsync(async () =>
+    {
+        if (await Runner.ConfirmAsync("Удалить сохранённый текст?",
+                "Будет удалён только неотправленный текст этого профиля. Дневник, продукты и блюда останутся.",
+                "Удалить", "Оставить", destructive: true))
+        {
+            await Capture.DiscardDraftAsync();
+            Capture.Open(Date);
+            _focusEditor = true;
+        }
+    });
+
+    private void OnCaptureChanged()
+    {
+        // the status under the field changes silently, a failed save has to be heard once
+        if (Capture.SaveFailed && !_saveFailed)
+        {
+            Runner.Announce(CaptureText.SaveFailed);
+        }
+
+        _saveFailed = Capture.SaveFailed;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Capture.Changed -= OnCaptureChanged;
+        // leaving the section writes the last typed words at once
+        Capture.SaveNow();
+    }
+}

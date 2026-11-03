@@ -41,6 +41,15 @@ export async function promptInstall() {
     return choice.outcome;
 }
 
+// a phone may freeze or discard a hidden page without another event, so unsaved input is written when it hides
+export function watchVisibility(watcher, target = globalThis.document) {
+    target.addEventListener("visibilitychange", () => {
+        if (target.visibilityState === "hidden") {
+            watcher.invokeMethodAsync("OnHidden");
+        }
+    });
+}
+
 function notifyInstall() {
     installWatcher?.invokeMethodAsync("OnInstallAvailabilityChanged", installPrompt !== null);
 }

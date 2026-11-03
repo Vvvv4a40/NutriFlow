@@ -5,6 +5,7 @@ using NutriFlow.Mobile.Core;
 using NutriFlow.Ui;
 using NutriFlow.Ui.Hosting;
 using NutriFlow.Web;
+using NutriFlow.Web.Diagnostics;
 using NutriFlow.Web.Services;
 
 // boot.mjs starts blazor with the same culture so that the russian icu data is loaded
@@ -26,9 +27,14 @@ builder.Services.AddSingleton<OpfsFiles>();
 builder.Services.AddSingleton(services => new PersistentDirectory(services.GetRequiredService<OpfsFiles>()));
 builder.Services.AddSingleton(_ => new LocalProfileStore(PersistentDirectory.MemoryRoot));
 builder.Services.AddSingleton(services => new LocalInputDraftStore(services.GetRequiredService<LocalProfileStore>()));
+// in development the Groq key «fake» parses text without network (Diagnostics/FakeGroqHandler.cs)
+Func<HttpClient>? httpClients = builder.HostEnvironment.IsDevelopment()
+    ? () => new HttpClient(new FakeGroqHandler(new HttpClientHandler()))
+    : null;
 builder.Services.AddScoped(services => new LocalMealClient(
     services.GetRequiredService<LocalProfileStore>(),
-    openDatabase: services.GetRequiredService<WebProfileDatabase>().OpenAsync));
+    httpClients,
+    services.GetRequiredService<WebProfileDatabase>().OpenAsync));
 builder.Services.AddSingleton<WebProfileSettings>();
 builder.Services.AddSingleton<IProfileSettings>(services => services.GetRequiredService<WebProfileSettings>());
 builder.Services.AddSingleton<BrowserPlatform>();

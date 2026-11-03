@@ -1,6 +1,7 @@
 @using Microsoft.JSInterop
 @implements IDisposable
 @inject ProfileState Profiles
+@inject CaptureState Capture
 @inject ActionRunner Runner
 @inject IJSRuntime Js
 
@@ -28,13 +29,24 @@ else if (Profiles.Current is not { } profile)
 }
 else
 {
-    <AppShell @ref="_shell" Title="@TitleText" ProfileName="@profile.Name" Selected="_tab" SelectedChanged="SelectTabAsync" OnProfile="ChooseProfileAsync">
+    <AppShell @ref="_shell" Title="@TitleText" ProfileName="@profile.Name" Selected="_tab" SelectedChanged="SelectTabAsync" OnProfile="ChooseProfileAsync"
+              ActionBar="@(_tab == ShellTab.Input && Capture.Session is not null ? ConfirmBar : null)">
         <ChildContent>
+            @if (_tab != ShellTab.Input && Capture.ProfileId == profile.Id && Capture.Blocked)
+            {
+                <Notice TestId="input-draft-attention">
+                    <ChildContent>@(Capture.DraftProblem ?? "Есть неотправленный текст другой записи.")</ChildContent>
+                    <Action><GhostButton Text="Проверить сохранённый ввод" OnClick="() => SelectTabAsync(ShellTab.Input)" /></Action>
+                </Notice>
+            }
             @switch (_tab)
             {
                 case ShellTab.Diary:
                     <DiaryScreen @key="profile.Id" Profile="profile" Date="_date" DateChanged="date => _date = date"
                                  OnAddFood="() => SelectTabAsync(ShellTab.Input)" />
+                    break;
+                case ShellTab.Input:
+                    <CaptureScreen @key="profile.Id" Profile="profile" Date="_date" OnOpenSettings="() => SelectTabAsync(ShellTab.Settings)" />
                     break;
                 case ShellTab.Settings:
                     <SettingsScreen @key="profile.Id" Profile="profile" OnChooseProfile="ChooseProfileAsync" DeveloperTools="DeveloperTools" />
@@ -59,6 +71,7 @@ else
     private AppShell? _shell;
     private Guid? _shownProfileId;
     private bool _focusShell;
+    private string? _announcement;
     private ShellTab _tab = ShellTab.Diary;
     private DateOnly _date = Today;
 
@@ -68,10 +81,12 @@ else
 
     private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
 
+    private RenderFragment ConfirmBar => @<ConfirmSessionButton OnConfirmed="OnConfirmedAsync" />;
+
     private string TitleText => _tab switch
     {
         ShellTab.Products => "Продукты",
-        ShellTab.Input => "Запись еды",
+        ShellTab.Input => CaptureText.Title(Capture.Session, Capture.Purpose),
         ShellTab.Dishes => "Блюда",
         ShellTab.Settings => "Настройки",
         _ => "Дневник"
@@ -80,6 +95,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         Profiles.Changed += OnProfileChanged;
+        Capture.Changed += OnCaptureChanged;
         await LoadAsync();
     }
 
@@ -89,6 +105,12 @@ else
         {
             _loadError = null;
             await Profiles.LoadAsync();
+            // the saved input is read at start, so other sections can point to text waiting for a decision
+            if (Profiles.Current is { } current)
+            {
+                await Capture.LoadAsync(current.Id);
+            }
+
             _loaded = true;
         }
         catch (Exception exception)
@@ -100,6 +122,8 @@ else
 
     private async Task SelectTabAsync(ShellTab tab)
     {
+        // leaving the input writes the last typed words at once
+        Capture.SaveNow();
         _tab = tab;
         // every section starts at its top, as on the phone
         await Js.InvokeVoidAsync("scrollTo", 0, 0);
@@ -107,6 +131,7 @@ else
 
     private Task ChooseProfileAsync() => Runner.RunAsync(async () =>
     {
+        await Capture.FlushAsync();
         ProfileChoices choices = new(await Profiles.ListAsync(), Profiles.Current?.Id);
         string? choice = await Runner.ChooseAsync("Профили на этом устройстве", "Отмена", null, choices.Buttons);
         if (choice == ProfileChoices.Create)
@@ -119,6 +144,27 @@ else
         }
     });
 
+    // the diary with the new entry is already on screen, so only a dish or a problem with the saved input needs a dialog
+    private async Task OnConfirmedAsync(ConfirmMealSessionResponse result)
+    {
+        if (result.SavedDish is null)
+        {
+            _date = result.Session.MealDate;
+        }
+
+        await SelectTabAsync(result.SavedDish is null ? ShellTab.Diary : ShellTab.Dishes);
+        _focusShell = true;
+        StateHasChanged();
+        if (result.SavedDish is null && Capture.DraftProblem is null)
+        {
+            _announcement = "Запись добавлена в дневник";
+            return;
+        }
+
+        string message = result.SavedDish is null ? "Запись добавлена в дневник." : "Блюдо сохранено в профиле. Порции из него можно будет записывать в дневник со следующей версии.";
+        await Runner.AlertAsync("Сохранено", Capture.DraftProblem is { } problem ? $"{message} {problem}" : message, "Готово");
+    }
+
     // the control that had the focus left with the old screen (the welcome start button, the profile row of the
     // settings recreated for the new profile); the shell title takes it once the form is closed
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -128,6 +174,12 @@ else
             _focusShell = false;
             await _shell.FocusTitleAsync();
         }
+
+        if (_announcement is { } announcement && !_focusShell)
+        {
+            _announcement = null;
+            Runner.Announce(announcement);
+        }
     }
 
     // another profile starts at today, like a fresh start of the phone app
@@ -136,8 +188,20 @@ else
         _focusShell |= _loaded && Profiles.Current is not null && Profiles.Current.Id != _shownProfileId;
         _shownProfileId = Profiles.Current?.Id;
         _date = Today;
+        // the input screen waits for the same load and shows its error
+        if (Profiles.Current is { } current)
+        {
+            _ = Capture.LoadAsync(current.Id);
+        }
+
         _ = InvokeAsync(StateHasChanged);
     }
 
-    public void Dispose() => Profiles.Changed -= OnProfileChanged;
+    private void OnCaptureChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Profiles.Changed -= OnProfileChanged;
+        Capture.Changed -= OnCaptureChanged;
+    }
 }

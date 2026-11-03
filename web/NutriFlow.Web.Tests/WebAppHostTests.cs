@@ -28,6 +28,21 @@ public sealed class WebAppHostTests : IDisposable
         Assert.Equal(1, changes);
     }
 
+    [Fact]
+    public async Task HiddenPageIsReportedToTheScreens()
+    {
+        BrowserPlatform platform = new(_js);
+        WebAppHost host = Create(platform);
+        int hidden = 0;
+        host.Hidden += () => hidden++;
+
+        await platform.StartAsync();
+        platform.OnHidden();
+
+        Assert.Same(platform, Assert.IsAssignableFrom<Microsoft.JSInterop.DotNetObjectReference<BrowserPlatform>>(_js.Platform.VisibilityWatcher).Value);
+        Assert.Equal(1, hidden);
+    }
+
     [Theory]
     [InlineData("accepted", true)]
     [InlineData("dismissed", false)]

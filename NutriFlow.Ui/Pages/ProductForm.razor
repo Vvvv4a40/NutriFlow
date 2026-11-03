@@ -1,0 +1,140 @@
+@inject LocalMealClient Meals
+@inject ActionRunner Runner
+
+@* a catalog product typed in from the package (ProductEditorPageAsync in MainPage.Products.cs, without the label photo) *@
+<FormPage Title="Новый продукт" TestId="product-form" OnClose="OnClose">
+    <ChildContent>
+        <BodyText Muted="true">Перенесите значения на 100 г с упаковки или из другого известного источника.</BodyText>
+        <Field @ref="_nameField" Label="Название" Placeholder="Например, Творог 5% «Простоквашино»" MaxLength="200"
+               Error="@_errors.GetValueOrDefault(NameKey)" Hint="@NameHint" TestId="product-name"
+               @bind-Value="_name" @bind-Value:after="() => _errors.Remove(NameKey)" />
+        <Overline>Пищевая ценность на 100 г</Overline>
+        <div class="nf-field-grid">
+            @foreach (NutrientField field in Nutrients)
+            {
+                <Field @ref="_fields[field.Key]" Label="@field.Label" Number="true" Error="@_errors.GetValueOrDefault(field.Key)"
+                       TestId="@($"product-{field.Key}")" Value="@_values.GetValueOrDefault(field.Key)"
+                       ValueChanged="value => OnNutrientChanged(field.Key, value)" />
+            }
+        </div>
+        <Field Label="Штрихкод" Placeholder="Необязательно" Number="true" Plain="true" MaxLength="32" TestId="product-barcode"
+               @bind-Value="_barcode" />
+        <SwitchRow Text="Значения приблизительные" Hint="Например, взяты по похожему продукту" TestId="product-estimated"
+                   @bind-Checked="_estimated" />
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Сохранить продукт" TestId="product-save" OnClick="SaveAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private const string NameKey = "name";
+
+    private sealed record NutrientField(string Key, string Label, string Error);
+
+    private static readonly NutrientField[] Nutrients =
+    [
+        new("calories", "Калории, ккал", "Введите калории, например 110."),
+        new("protein", "Белки, г", "Введите белки, например 3,6 или 0."),
+        new("fat", "Жиры, г", "Введите жиры, например 1,3 или 0."),
+        new("carbs", "Углеводы, г", "Введите углеводы, например 21,3 или 0.")
+    ];
+
+    private readonly Dictionary<string, Field?> _fields = [];
+    private readonly Dictionary<string, string?> _values = [];
+    private readonly Dictionary<string, string> _errors = [];
+    private Field? _nameField;
+    private string? _name;
+    private string? _barcode;
+    private bool _estimated;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    // the ingredient that had no nutrition in the preview
+    [Parameter]
+    public string? InitialName { get; set; }
+
+    [Parameter]
+    public EventCallback<ProductResponse> OnSaved { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    // the calculation matches products by their exact name, another name would leave the ingredient without nutrition
+    private string? NameHint => InitialName is null ? null
+        : $"Расчёт найдёт продукт по названию «{InitialName}». Другое название в расчёт не подставится.";
+
+    protected override void OnInitialized() => _name = InitialName;
+
+    private void OnNutrientChanged(string key, string? value)
+    {
+        _values[key] = value;
+        _errors.Remove(key);
+    }
+
+    private async Task SaveAsync()
+    {
+        _errors.Clear();
+        string name = (_name ?? "").Trim();
+        if (name.Length == 0)
+        {
+            _errors[NameKey] = "Введите название продукта, например «Гречка отварная».";
+        }
+
+        Dictionary<string, decimal> numbers = [];
+        foreach (NutrientField field in Nutrients)
+        {
+            if (NutritionText.TryParseNumber(_values.GetValueOrDefault(field.Key), positive: false, out decimal value))
+            {
+                numbers[field.Key] = value;
+            }
+            else
+            {
+                _errors[field.Key] = field.Error;
+            }
+        }
+
+        if (_errors.Count > 0)
+        {
+            await ShowErrorAsync();
+            return;
+        }
+
+        ProductResponse product = new(name, numbers["calories"], numbers["protein"], numbers["fat"], numbers["carbs"],
+            "ManualInput", _estimated ? "Estimated" : "Exact", "Ручной ввод пользователя", null,
+            string.IsNullOrWhiteSpace(_barcode) ? null : _barcode.Trim());
+        bool duplicate = false;
+        await Runner.RunAsync(async () =>
+        {
+            if (!await Meals.AddProductAsync(ProfileId, product))
+            {
+                duplicate = true;
+                return;
+            }
+
+            await OnClose.InvokeAsync();
+            await OnSaved.InvokeAsync(product);
+        });
+
+        if (duplicate)
+        {
+            _errors[NameKey] = "Продукт с таким названием уже есть. Выберите другое название, например добавьте марку.";
+            await ShowErrorAsync();
+        }
+    }
+
+    // the first wrong field takes the focus; every error stays under its own field
+    private async Task ShowErrorAsync()
+    {
+        StateHasChanged();
+        await Task.Yield();
+        Field? first = _errors.ContainsKey(NameKey)
+            ? _nameField
+            : Nutrients.Where(field => _errors.ContainsKey(field.Key)).Select(field => _fields.GetValueOrDefault(field.Key)).FirstOrDefault();
+        if (first is not null)
+        {
+            await first.FocusAsync();
+        }
+    }
+}

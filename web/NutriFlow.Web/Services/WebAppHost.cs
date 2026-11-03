@@ -19,6 +19,12 @@ public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, Persisten
         remove => platform.InstallChanged -= value;
     }
 
+    public event Action? Hidden
+    {
+        add => platform.Hidden += value;
+        remove => platform.Hidden -= value;
+    }
+
     public Task<bool> InstallAsync() => platform.InstallAsync();
 
     public Task<bool> IsStoragePersistentAsync() => platform.IsPersistedAsync();

@@ -1,0 +1,163 @@
+@* one dish of the preview: the portion first, then the dish and per 100 g, composition and sources on demand
+   (DishPreviewCard in MainPage.PreviewCards.cs) *@
+@{
+    bool single = CaptureText.IsSingleProduct(Dish);
+    // a single product without nutrition has nothing to total yet; «Что проверить» above offers to add it
+    string? missing = single && Dish.Ingredients[0].ResolvedProduct is null ? Dish.Ingredients[0].ProductName : null;
+}
+<Card Class="nf-dish-preview" TestId="draft-dish">
+    <div class="nf-dish-preview__heading">
+        <Headline>@Dish.Name</Headline>
+        @if (!single)
+        {
+            <div class="nf-badges">
+                <Caption>@CaptureText.FinalWeight(Dish.FinalWeightInGrams)</Caption>
+                @Quality(Dish.FinalWeightQuality)
+            </div>
+        }
+    </div>
+
+    @foreach (PortionPreviewResponse portion in Dish.Portions)
+    {
+        <div class="nf-portion" data-testid="draft-portion">
+            <NutritionBlock Caption="Ваша порция" Value="portion.Nutrition" Class="nf-nutrition--large" />
+            <div class="nf-badges">
+                <Caption>@CaptureText.PortionWeight(portion)</Caption>
+                @Quality(portion.WeightQuality is "Exact" or "Verified" ? portion.NutritionQuality : portion.WeightQuality)
+            </div>
+        </div>
+    }
+
+    @if (missing is null)
+    {
+        <div class="nf-totals">
+            @if (CaptureText.IsWholeDishEaten(Dish))
+            {
+                @Total("На 100 г", Dish.NutritionPer100Grams, Dish.NutritionPer100GramsQuality, true)
+            }
+            else
+            {
+                @Total("Всё блюдо", Dish.TotalNutrition, Dish.TotalNutritionQuality, false)
+                @Total("На 100 г", Dish.NutritionPer100Grams, Dish.NutritionPer100GramsQuality, false)
+            }
+        </div>
+    }
+
+    @if (!single)
+    {
+        <SectionHeader Title="Состав" Detail="@(Dish.Ingredients.Count > 0 ? Dish.Ingredients.Count.ToString() : null)" />
+        @if (Dish.Ingredients.Count == 0)
+        {
+            <Caption>Состав пока неизвестен.</Caption>
+        }
+        else
+        {
+            <ul class="nf-ingredients" role="list" data-testid="draft-ingredients">
+                @foreach (IngredientPreviewResponse ingredient in Dish.Ingredients)
+                {
+                    @Ingredient(ingredient)
+                }
+            </ul>
+        }
+    }
+    else if (Dish.Ingredients is [{ ResolvedProduct: { DataQuality: "Estimated" } }])
+    {
+        <div class="nf-badges"><Badge Text="≈ КБЖУ" SpokenText="оценочные КБЖУ продукта" Tone="Tone.Warning" /></div>
+    }
+
+    @if (Dish.Ingredients.Any(ingredient => ingredient.ResolvedProduct is not null))
+    {
+        <Expander Title="Источники данных" TestId="draft-sources-toggle">
+            <div class="nf-history">
+                @foreach (ProductResponse product in Dish.Ingredients.Select(ingredient => ingredient.ResolvedProduct).OfType<ProductResponse>())
+                {
+                    <div class="nf-history__item">
+                        <BodyText Strong="true">@product.Name</BodyText>
+                        <Caption>@CaptureText.Source(product)</Caption>
+                        <p class="nf-caption">
+                            <span aria-hidden="true">На 100 г: @NutritionText.Nutrition(product)</span>
+                            <span class="nf-visually-hidden">На 100 граммов: @NutritionText.SpokenNutrition(product)</span>
+                        </p>
+                        @if (!string.IsNullOrWhiteSpace(product.SourceReference))
+                        {
+                            <Caption Class="nf-break-all">@product.SourceReference</Caption>
+                        }
+                    </div>
+                }
+            </div>
+        </Expander>
+    }
+</Card>
+
+@code {
+    [Parameter, EditorRequired]
+    public DishPreviewResponse Dish { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback<string> OnAddProduct { get; set; }
+
+    private static RenderFragment Quality(string? quality) => __builder =>
+    {
+        if (quality is not null)
+        {
+            <QualityBadge Quality="@quality" />
+        }
+    };
+
+    private static RenderFragment Total(string title, NutritionResponse? nutrition, string? quality, bool wide) => __builder =>
+    {
+        <div class="nf-total @(wide ? "nf-total--wide" : null)">
+            <p class="nf-overline">@title</p>
+            @if (nutrition is null)
+            {
+                <Caption>неизвестно</Caption>
+            }
+            else
+            {
+                <p class="nf-total__calories">
+                    <span class="nf-total__number" aria-hidden="true">@NutritionText.Kilocalories(nutrition.Calories)</span>
+                    <span class="nf-total__unit" aria-hidden="true">ккал</span>
+                    <span class="nf-visually-hidden">@NutritionText.Amount(nutrition.Calories) килокалорий</span>
+                </p>
+                <MacroLine Protein="nutrition.ProteinGrams" Fat="nutrition.FatGrams" Carbs="nutrition.CarbohydratesGrams" />
+            }
+            @Quality(quality)
+        </div>
+    };
+
+    private RenderFragment Ingredient(IngredientPreviewResponse ingredient) => __builder =>
+    {
+        ProductResponse? product = ingredient.ResolvedProduct;
+        string name = product?.Name ?? ingredient.ProductName;
+        <li class="nf-ingredient" data-testid="draft-ingredient">
+            <div class="nf-ingredient__text">
+                <span class="nf-text nf-text--strong">@name</span>
+                <span class="nf-caption">@CaptureText.IngredientWeight(ingredient)</span>
+                @if (ingredient.WeightQuality is not ("Exact" or "Verified") || product is null || product.DataQuality == "Estimated")
+                {
+                    <span class="nf-badges">
+                        @if (product is null)
+                        {
+                            <Badge Text="нет КБЖУ" SpokenText="нет пищевой ценности" Tone="Tone.Warning" />
+                        }
+                        @if (ingredient.WeightQuality is not ("Exact" or "Verified"))
+                        {
+                            <QualityBadge Quality="@ingredient.WeightQuality" />
+                        }
+                        @if (product?.DataQuality == "Estimated")
+                        {
+                            <Badge Text="≈ КБЖУ" SpokenText="оценочные КБЖУ продукта" Tone="Tone.Warning" />
+                        }
+                    </span>
+                }
+            </div>
+            @if (product is not null && ingredient.Nutrition is not null)
+            {
+                <span class="nf-text nf-text--strong nf-ingredient__value">
+                    <span aria-hidden="true">@NutritionText.Kilocalories(ingredient.Nutrition.Calories) ккал</span>
+                    <span class="nf-visually-hidden">@NutritionText.Amount(ingredient.Nutrition.Calories) килокалорий</span>
+                </span>
+            }
+        </li>
+    };
+}

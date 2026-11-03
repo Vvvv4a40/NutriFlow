@@ -1,18 +1,29 @@
+@* a multiline field; an error stays under it until the owner clears it, as in Field *@
 <div class="nf-field @Class">
     @if (Label is not null)
     {
         <label class="nf-field__label" for="@_id">@Label</label>
     }
     <textarea id="@_id" class="nf-field__input nf-field__input--multiline" rows="@Rows" placeholder="@Placeholder"
-              maxlength="@MaxLength" aria-label="@(Label is null ? Placeholder : null)" data-testid="@TestId"
-              value="@Value" @oninput="OnInputAsync"></textarea>
+              maxlength="@MaxLength" aria-label="@(Label is null ? AccessibleLabel ?? Placeholder : null)"
+              aria-invalid="@(Error is null ? null : "true")" aria-describedby="@(Error is null ? null : _id + "-error")"
+              disabled="@(!Enabled)" data-testid="@TestId" @ref="_input" value="@Value" @oninput="OnInputAsync"></textarea>
+    @if (Error is not null)
+    {
+        <p id="@(_id + "-error")" class="nf-field__error" data-testid="@(TestId is null ? null : TestId + "-error")">@Error</p>
+    }
 </div>
 
 @code {
     private readonly string _id = "text-" + Guid.NewGuid().ToString("N")[..8];
+    private ElementReference _input;
 
     [Parameter]
     public string? Label { get; set; }
+
+    // a spoken name when the field has no visible label; the placeholder is used otherwise
+    [Parameter]
+    public string? AccessibleLabel { get; set; }
 
     [Parameter]
     public string? Value { get; set; }
@@ -30,10 +41,18 @@
     public int? MaxLength { get; set; }
 
     [Parameter]
+    public string? Error { get; set; }
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    [Parameter]
     public string? TestId { get; set; }
 
     [Parameter]
     public string? Class { get; set; }
+
+    public ValueTask FocusAsync() => _input.FocusAsync();
 
     private Task OnInputAsync(ChangeEventArgs args)
     {

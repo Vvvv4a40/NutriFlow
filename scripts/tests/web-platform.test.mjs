@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureInstallPrompt, promptInstall, watchInstall } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
+import { captureInstallPrompt, promptInstall, watchInstall, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
 
 // a window that dispatches the two install events of chrome
 function browser() {
@@ -76,4 +76,16 @@ test("an installed app hides the install button", () => {
 
     assert.deepEqual(dotnet.calls, [["OnInstallAvailabilityChanged", true], ["OnInstallAvailabilityChanged", false]]);
     assert.equal(watchInstall(dotnet), false);
+});
+
+test("a hidden page asks .NET to write unsaved input, a visible one does not", () => {
+    const document = { ...browser(), visibilityState: "visible" };
+    const dotnet = watcher();
+    watchVisibility(dotnet, document);
+
+    document.dispatch("visibilitychange");
+    document.visibilityState = "hidden";
+    document.dispatch("visibilitychange");
+
+    assert.deepEqual(dotnet.calls, [["OnHidden", undefined]]);
 });

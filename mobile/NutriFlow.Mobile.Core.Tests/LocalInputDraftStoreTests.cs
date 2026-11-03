@@ -38,6 +38,22 @@ public sealed class LocalInputDraftStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task ClearingAndEmptyTextNeedNoProfileFolder()
+    {
+        LocalProfileStore profiles = new(_root);
+        LocalProfile profile = await profiles.CreateAsync("Первый");
+        LocalInputDraftStore drafts = new(profiles);
+        Assert.False(Directory.Exists(ProfileDirectory(profile.Id)));
+
+        await drafts.ClearAsync(profile.Id);
+        await drafts.DiscardAsync(profile.Id);
+        await drafts.SaveAsync(profile.Id, new LocalInputDraft(" ", _date, MealSessionPurpose.Diary));
+
+        Assert.Null(await drafts.ReadAsync(profile.Id));
+        Assert.False(Directory.Exists(ProfileDirectory(profile.Id)));
+    }
+
+    [Fact]
     public async Task DraftsAreIsolatedBetweenProfilesAndClearingDoesNotAffectOthers()
     {
         LocalProfileStore profiles = new(_root);

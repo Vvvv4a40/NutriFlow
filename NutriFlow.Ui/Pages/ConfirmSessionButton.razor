@@ -1,0 +1,46 @@
+@implements IDisposable
+@inject CaptureState Capture
+@inject ActionRunner Runner
+
+@* the pinned confirmation of the preview (ConfirmButton in MainPage.Preview.cs) *@
+@if (Capture.Session is { } session)
+{
+    <ActionButton Text="@CaptureText.ConfirmText(session)" Enabled="session.CanConfirm"
+                  Class="nf-button--large" TestId="draft-confirm" OnClick="ConfirmAsync" />
+}
+
+@code {
+    // the saved session left the screen: the host shows the diary or the dishes
+    [Parameter]
+    public EventCallback<ConfirmMealSessionResponse> OnConfirmed { get; set; }
+
+    protected override void OnInitialized() => Capture.Changed += OnCaptureChanged;
+
+    private Task ConfirmAsync() => Runner.RunAsync(async () =>
+    {
+        await Capture.FlushAsync();
+        if (!string.IsNullOrWhiteSpace(Capture.Text) && !await Runner.ConfirmAsync(CaptureText.ConfirmWithoutText(Capture.Session),
+                "Набранное уточнение ещё не отправлено и не входит в этот расчёт. После подтверждения оно будет удалено.",
+                CaptureText.ConfirmText(Capture.Session), "Вернуться"))
+        {
+            return;
+        }
+
+        ConfirmMealSessionResponse result = await Capture.ConfirmAsync();
+        if (result.Session.Status == "Confirmed")
+        {
+            await OnConfirmed.InvokeAsync(result);
+        }
+        else
+        {
+            StateHasChanged();
+            await Runner.AlertAsync("Проверьте расчёт", result.Outcome == "StalePreview"
+                ? "Расчёт изменился, пока был открыт. Проверьте новые значения и подтвердите ещё раз."
+                : result.Message ?? "Перед подтверждением нужны уточнения. Проверьте обновлённый расчёт.", "Понятно");
+        }
+    });
+
+    private void OnCaptureChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Capture.Changed -= OnCaptureChanged;
+}

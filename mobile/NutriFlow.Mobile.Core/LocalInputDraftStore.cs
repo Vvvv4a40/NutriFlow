@@ -29,7 +29,7 @@ public sealed class LocalInputDraftStore
             DeleteInterruptedWrites(directory);
             if (string.IsNullOrWhiteSpace(draft.Text))
             {
-                File.Delete(path);
+                DeleteIfPresent(path);
                 return true;
             }
 
@@ -65,7 +65,7 @@ public sealed class LocalInputDraftStore
         {
             await ReadFileAsync(path, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
-            File.Delete(path);
+            DeleteIfPresent(path);
             return true;
         }, cancellationToken);
 
@@ -73,7 +73,7 @@ public sealed class LocalInputDraftStore
         WithProfileAsync(profileId, (path, token) =>
         {
             token.ThrowIfCancellationRequested();
-            File.Delete(path);
+            DeleteIfPresent(path);
             return Task.FromResult(true);
         }, cancellationToken);
 
@@ -124,6 +124,16 @@ public sealed class LocalInputDraftStore
         catch (Exception exception) when (exception is JsonException or ArgumentException)
         {
             throw new InvalidDataException("Не удалось прочитать сохранённый ввод. Исходный файл не изменён.", exception);
+        }
+    }
+
+    // the profile folder exists only once something was written there: in the browser the database lives outside it
+    // and the folder is restored only with its files
+    private static void DeleteIfPresent(string path)
+    {
+        if (File.Exists(path))
+        {
+            File.Delete(path);
         }
     }
 

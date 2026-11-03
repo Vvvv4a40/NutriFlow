@@ -1,0 +1,99 @@
+@* the calculation before confirmation: status, questions, dishes and the input history (MainPage.Preview.cs) *@
+@{
+    PreviewStatusText status = CaptureText.Status(Session, DateOnly.FromDateTime(DateTime.Today));
+    IReadOnlyList<WorkflowIssueResponse> issues = CaptureText.VisibleIssues(Session);
+}
+<div class="nf-preview-status @PressableBase.ToneClass(status.Tone)" tabindex="-1" data-testid="draft-status-card" @ref="_status">
+    <IconTile Icon="status.Icon" Tone="status.Tone" />
+    <div class="nf-preview-status__text">
+        <p class="nf-overline nf-preview-status__context">@status.Context</p>
+        <p class="nf-preview-status__title" data-testid="draft-status">@status.Title</p>
+        <Caption>@status.Hint</Caption>
+    </div>
+</div>
+
+@if (Session.ClarificationQuestions.Count > 0 || issues.Count > 0)
+{
+    <Card>
+        @if (Session.ClarificationQuestions.Count > 0)
+        {
+            <Overline>Ответьте в поле уточнения</Overline>
+            <ol class="nf-questions" role="list" data-testid="draft-questions">
+                @for (int index = 0; index < Session.ClarificationQuestions.Count; index++)
+                {
+                    <li class="nf-questions__item">
+                        <span class="nf-questions__number" aria-hidden="true">@(index + 1)</span>
+                        <span class="nf-text">@Session.ClarificationQuestions[index]</span>
+                    </li>
+                }
+            </ol>
+            <GhostButton Text="Ответить на вопросы" Class="nf-issues__action" TestId="draft-answer" OnClick="OnAnswer" />
+        }
+        @if (issues.Count > 0)
+        {
+            <Overline>Что проверить</Overline>
+            <ul class="nf-issues" role="list" data-testid="draft-issues">
+                @foreach (WorkflowIssueResponse issue in issues)
+                {
+                    <li class="nf-issues__item">
+                        <span class="nf-text nf-text--strong">@CaptureText.IssueTitle(issue)</span>
+                        <span class="nf-caption">@CaptureText.Issue(issue)</span>
+                        @* the next step sits next to the problem, not only in the dish card further down *@
+                        @if (issue is { Code: "product_not_found", IngredientName: { } ingredient })
+                        {
+                            <GhostButton Text="Добавить пищевую ценность" Class="nf-issues__action" TestId="draft-issue-add-product"
+                                         Description="@($"Добавить пищевую ценность продукта «{ingredient}»")"
+                                         OnClick="() => OnAddProduct.InvokeAsync(ingredient)" />
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </Card>
+}
+
+@foreach (DishPreviewResponse dish in Session.Dishes)
+{
+    <DishPreview Dish="dish" OnAddProduct="OnAddProduct" />
+}
+
+@if (Session.Dishes.Count == 0)
+{
+    <EmptyState Icon="AppIconKind.Sparkle" Title="Состав пока не определён" TestId="draft-empty"
+                Message="Добавьте описание еды ниже или ответьте на вопросы." />
+}
+
+@if (Session.Messages.Count > 0)
+{
+    <Card>
+        <Expander Title="@($"История ввода · {Session.Messages.Count}")" TestId="draft-history-toggle">
+            <div class="nf-history" data-testid="draft-history">
+                @for (int index = 0; index < Session.Messages.Count; index++)
+                {
+                    <div class="nf-history__item">
+                        <p class="nf-overline">@CaptureText.HistoryTitle(index)</p>
+                        <BodyText Muted="true" Class="nf-history__text">@Session.Messages[index]</BodyText>
+                    </div>
+                }
+            </div>
+        </Expander>
+    </Card>
+}
+
+@code {
+    private ElementReference _status;
+
+    [Parameter, EditorRequired]
+    public MealSessionResponse Session { get; set; } = null!;
+
+    // the name of an ingredient without nutrition, for a new catalog product
+    [Parameter]
+    public EventCallback<string> OnAddProduct { get; set; }
+
+    // the clarification field is below the dishes: this brings the focus there
+    [Parameter]
+    public EventCallback OnAnswer { get; set; }
+
+    // after a new calculation the status is the first thing to read
+    public ValueTask FocusStatusAsync() => _status.FocusAsync();
+}

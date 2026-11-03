@@ -1,4 +1,5 @@
 using Microsoft.JSInterop;
+using NutriFlow.Mobile.Core;
 using NutriFlow.Ui.Hosting;
 
 namespace NutriFlow.Ui.Tests;
@@ -47,6 +48,10 @@ internal sealed class FakeAppHost : IAppHost
 
     public event Action? Changed;
 
+    public event Action? Hidden;
+
+    public void Hide() => Hidden?.Invoke();
+
     public Task<bool> InstallAsync()
     {
         Changed?.Invoke();
@@ -72,6 +77,10 @@ internal sealed class FakeProfileSettings : IProfileSettings
 {
     public Dictionary<Guid, string> Themes { get; } = [];
 
+    public Dictionary<Guid, Guid> Sessions { get; } = [];
+
+    public string? GroqKey { get; set; }
+
     public Task<string> GetThemeAsync(Guid profileId) => Task.FromResult(Themes.GetValueOrDefault(profileId, "terracotta"));
 
     public Task SaveThemeAsync(Guid profileId, string theme)
@@ -80,7 +89,7 @@ internal sealed class FakeProfileSettings : IProfileSettings
         return Task.CompletedTask;
     }
 
-    public Task<bool> HasGroqAsync(Guid profileId) => Task.FromResult(false);
+    public Task<bool> HasGroqAsync(Guid profileId) => Task.FromResult(GroqKey is not null);
 
     public Task<string> GetTextModelAsync(Guid profileId) => Task.FromResult("text");
 
@@ -92,4 +101,23 @@ internal sealed class FakeProfileSettings : IProfileSettings
         Task.CompletedTask;
 
     public Task RemoveGroqAsync(Guid profileId) => Task.CompletedTask;
+
+    public Task<GroqSettings> GetGroqAsync(Guid profileId) => GroqKey is null
+        ? throw new InvalidOperationException("Добавьте личный ключ Groq в разделе «Настройки».")
+        : Task.FromResult(new GroqSettings(GroqKey));
+
+    public Task<Guid?> GetSessionIdAsync(Guid profileId) =>
+        Task.FromResult(Sessions.TryGetValue(profileId, out Guid id) ? id : (Guid?)null);
+
+    public Task SaveSessionIdAsync(Guid profileId, Guid sessionId)
+    {
+        Sessions[profileId] = sessionId;
+        return Task.CompletedTask;
+    }
+
+    public Task ClearSessionIdAsync(Guid profileId)
+    {
+        Sessions.Remove(profileId);
+        return Task.CompletedTask;
+    }
 }

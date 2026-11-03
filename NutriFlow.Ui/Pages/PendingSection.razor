@@ -1,21 +1,15 @@
-@* sections whose screens come with the next steps of the web app; each points to what already works *@
+@* products and dishes, whose screens come with step 7 of the web app; each points to what already works *@
 @switch (Tab)
 {
-    case ShellTab.Products:
-        <EmptyState Icon="AppIconKind.Products" Title="Продукты появятся в следующей версии" TestId="pending-products"
-                    Message="Каталог, поиск и продукты по штрихкоду готовятся. А пока задайте цель на день в дневнике.">
-            <Action><ActionButton Text="Открыть дневник" Secondary="true" TestId="pending-open-diary" OnClick="OnOpenDiary" /></Action>
-        </EmptyState>
-        break;
     case ShellTab.Dishes:
-        <EmptyState Icon="AppIconKind.Dishes" Title="Блюда появятся в следующей версии" TestId="pending-dishes"
-                    Message="Свои блюда из продуктов и описанные словами готовятся. А пока задайте цель на день в дневнике.">
+        <EmptyState Icon="AppIconKind.Dishes" Title="Список блюд появится в следующей версии" TestId="pending-dishes"
+                    Message="Блюда, сохранённые через «Создать блюдо», уже хранятся в профиле и появятся здесь. А пока откройте дневник.">
             <Action><ActionButton Text="Открыть дневник" Secondary="true" TestId="pending-open-diary" OnClick="OnOpenDiary" /></Action>
         </EmptyState>
         break;
     default:
-        <EmptyState Icon="AppIconKind.Microphone" Title="Запись еды появится в следующей версии" TestId="pending-input"
-                    Message="Описание текстом, голосом и по фото этикетки готовится. А пока задайте цель на день — дневник покажет, сколько осталось.">
+        <EmptyState Icon="AppIconKind.Products" Title="Продукты появятся в следующей версии" TestId="pending-products"
+                    Message="Каталог, поиск и продукты по штрихкоду готовятся. Продукт уже можно добавить из расчёта: кнопка «Добавить пищевую ценность».">
             <Action><ActionButton Text="Открыть дневник" Secondary="true" TestId="pending-open-diary" OnClick="OnOpenDiary" /></Action>
         </EmptyState>
         break;
