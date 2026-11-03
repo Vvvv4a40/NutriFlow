@@ -17,6 +17,10 @@ public static class DiaryText
 
     public static string FullDate(DateOnly date) => date.ToString("D", Russian);
 
+    // the goal is saved for its date, later days without their own goal take it over
+    public static string GoalScope(DateOnly date) =>
+        $"Действует с {date.ToString("d MMMM", Russian)} и в следующие дни, пока не зададите другую.";
+
     // a goal of zero calories is no goal: the arc and the tiles show what was eaten
     public static NutritionResponse? EffectiveGoal(NutritionResponse? goal) => goal is { Calories: > 0m } ? goal : null;
 

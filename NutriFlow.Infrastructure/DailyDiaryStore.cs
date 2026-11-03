@@ -90,13 +90,21 @@ public sealed class DailyDiaryStore
                 item => item.UserId == _ownerId && item.Date == date,
                 cancellationToken);
 
-        return record is null
-            ? null
-            : new DailyGoal(new NutritionValues(
-                record.Calories,
-                record.ProteinGrams,
-                record.FatGrams,
-                record.CarbohydratesGrams));
+        return ToGoal(record);
+    }
+
+    // the goal of the day or, without one, the last goal set before it; a zero goal set to clear it is returned as is
+    public async Task<DailyGoal?> FindGoalInEffectAsync(
+        DateOnly date,
+        CancellationToken cancellationToken = default)
+    {
+        DailyGoalRecord? record = await _dbContext.DailyGoals
+            .AsNoTracking()
+            .Where(item => item.UserId == _ownerId && item.Date <= date)
+            .OrderByDescending(item => item.Date)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return ToGoal(record);
     }
 
     public async Task<IReadOnlyList<MealEntry>> GetEntriesAsync(
@@ -297,6 +305,17 @@ public sealed class DailyDiaryStore
                     .SetProperty(item => item.FatGrams, nutrition.FatGrams)
                     .SetProperty(item => item.CarbohydratesGrams, nutrition.CarbohydratesGrams),
                 cancellationToken);
+    }
+
+    private static DailyGoal? ToGoal(DailyGoalRecord? record)
+    {
+        return record is null
+            ? null
+            : new DailyGoal(new NutritionValues(
+                record.Calories,
+                record.ProteinGrams,
+                record.FatGrams,
+                record.CarbohydratesGrams));
     }
 
     private IQueryable<MealEntryRecord> GetEligibleEntries()

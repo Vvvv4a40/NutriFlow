@@ -17,6 +17,10 @@ public sealed class DiaryTextTests
     }
 
     [Fact]
+    public void GoalFormSaysTheGoalCarriesOver() =>
+        Assert.Equal("Действует с 2 ноября и в следующие дни, пока не зададите другую.", DiaryText.GoalScope(Today));
+
+    [Fact]
     public void CentreOfTheArcShowsWhatIsLeftOrTheExcess()
     {
         NutritionResponse eaten = new(1240.4m, 60m, 40m, 150m);

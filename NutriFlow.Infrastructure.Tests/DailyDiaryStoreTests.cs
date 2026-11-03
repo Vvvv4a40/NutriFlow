@@ -56,6 +56,49 @@ public sealed class DailyDiaryStoreTests
     }
 
     [Fact]
+    public async Task FindGoalInEffectAsync_TakesTheDaysGoalOrTheLastOneBefore()
+    {
+        await using TestDatabase database = new TestDatabase();
+        await database.MigrateAsync();
+        Guid otherOwnerId = Guid.NewGuid();
+        DateOnly first = new DateOnly(2026, 9, 6);
+        DateOnly second = new DateOnly(2026, 9, 29);
+        DateOnly cleared = new DateOnly(2026, 10, 12);
+
+        await using (NutriFlowDbContext context = database.CreateContext())
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO "Users" ("Id", "CreatedAtUtc", "IsLegacyLocal")
+                VALUES ({otherOwnerId}, {DateTimeOffset.UtcNow}, {false})
+                """);
+            DailyDiaryStore store = new DailyDiaryStore(context);
+            await store.SetGoalAsync(second, CreateGoal(1800m, 110m, 55m, 190m));
+            await store.SetGoalAsync(first, CreateGoal(2200m, 150m, 70m, 230m));
+            // zero calories is how the android app clears a goal; later days keep that choice
+            await store.SetGoalAsync(cleared, CreateGoal(0m, 0m, 0m, 0m));
+            await new DailyDiaryStore(context, otherOwnerId).SetGoalAsync(
+                first.AddDays(1),
+                CreateGoal(1500m, 90m, 50m, 160m));
+        }
+
+        await using NutriFlowDbContext readContext = database.CreateContext();
+        DailyDiaryStore readStore = new DailyDiaryStore(readContext);
+
+        Assert.Null(await readStore.FindGoalInEffectAsync(first.AddDays(-1)));
+        Assert.Equal(2200m, (await readStore.FindGoalInEffectAsync(first))!.TargetNutrition.Calories);
+        // the goal another owner set in between does not count
+        Assert.Equal(2200m, (await readStore.FindGoalInEffectAsync(second.AddDays(-1)))!.TargetNutrition.Calories);
+        AssertNutrition(
+            (await readStore.FindGoalInEffectAsync(second.AddDays(3)))!.TargetNutrition,
+            calories: 1800m,
+            protein: 110m,
+            fat: 55m,
+            carbohydrates: 190m);
+        Assert.Equal(0m, (await readStore.FindGoalInEffectAsync(cleared.AddDays(30)))!.TargetNutrition.Calories);
+        Assert.Null(await readStore.FindGoalAsync(second.AddDays(3)));
+    }
+
+    [Fact]
     public async Task Owners_HaveIndependentGoalsAndEntries_AndCannotConfirmForeignSessions()
     {
         await using TestDatabase database = new TestDatabase();

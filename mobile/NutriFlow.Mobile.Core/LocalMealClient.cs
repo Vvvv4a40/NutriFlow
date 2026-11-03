@@ -35,8 +35,14 @@ public sealed class LocalMealClient
     public Task<DailyProgressResponse> GetDailyProgressAsync(
         Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
     {
+        return GetDailyProgressAsync(profileId, date, carryGoalOver: false, cancellationToken);
+    }
+
+    public Task<DailyProgressResponse> GetDailyProgressAsync(
+        Guid profileId, DateOnly date, bool carryGoalOver, CancellationToken cancellationToken = default)
+    {
         return WithWorkflowAsync(profileId, null,
-            workflow => workflow.GetDailyProgressAsync(date, cancellationToken), cancellationToken);
+            workflow => workflow.GetDailyProgressAsync(date, carryGoalOver, cancellationToken), cancellationToken);
     }
 
     public Task SetDailyGoalAsync(

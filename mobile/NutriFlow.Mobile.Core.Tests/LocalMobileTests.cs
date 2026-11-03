@@ -109,6 +109,32 @@ public sealed class LocalMobileTests : IDisposable
     }
 
     [Fact]
+    public async Task GoalCarriesOverToLaterDaysOnlyWhenAsked()
+    {
+        (_, LocalProfile profile, LocalMealClient client) = await CreateClientAsync();
+        await client.AddProductAsync(profile.Id, Product("Продукт", 100m));
+        await client.SetDailyGoalAsync(profile.Id, _date, new NutritionResponse(2000m, 150m, 66m, 200m));
+        DateOnly later = _date.AddDays(3);
+        MealSessionResponse draft = await client.CreateManualMealAsync(profile.Id, "Продукт", 300m, later);
+        await client.ConfirmAsync(profile.Id, draft.Id, draft.PreviewToken);
+
+        DailyProgressResponse carried = await client.GetDailyProgressAsync(profile.Id, later, carryGoalOver: true);
+        Assert.Equal(new NutritionResponse(2000m, 150m, 66m, 200m), carried.Goal);
+        Assert.Equal(1700m, carried.Remaining!.Calories);
+        Assert.Equal(300m, carried.Consumed.Calories);
+        Assert.Null((await client.GetDailyProgressAsync(profile.Id, _date.AddDays(-1), carryGoalOver: true)).Goal);
+
+        // the android diary and the api keep a goal to its own date
+        DailyProgressResponse ownDateOnly = await client.GetDailyProgressAsync(profile.Id, later);
+        Assert.Null(ownDateOnly.Goal);
+        Assert.Null(ownDateOnly.Remaining);
+
+        await client.SetDailyGoalAsync(profile.Id, later, new NutritionResponse(1600m, 120m, 53m, 160m));
+        Assert.Equal(1600m, (await client.GetDailyProgressAsync(profile.Id, later.AddDays(1), carryGoalOver: true)).Goal!.Calories);
+        Assert.Equal(2000m, (await client.GetDailyProgressAsync(profile.Id, later.AddDays(-1), carryGoalOver: true)).Goal!.Calories);
+    }
+
+    [Fact]
     public async Task MissingProductBlocksConfirmationUntilNutritionIsEntered()
     {
         (_, LocalProfile profile, LocalMealClient client) = await CreateClientAsync();

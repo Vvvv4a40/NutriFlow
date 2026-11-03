@@ -502,13 +502,23 @@ public sealed class MealWorkflowService
         await _diaryStore.SetGoalAsync(date, goal, cancellationToken);
     }
 
-    public async Task<DailyProgressResponse> GetDailyProgressAsync(
+    public Task<DailyProgressResponse> GetDailyProgressAsync(
         DateOnly date,
         CancellationToken cancellationToken = default)
     {
-        DailyGoal? goal = await _diaryStore.FindGoalAsync(
-            date,
-            cancellationToken);
+        return GetDailyProgressAsync(date, carryGoalOver: false, cancellationToken);
+    }
+
+    // with carryGoalOver a day without its own goal takes the last one set before it, as the web app shows the diary;
+    // the api and the android diary keep a goal to its own date
+    public async Task<DailyProgressResponse> GetDailyProgressAsync(
+        DateOnly date,
+        bool carryGoalOver,
+        CancellationToken cancellationToken = default)
+    {
+        DailyGoal? goal = carryGoalOver
+            ? await _diaryStore.FindGoalInEffectAsync(date, cancellationToken)
+            : await _diaryStore.FindGoalAsync(date, cancellationToken);
         IReadOnlyList<StoredMealEntry> storedEntries = await _diaryStore.GetStoredEntriesAsync(
             date,
             cancellationToken);

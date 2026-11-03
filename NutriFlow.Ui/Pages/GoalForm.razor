@@ -5,7 +5,7 @@
 @* calories and linked macro shares of the day goal (EditGoalPageAsync in MainPage.Goal.cs) *@
 <FormPage Title="Цель на день" TestId="goal-form" OnClose="OnClose">
     <ChildContent>
-        <Caption>Цель для дневника за @Date.ToString("d MMMM", CultureInfo.GetCultureInfo("ru-RU"))</Caption>
+        <Caption TestId="goal-scope">@DiaryText.GoalScope(Date)</Caption>
         <Card Class="nf-goal-calories">
             <Overline>Калории</Overline>
             <Field @ref="_calories" Number="true" Class="nf-field--hero" AccessibleLabel="Калории в день" EnterKeyHint="done"

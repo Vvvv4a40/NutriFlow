@@ -141,7 +141,8 @@ else if (_slow)
         _ = ShowSlowLoadingAsync(version);
         try
         {
-            DailyProgressResponse progress = await Meals.GetDailyProgressAsync(Profile.Id, date);
+            // a day without its own goal shows the last one set before it, and the goal form starts from it
+            DailyProgressResponse progress = await Meals.GetDailyProgressAsync(Profile.Id, date, carryGoalOver: true);
             if (version == _version)
             {
                 _progress = progress;
