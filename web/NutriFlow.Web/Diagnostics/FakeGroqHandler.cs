@@ -6,39 +6,85 @@ using System.Text.RegularExpressions;
 
 namespace NutriFlow.Web.Diagnostics;
 
-// development only: with the Groq key «fake» the text parser answers here, without network or a real key.
-// It reads «name 150 г» items separated by commas or «и» and asks for a missing weight, which is enough to walk
-// through parsing, clarifications and the preview; every other request goes to the real Groq
+// development only: with the Groq key «fake» the requests of the app are answered here, without network or a real key.
+// Text: «name 150 г» items separated by commas or «и», with a question about a missing weight, which is enough to walk
+// through parsing, clarifications and the preview. Speech: a fixed transcript in that format. A label photo: fixed values
+// per 100 g, whatever is on the photo. With «fake-serving» the label has values per a serving and a question, with
+// «fake-down» every request fails as if Groq were down. Every other key goes to the real Groq
 public sealed partial class FakeGroqHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
 {
     public const string Key = "fake";
+    public const string ServingKey = "fake-serving";
+    public const string DownKey = "fake-down";
+    public const string Transcript = "гречка 150 г, куриная грудка 120 г";
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        if (request.Headers.Authorization?.Parameter != Key ||
-            request.RequestUri?.AbsolutePath.EndsWith("/chat/completions", StringComparison.Ordinal) != true ||
-            request.Content is null)
+        string? key = request.Headers.Authorization?.Parameter;
+        if (key is not (Key or ServingKey or DownKey) || request.RequestUri is null || request.Content is null)
+        {
+            return await base.SendAsync(request, cancellationToken);
+        }
+
+        if (key == DownKey)
+        {
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        }
+
+        string path = request.RequestUri.AbsolutePath;
+        if (path.EndsWith("/audio/transcriptions", StringComparison.Ordinal))
+        {
+            return Json(new JsonObject { ["text"] = Transcript });
+        }
+
+        if (!path.EndsWith("/chat/completions", StringComparison.Ordinal))
         {
             return await base.SendAsync(request, cancellationToken);
         }
 
         JsonNode body = JsonNode.Parse(await request.Content.ReadAsStringAsync(cancellationToken))!;
         JsonArray messages = body["messages"]!.AsArray();
-        bool dish = messages[0]!["content"]!.GetValue<string>().Contains("The session purpose is CreateDish", StringComparison.Ordinal);
-        string draft = Parse(messages[1]!["content"]!.GetValue<string>(), dish).ToJsonString();
-        string completion = new JsonObject
+        // only the request with a photo sends its user part as a list of text and image
+        JsonObject answer = messages[1]!["content"] is JsonArray
+            ? Label(key == ServingKey)
+            : Parse(messages[1]!["content"]!.GetValue<string>(),
+                messages[0]!["content"]!.GetValue<string>().Contains("The session purpose is CreateDish", StringComparison.Ordinal));
+        return Json(new JsonObject
         {
             ["choices"] = new JsonArray(new JsonObject
             {
-                ["message"] = new JsonObject { ["content"] = draft },
+                ["message"] = new JsonObject { ["content"] = answer.ToJsonString() },
                 ["finish_reason"] = "stop"
             })
-        }.ToJsonString();
-        return new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(completion, Encoding.UTF8, "application/json")
-        };
+        });
     }
+
+    private static HttpResponseMessage Json(JsonObject content) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(content.ToJsonString(), Encoding.UTF8, "application/json")
+    };
+
+    internal static JsonObject Label(bool perServing) => perServing
+        ? new JsonObject
+        {
+            ["productName"] = "Батончик с этикетки",
+            ["basis"] = "per_serving",
+            ["calories"] = 180m,
+            ["proteinGrams"] = 5m,
+            ["fatGrams"] = 7.5m,
+            ["carbohydratesGrams"] = null,
+            ["clarificationQuestions"] = new JsonArray("Сколько граммов в порции?", "Сколько углеводов в порции?")
+        }
+        : new JsonObject
+        {
+            ["productName"] = "Йогурт с этикетки",
+            ["basis"] = "per_100g",
+            ["calories"] = 62m,
+            ["proteinGrams"] = 4.1m,
+            ["fatGrams"] = 1.5m,
+            ["carbohydratesGrams"] = 6.8m,
+            ["clarificationQuestions"] = new JsonArray()
+        };
 
     // the user part of the request lists the messages as «1. text»; a later message overrides an earlier weight
     internal static JsonObject Parse(string input, bool dish)

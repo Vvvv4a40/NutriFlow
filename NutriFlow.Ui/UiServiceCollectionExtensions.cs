@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using NutriFlow.Ui.Capture;
+using NutriFlow.Ui.Catalog;
 using NutriFlow.Ui.Dialogs;
 using NutriFlow.Ui.Navigation;
 using NutriFlow.Ui.Profiles;
@@ -21,6 +22,7 @@ public static class UiServiceCollectionExtensions
         // scoped like LocalMealClient, which it uses; the browser has one scope for the whole app
         services.AddScoped<CaptureState>();
         services.AddScoped<ProfileBackups>();
+        services.AddScoped<LabelReader>();
         return services;
     }
 }

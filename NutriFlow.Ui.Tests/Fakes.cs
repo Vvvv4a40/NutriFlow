@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
 using NutriFlow.Mobile.Core;
 using NutriFlow.Ui.Hosting;
@@ -66,6 +67,16 @@ internal sealed class FakeAppHost : IAppHost
         return Task.CompletedTask;
     }
 
+    public int PersistenceRenewals { get; private set; }
+
+    public bool RenewalFails { get; set; }
+
+    public Task RenewPersistentStorageAsync()
+    {
+        PersistenceRenewals++;
+        return RenewalFails ? Task.FromException(new InvalidOperationException("blocked")) : Task.CompletedTask;
+    }
+
     public Task SaveProfileFilesAsync()
     {
         SavedFiles++;
@@ -78,6 +89,75 @@ internal sealed class FakeAppHost : IAppHost
     {
         HandedFiles.Add((fileName, contentType, content));
         return Task.FromResult(true);
+    }
+
+    public FakeVoiceRecorder Recorder { get; } = new();
+
+    public IVoiceRecorder CreateVoiceRecorder() => Recorder;
+
+    public PickedPhoto? Photo { get; set; }
+
+    public Task<PickedPhoto?> ReadPhotoAsync(ElementReference input) => Task.FromResult(Photo);
+}
+
+// speech-capture.mjs without a browser: the test plays the events of a recording
+internal sealed class FakeVoiceRecorder : IVoiceRecorder
+{
+    private Func<RecordedAudio, CancellationToken, Task<string>>? _transcribe;
+
+    public int Starts { get; private set; }
+
+    public int Stops { get; private set; }
+
+    public bool Disposed { get; private set; }
+
+    public event Action<VoicePhase>? PhaseChanged;
+
+    public event Action<string>? Transcribed;
+
+    public event Action<string>? Failed;
+
+    public Task StartAsync(Func<RecordedAudio, CancellationToken, Task<string>> transcribe)
+    {
+        _transcribe = transcribe;
+        Starts++;
+        return Task.CompletedTask;
+    }
+
+    public Task StopAsync()
+    {
+        Stops++;
+        return Task.CompletedTask;
+    }
+
+    public void Fail(string message)
+    {
+        PhaseChanged?.Invoke(VoicePhase.Idle);
+        Failed?.Invoke(message);
+    }
+
+    public void Begin() => PhaseChanged?.Invoke(VoicePhase.Recording);
+
+    // what the script does once the recording ended: the delegate, then the text or the failure
+    public async Task FinishAsync(RecordedAudio audio)
+    {
+        PhaseChanged?.Invoke(VoicePhase.Transcribing);
+        try
+        {
+            string text = await _transcribe!(audio, CancellationToken.None);
+            PhaseChanged?.Invoke(VoicePhase.Idle);
+            Transcribed?.Invoke(text);
+        }
+        catch (Exception exception)
+        {
+            Fail(exception.Message);
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Disposed = true;
+        return ValueTask.CompletedTask;
     }
 }
 

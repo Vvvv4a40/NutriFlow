@@ -1,0 +1,55 @@
+@using Microsoft.AspNetCore.Components.Forms
+@implements IDisposable
+@inject ActionRunner Runner
+
+@* a button that opens the system photo picker: the transparent file input covers it, so the tap reaches the input itself.
+   capture opens the camera on a phone; without it the same input offers the gallery *@
+<label class="nf-button @(Secondary ? "nf-button--secondary" : "nf-button--primary") nf-photo-button">
+    <InputFile @ref="_input" class="nf-photo-button__input" accept="image/*" capture="@(Camera ? "environment" : null)"
+               aria-label="@ShownText" data-testid="@TestId" OnChange="OnChangeAsync" />
+    <span aria-hidden="true">@ShownText</span>
+</label>
+
+@code {
+    private InputFile? _input;
+
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    [Parameter]
+    public bool Camera { get; set; }
+
+    [Parameter]
+    public bool Secondary { get; set; }
+
+    [Parameter]
+    public string? ProgressKey { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    // the input with the chosen file; IAppHost.ReadPhotoAsync reads it
+    [Parameter]
+    public EventCallback<ElementReference> OnPicked { get; set; }
+
+    private string ShownText => ProgressKey is not null && Runner.ProgressKey == ProgressKey && Runner.ProgressText is { } progress
+        ? progress
+        : Text;
+
+    protected override void OnInitialized() => Runner.Changed += OnRunnerChanged;
+
+    public ValueTask FocusAsync() => _input?.Element is { } element ? element.FocusAsync() : ValueTask.CompletedTask;
+
+    private Task OnChangeAsync(InputFileChangeEventArgs args) =>
+        _input?.Element is { } element ? OnPicked.InvokeAsync(element) : Task.CompletedTask;
+
+    private void OnRunnerChanged()
+    {
+        if (ProgressKey is not null)
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose() => Runner.Changed -= OnRunnerChanged;
+}

@@ -72,17 +72,19 @@ else
                       Placeholder="@CaptureText.Placeholder(Capture.Session is not null, Capture.Purpose)"
                       Value="@Capture.Text" ValueChanged="OnTextChanged" Error="@_error"
                       Class="nf-composer__text" TestId="input-description" />
-            @if (Capture.SaveStatus.Length > 0 || CaptureText.Counter(Capture.Text.Length) is not null)
-            {
-                <div class="nf-composer__tools">
-                    <Caption Class="nf-composer__status" Tone="@(Capture.SaveFailed ? Tone.Danger : (Tone?)null)" TestId="input-save-status">@Capture.SaveStatus</Caption>
-                    @if (Capture.SaveFailed)
-                    {
-                        <GhostButton Text="Повторить сохранение" Class="nf-composer__retry" TestId="input-draft-retry" OnClick="RetrySaveAsync" />
-                    }
-                    <Caption Class="nf-composer__count">@CaptureText.Counter(Capture.Text.Length)</Caption>
-                </div>
-            }
+            <div class="nf-composer__tools">
+                <Pressable Class="nf-voice-chip" Description="Голос" Hint="Распознать речь и проверить текст перед использованием"
+                           TestId="input-voice" OnClick="() => _voice = true">
+                    <AppIcon Kind="AppIconKind.Microphone" Size="20" />
+                    <span>Голос</span>
+                </Pressable>
+                <Caption Class="nf-composer__status" Tone="@(Capture.SaveFailed ? Tone.Danger : (Tone?)null)" TestId="input-save-status">@Capture.SaveStatus</Caption>
+                @if (Capture.SaveFailed)
+                {
+                    <GhostButton Text="Повторить сохранение" Class="nf-composer__retry" TestId="input-draft-retry" OnClick="RetrySaveAsync" />
+                }
+                <Caption Class="nf-composer__count">@CaptureText.Counter(Capture.Text.Length)</Caption>
+            </div>
             @* while the calculation waits for answers, sending them is the main step *@
             <ActionButton Text="@(Capture.Session is null ? "Разобрать описание" : "Добавить уточнение")"
                           Secondary="@(Capture.Session is { CanConfirm: true })"
@@ -116,6 +118,11 @@ else
     }
 }
 
+@if (_voice)
+{
+    <VoiceForm ProfileId="Profile.Id" OnOpenSettings="OnOpenSettings" OnClose="() => _voice = false" />
+}
+
 @if (_buildingDish)
 {
     <DishBuilderForm ProfileId="Profile.Id" Date="Date" OnStarted="OnDishStartedAsync" OnClose="() => _buildingDish = false" />
@@ -139,6 +146,7 @@ else
     private string? _error;
     private string? _newProduct;
     private bool _buildingDish;
+    private bool _voice;
     private TextArea? _editor;
     private SessionPreview? _preview;
     private bool _focusPreview;
@@ -187,7 +195,7 @@ else
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine(exception);
+            UiLog.Error(exception);
             _loadError = DiaryText.LoadFailed;
         }
     }

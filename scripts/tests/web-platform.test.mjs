@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureInstallPrompt, promptInstall, saveFile, watchInstall, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
+import { captureInstallPrompt, promptInstall, renewPersistence, saveFile, watchInstall, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
 
 // a window that dispatches the two install events of chrome
 function browser() {
@@ -147,4 +147,58 @@ test("other browsers download the file and free its url later", async () => {
     assert.deepEqual(computer.revoked, []);
     computer.timers[0].callback();
     assert.deepEqual(computer.revoked, ["blob:NutriFlow.zip"]);
+});
+
+// the storage manager of a browser that answers persist() with the given decision
+function storageBrowser(userAgent, { persisted = false, decision = false } = {}) {
+    const browser = {
+        userAgent,
+        asked: 0,
+        storage: {
+            persisted: async () => persisted,
+            persist: async () => {
+                browser.asked++;
+                return decision;
+            }
+        }
+    };
+    return browser;
+}
+
+test("a browser that decides silently is asked again at every start until it agrees", async () => {
+    const chrome = storageBrowser("Mozilla/5.0 Chrome/146.0 Safari/537.36", { decision: true });
+    assert.equal(await renewPersistence(chrome), true);
+    assert.equal(chrome.asked, 1);
+
+    const safari = storageBrowser("Mozilla/5.0 (iPhone) Version/27.0 Safari/605.1.15");
+    assert.equal(await renewPersistence(safari), false);
+    assert.equal(safari.asked, 1);
+});
+
+test("storage that is already persistent is not asked for again", async () => {
+    const chrome = storageBrowser("Mozilla/5.0 Chrome/146.0", { persisted: true });
+    assert.equal(await renewPersistence(chrome), true);
+    assert.equal(chrome.asked, 0);
+});
+
+test("firefox shows the question to the user, so a start never asks it, unlike firefox on iphone", async () => {
+    const firefox = storageBrowser("Mozilla/5.0 (Android 14; Mobile; rv:146.0) Gecko/146.0 Firefox/146.0", { decision: true });
+    assert.equal(await renewPersistence(firefox), false);
+    assert.equal(firefox.asked, 0);
+
+    const firefoxOnIphone = storageBrowser("Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 FxiOS/146.0 Mobile/15E148 Safari/605.1.15");
+    await renewPersistence(firefoxOnIphone);
+    assert.equal(firefoxOnIphone.asked, 1);
+});
+
+test("a browser without the storage manager or with a failing one simply stays not persistent", async () => {
+    assert.equal(await renewPersistence({ userAgent: "Old" }), false);
+    const failing = {
+        userAgent: "Mozilla/5.0 Chrome/146.0",
+        storage: {
+            persisted: () => Promise.reject(new Error("blocked")),
+            persist: () => Promise.reject(new Error("blocked"))
+        }
+    };
+    assert.equal(await renewPersistence(failing), false);
 });

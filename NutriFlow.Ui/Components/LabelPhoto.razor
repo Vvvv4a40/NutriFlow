@@ -1,0 +1,81 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+@* the photo next to the values it has to be compared with; a blob url keeps megabytes of it out of the render tree.
+   small by default, so the fields stay on the screen; enlarged it scrolls, a table of small print has to be readable *@
+<div class="nf-label-photo">
+    @if (_failed)
+    {
+        <Notice TestId="label-photo-error">Не удалось показать фото. Сверьте значения с упаковкой.</Notice>
+    }
+    else
+    {
+        <div class="nf-label-photo__frame @(_enlarged ? "nf-label-photo__frame--enlarged" : null)"
+             tabindex="@(_enlarged ? "0" : null)" role="@(_enlarged ? "group" : null)" aria-label="@(_enlarged ? "Увеличенное фото этикетки" : null)">
+            @if (_url is null)
+            {
+                <Spinner />
+            }
+            else
+            {
+                <img class="nf-label-photo__image" src="@_url" alt="Фото этикетки" data-testid="label-photo" @onerror="() => _failed = true" />
+            }
+        </div>
+        <GhostButton Text="@(_enlarged ? "Уменьшить фото" : "Увеличить фото")" Class="nf-label-photo__toggle" TestId="label-photo-toggle"
+                     OnClick="() => _enlarged = !_enlarged" />
+    }
+</div>
+
+@code {
+    private IJSObjectReference? _module;
+    private string? _url;
+    private bool _enlarged;
+    private bool _failed;
+
+    [Parameter, EditorRequired]
+    public PickedPhoto Photo { get; set; } = null!;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/NutriFlow.Ui/photo.mjs");
+            _url = await _module.InvokeAsync<string>("createPhotoUrl", Photo.Content, Photo.MediaType);
+        }
+        catch (JSException exception)
+        {
+            UiLog.Error(exception);
+            _failed = true;
+        }
+
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_url is not null)
+            {
+                await _module.InvokeVoidAsync("revokePhotoUrl", _url);
+            }
+
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // the page is gone and the url with it
+        }
+    }
+}

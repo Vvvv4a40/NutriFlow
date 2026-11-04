@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure.Ai;
+using NutriFlow.Infrastructure.Audio;
 using NutriFlow.Web.Diagnostics;
 
 namespace NutriFlow.Web.Tests;
@@ -52,6 +53,62 @@ public sealed class FakeGroqHandlerTests
         Assert.Equal(1, inner.Requests);
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task FakeKeyTranscribesAudioThroughTheRealClient()
+    {
+        RecordingHandler inner = new();
+        using HttpClient client = Client(inner, FakeGroqHandler.Key);
+        ValidatedAudio audio = AudioUploadValidator.Validate(WebmAudio, "audio/webm;codecs=opus");
+
+        string text = await new GroqSpeechTranscriber(client, "whisper").TranscribeAsync(audio);
+
+        Assert.Equal(FakeGroqHandler.Transcript, text);
+        Assert.Equal(0, inner.Requests);
+    }
+
+    [Fact]
+    public async Task FakeKeyReadsALabelPer100Grams()
+    {
+        RecordingHandler inner = new();
+        using HttpClient client = Client(inner, FakeGroqHandler.Key);
+
+        NutritionLabelDraft draft = await new GroqNutritionLabelReader(client, "vision").ReadAsync(new byte[] { 1, 2, 3 }, "image/jpeg");
+
+        Assert.Equal("Йогурт с этикетки", draft.ProductName);
+        Assert.Equal(NutritionBasis.Per100Grams, draft.Basis);
+        Assert.Equal(62m, draft.Calories);
+        Assert.True(draft.CanCreateProduct);
+        Assert.Equal(0, inner.Requests);
+    }
+
+    [Fact]
+    public async Task ServingKeyGivesALabelThatNeedsRecalculation()
+    {
+        using HttpClient client = Client(new RecordingHandler(), FakeGroqHandler.ServingKey);
+
+        NutritionLabelDraft draft = await new GroqNutritionLabelReader(client, "vision").ReadAsync(new byte[] { 1, 2, 3 }, "image/jpeg");
+
+        Assert.Equal(NutritionBasis.PerServing, draft.Basis);
+        Assert.Null(draft.CarbohydratesGrams);
+        Assert.Equal(2, draft.ClarificationQuestions.Count);
+        Assert.False(draft.CanCreateProduct);
+    }
+
+    [Fact]
+    public async Task DownKeyFailsEveryRequestLikeAnUnavailableService()
+    {
+        RecordingHandler inner = new();
+        using HttpClient client = Client(inner, FakeGroqHandler.DownKey);
+
+        HttpRequestException error = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            new GroqNutritionLabelReader(client, "vision").ReadAsync(new byte[] { 1, 2, 3 }, "image/jpeg"));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, error.StatusCode);
+        Assert.Equal(0, inner.Requests);
+    }
+
+    private static readonly byte[] WebmAudio = [0x1A, 0x45, 0xDF, 0xA3, 0x01, 0x02];
 
     private static async Task<MealDraft> ParseAsync(MealSessionPurpose purpose, params string[] messages)
     {

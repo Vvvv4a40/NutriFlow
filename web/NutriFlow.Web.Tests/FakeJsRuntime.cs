@@ -1,4 +1,5 @@
 using Microsoft.JSInterop;
+using NutriFlow.Ui.Hosting;
 
 namespace NutriFlow.Web.Tests;
 
@@ -10,6 +11,8 @@ internal sealed class FakeJsRuntime : IJSRuntime
     public FakeStorageModule Storage { get; } = new();
 
     public FakePlatformModule Platform { get; } = new();
+
+    public FakeMediaModule Media { get; } = new();
 
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
         InvokeAsync<TValue>(identifier, CancellationToken.None, args);
@@ -24,6 +27,7 @@ internal sealed class FakeJsRuntime : IJSRuntime
             "localStorage.removeItem" => Remove((string)values[0]!),
             "import" when (string?)values[0] == "./js/storage.mjs" => Storage,
             "import" when (string?)values[0] == "./js/platform.mjs" => Platform,
+            "import" when (string?)values[0] == "./js/media.mjs" => Media,
             _ => throw new InvalidOperationException($"Unexpected call: {identifier}")
         };
         return ValueTask.FromResult((TValue)result!);
@@ -117,6 +121,63 @@ internal sealed class FakeStorageModule : IJSObjectReference
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
+// media.mjs: the photo chosen in the input and the recorder over speech-capture.mjs
+internal sealed class FakeMediaModule : IJSObjectReference
+{
+    public PickedPhoto? Photo { get; set; }
+
+    public bool PhotoFails { get; set; }
+
+    public FakeVoiceCaptureObject Capture { get; } = new();
+
+    public int? MaximumMilliseconds { get; private set; }
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+        InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+    {
+        object? result;
+        switch (identifier)
+        {
+            case "readPhoto":
+                if (PhotoFails)
+                {
+                    throw new JSException("EncodingError: The source image cannot be decoded.");
+                }
+
+                result = Photo;
+                break;
+            case "createVoiceCapture":
+                MaximumMilliseconds = (int)args![1]!;
+                result = Capture;
+                break;
+            default:
+                throw new InvalidOperationException($"Unexpected call: {identifier}");
+        }
+
+        return ValueTask.FromResult((TValue)result!);
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+internal sealed class FakeVoiceCaptureObject : IJSObjectReference
+{
+    public List<string> Calls { get; } = [];
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+    {
+        Calls.Add(identifier);
+        return ValueTask.FromResult(default(TValue)!);
+    }
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+        InvokeAsync<TValue>(identifier, args);
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
 // platform.mjs: installation as chrome offers it and the persistent storage flag
 internal sealed class FakePlatformModule : IJSObjectReference
 {
@@ -127,6 +188,8 @@ internal sealed class FakePlatformModule : IJSObjectReference
     public bool Persisted { get; set; }
 
     public int PersistenceRequests { get; private set; }
+
+    public int PersistenceRenewals { get; private set; }
 
     public string SaveOutcome { get; set; } = "saved";
 
@@ -160,6 +223,10 @@ internal sealed class FakePlatformModule : IJSObjectReference
                 break;
             case "requestPersistence":
                 PersistenceRequests++;
+                result = Persisted;
+                break;
+            case "renewPersistence":
+                PersistenceRenewals++;
                 result = Persisted;
                 break;
             case "saveFile":

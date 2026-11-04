@@ -1,0 +1,175 @@
+@using NutriFlow.Ui.Catalog
+@inject LabelReader Labels
+@inject IAppHost Host
+@inject IProfileSettings Settings
+@inject ActionRunner Runner
+
+@* where the photo of a label comes from and what makes it readable (LabelSourcePageAsync in MainPage.Media.cs) *@
+<FormPage Title="Фото этикетки" TestId="label-source" CanLeave="CanLeaveAsync" OnClose="OnClose">
+    <ChildContent>
+        @* first on the screen: below the tips it would be under the pinned buttons on a small phone or with a large font *@
+        @if (_error is { } error)
+        {
+            <div role="alert">
+                <Notice Tone="Tone.Danger" TestId="label-error">
+                    <ChildContent>@error</ChildContent>
+                    <Action><GhostButton Text="Заполнить вручную" TestId="label-error-manual" OnClick="() => _manual = true" /></Action>
+                </Notice>
+            </div>
+            @if (_retry is not null)
+            {
+                <ActionButton Text="Повторить распознавание" TestId="label-retry" OnClick="RetryAsync" />
+            }
+        }
+        @if (!_hasGroq)
+        {
+            <Notice Icon="AppIconKind.Key" TestId="label-key-notice">
+                <ChildContent>@LabelText.NoKey</ChildContent>
+                <Action><GhostButton Text="Открыть настройки" TestId="label-key-settings" OnClick="OnOpenSettings" /></Action>
+            </Notice>
+        }
+        <IconTile Icon="AppIconKind.Camera" Large="true" />
+        <Headline>Пищевая ценность с упаковки</Headline>
+        <BodyText Muted="true">Фото отправится в Groq. Затем вы сверите и при необходимости исправите каждое значение.</BodyText>
+        <Card>
+            <ul class="nf-tips" role="list">
+                @foreach (string tip in Tips)
+                {
+                    <li class="nf-tips__item">
+                        <AppIcon Kind="AppIconKind.Check" Size="18" Class="nf-tone-success nf-tips__icon" />
+                        <span class="nf-text">@tip</span>
+                    </li>
+                }
+            </ul>
+        </Card>
+    </ChildContent>
+    <Footer>
+        @if (_hasGroq)
+        {
+            @* the photo already read waits in memory: another picture is not the main way on after a failure *@
+            <PhotoButton @ref="_cameraButton" Text="Сделать фото" Camera="true" Secondary="@(_retry is not null)" ProgressKey="label-camera" TestId="label-camera"
+                         OnPicked="input => OnPickedAsync(input, CameraKey)" />
+            <PhotoButton @ref="_galleryButton" Text="Выбрать из галереи" Secondary="true" ProgressKey="label-gallery" TestId="label-gallery"
+                         OnPicked="input => OnPickedAsync(input, GalleryKey)" />
+        }
+        else
+        {
+            <ActionButton Text="Заполнить вручную" TestId="label-manual" OnClick="() => _manual = true" />
+        }
+    </Footer>
+</FormPage>
+
+@if (_reading is { } reading)
+{
+    <ProductForm ProfileId="ProfileId" Label="reading" OnSaved="OnSavedAsync" OnClose="() => _reading = null" />
+}
+
+@if (_manual)
+{
+    <ProductForm ProfileId="ProfileId" Reason="@(_error is null ? null : LabelText.ManualReason)" OnSaved="OnSavedAsync" OnClose="() => _manual = false" />
+}
+
+@code {
+    private const string CameraKey = "label-camera";
+    private const string GalleryKey = "label-gallery";
+
+    private static readonly string[] Tips =
+    [
+        "Таблица КБЖУ крупно и без бликов",
+        "Название продукта тоже в кадре",
+        "Видно, на 100 г или на порцию указаны значения"
+    ];
+
+    private bool _hasGroq = true;
+    private bool _manual;
+    private string? _error;
+    private PickedPhoto? _retry;
+    private string _retryKey = GalleryKey;
+    private LabelReading? _reading;
+    private PhotoButton? _cameraButton;
+    private PhotoButton? _galleryButton;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenSettings { get; set; }
+
+    // a product came into the catalog and this form is closing: the list under it shows the product
+    [Parameter]
+    public EventCallback<ProductResponse> OnSaved { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override async Task OnInitializedAsync() => _hasGroq = await Settings.HasGroqAsync(ProfileId);
+
+    private Task OnPickedAsync(ElementReference input, string key) => Runner.RunAsync(async () =>
+    {
+        _error = null;
+        _retry = null;
+        PickedPhoto? photo;
+        try
+        {
+            photo = await Host.ReadPhotoAsync(input);
+        }
+        catch (InvalidDataException exception)
+        {
+            UiLog.Error(exception);
+            _error = LabelText.UnreadablePhoto;
+            return;
+        }
+
+        if (photo is not null)
+        {
+            await ReadAsync(photo, key);
+        }
+    });
+
+    // the photo stays in memory: the picture from the camera would be gone otherwise.
+    // the retry button goes away with the failure, so the focus moves first to the button that shows the progress
+    private async Task RetryAsync()
+    {
+        if ((_retryKey == CameraKey ? _cameraButton : _galleryButton) is { } button)
+        {
+            await button.FocusAsync();
+        }
+
+        await Runner.RunAsync(async () =>
+        {
+            if (_retry is { } photo)
+            {
+                _error = null;
+                await ReadAsync(photo, _retryKey);
+            }
+        });
+    }
+
+    private async Task ReadAsync(PickedPhoto photo, string key)
+    {
+        Runner.ShowProgress(key, "Распознаю этикетку…");
+        try
+        {
+            _reading = await Labels.ReadAsync(ProfileId, photo);
+            _retry = null;
+        }
+        catch (Exception exception)
+        {
+            UiLog.Error(exception);
+            _error = LabelText.Error(exception);
+            _retry = LabelText.CanRetry(exception) ? photo : null;
+            _retryKey = key;
+        }
+    }
+
+    // the picture waiting for another request to Groq is lost here; it may not be possible to take it again
+    private Task<bool> CanLeaveAsync() => _retry is null
+        ? Task.FromResult(true)
+        : Runner.ConfirmAsync("Выйти без фото?", "Снимок не сохранится, значения с него не распознаны.", "Выйти", "Остаться", destructive: true);
+
+    private async Task OnSavedAsync(ProductResponse product)
+    {
+        await OnClose.InvokeAsync();
+        await OnSaved.InvokeAsync(product);
+    }
+}

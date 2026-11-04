@@ -3,9 +3,12 @@
 @inject ActionRunner Runner
 
 <button type="button" class="nf-button @(Secondary ? "nf-button--secondary" : "nf-button--primary") @Class"
-        disabled="@(!Enabled)" aria-label="@(ShownText == Text ? Description : null)" data-testid="@TestId" @onclick="ClickAsync">@ShownText</button>
+        disabled="@(!Enabled)" aria-disabled="@(Waiting ? "true" : null)" aria-label="@(ShownText == Text ? Description : null)"
+        data-testid="@TestId" @ref="_button" @onclick="ClickAsync">@ShownText</button>
 
 @code {
+    private ElementReference _button;
+
     [Parameter, EditorRequired]
     public string Text { get; set; } = "";
 
@@ -14,6 +17,10 @@
 
     [Parameter]
     public bool Enabled { get; set; } = true;
+
+    // the owner ignores taps while something runs; unlike disabled the button keeps the focus
+    [Parameter]
+    public bool Waiting { get; set; }
 
     // a longer spoken name; it has to start with the visible text, or voice control will not find the button
     [Parameter]
@@ -25,6 +32,8 @@
 
     [Parameter]
     public string? Class { get; set; }
+
+    public ValueTask FocusAsync() => _button.FocusAsync();
 
     private string ShownText => ProgressKey is not null && Runner.ProgressKey == ProgressKey && Runner.ProgressText is { } progress
         ? progress

@@ -151,17 +151,21 @@ public static class CaptureText
     }.OfType<string>());
 
     // what a failed request to Groq tells the user; the text stays in the field and in the saved input
-    public static string GroqError(Exception exception) => exception switch
+    public static string GroqError(Exception exception) => GroqError(exception, "для текста", "добавьте запись вручную");
+
+    // the model of this kind of request and the way that works without Groq, both as they read inside a sentence
+    public static string GroqError(Exception exception, string model, string manualWay) => exception switch
     {
         HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } =>
-            "Groq не принял ключ. Проверьте ключ в настройках или добавьте запись вручную.",
+            $"Groq не принял ключ. Проверьте ключ в настройках или {manualWay}.",
         HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
             "Groq временно ограничил запросы по этому ключу. Подождите минуту и повторите.",
         HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.NotFound } =>
-            "Groq не принял запрос. Проверьте модель для текста в настройках и повторите.",
+            $"Groq не принял запрос. Проверьте модель {model} в настройках и повторите.",
         HttpRequestException { StatusCode: >= HttpStatusCode.InternalServerError } =>
-            "Groq сейчас не отвечает. Повторите позже или добавьте запись вручную.",
-        HttpRequestException or OperationCanceledException => Unreachable,
+            $"Groq сейчас не отвечает. Повторите позже или {manualWay}.",
+        HttpRequestException or OperationCanceledException =>
+            $"Не удалось связаться с Groq. Проверьте интернет и повторите или {manualWay}.",
         InvalidDataException => "Groq вернул неполный ответ. Повторите запрос.",
         _ => UiErrors.Describe(exception)
     };

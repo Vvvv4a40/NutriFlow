@@ -1,18 +1,37 @@
+@using NutriFlow.Domain
+@using NutriFlow.Ui.Catalog
 @inject LocalMealClient Meals
 @inject ActionRunner Runner
 
-@* a catalog product typed in from the package (ProductEditorPageAsync in MainPage.Products.cs, without the label photo) *@
-<FormPage Title="Новый продукт" TestId="product-form" OnClose="OnClose">
+@* a catalog product typed in from the package or checked against a photo of its label (ProductEditorPageAsync in
+   MainPage.Products.cs) *@
+<FormPage Title="@(Label is null ? "Новый продукт" : "Проверка этикетки")" TestId="product-form"
+          CanLeave="@(Label is null ? null : CanLeaveAsync)" OnClose="OnClose">
     <ChildContent>
         @if (Reason is not null)
         {
             <Notice Icon="AppIconKind.Products" Tone="Tone.Accent" TestId="product-form-reason">@Reason</Notice>
         }
-        <BodyText Muted="true">Перенесите значения на 100 г с упаковки или из другого известного источника.</BodyText>
+        @if (Label is { } label)
+        {
+            <LabelPhoto Photo="label.Photo" />
+            <Notice Tone="@(label.Capture.Draft.Basis == NutritionBasis.Per100Grams ? Tone.Accent : Tone.Warning)"
+                    Icon="@(label.Capture.Draft.Basis == NutritionBasis.Per100Grams ? AppIconKind.Check : AppIconKind.Warning)" TestId="label-note">
+                @LabelText.Note(label.Capture.Draft.Basis)
+                @foreach (string question in label.Capture.Draft.ClarificationQuestions)
+                {
+                    <span class="nf-label-question">@question</span>
+                }
+            </Notice>
+        }
+        else
+        {
+            <BodyText Muted="true">Перенесите значения на 100 г с упаковки или из другого известного источника.</BodyText>
+        }
         <Field @ref="_nameField" Label="Название" Placeholder="Например, Творог 5% «Простоквашино»" MaxLength="200"
                Error="@_errors.GetValueOrDefault(NameKey)" Hint="@NameHint" TestId="product-name"
                @bind-Value="_name" @bind-Value:after="() => _errors.Remove(NameKey)" />
-        <Overline>Пищевая ценность на 100 г</Overline>
+        <Overline>@(Label is null ? "Пищевая ценность на 100 г" : LabelText.ValuesTitle(Label.Capture.Draft.Basis))</Overline>
         <div class="nf-field-grid">
             @foreach (NutrientField field in Nutrients)
             {
@@ -24,8 +43,17 @@
         <Field @ref="_barcodeField" Label="Штрихкод" Placeholder="Необязательно" Digits="true" Plain="true" MaxLength="32"
                Error="@_errors.GetValueOrDefault(BarcodeKey)" TestId="product-barcode"
                @bind-Value="_barcode" @bind-Value:after="() => _errors.Remove(BarcodeKey)" />
-        <SwitchRow Text="Значения приблизительные" Hint="Например, взяты по похожему продукту" TestId="product-estimated"
-                   @bind-Checked="_estimated" />
+        @if (Label is { } checkedLabel)
+        {
+            <SwitchRow @ref="_checkedSwitch" Text="@LabelText.CheckedTitle" Hint="@LabelText.CheckedHint(checkedLabel.Capture.Draft.Basis)"
+                       Error="@_errors.GetValueOrDefault(CheckedKey)" TestId="product-checked"
+                       @bind-Checked="_checked" @bind-Checked:after="() => _errors.Remove(CheckedKey)" />
+        }
+        else
+        {
+            <SwitchRow Text="Значения приблизительные" Hint="Например, взяты по похожему продукту" TestId="product-estimated"
+                       @bind-Checked="_estimated" />
+        }
     </ChildContent>
     <Footer>
         <ActionButton Text="Сохранить продукт" TestId="product-save" OnClick="SaveAsync" />
@@ -35,6 +63,7 @@
 @code {
     private const string NameKey = "name";
     private const string BarcodeKey = "barcode";
+    private const string CheckedKey = "checked";
 
     private sealed record NutrientField(string Key, string Label, string Error);
 
@@ -51,9 +80,11 @@
     private readonly Dictionary<string, string> _errors = [];
     private Field? _nameField;
     private Field? _barcodeField;
+    private SwitchRow? _checkedSwitch;
     private string? _name;
     private string? _barcode;
     private bool _estimated;
+    private bool _checked;
 
     [Parameter, EditorRequired]
     public Guid ProfileId { get; set; }
@@ -72,6 +103,10 @@
     [Parameter]
     public string? Reason { get; set; }
 
+    // what the photo of a label gave; the product keeps a reference to the photo saved in the profile
+    [Parameter]
+    public LabelReading? Label { get; set; }
+
     [Parameter]
     public EventCallback<ProductResponse> OnSaved { get; set; }
 
@@ -86,7 +121,27 @@
     {
         _name = InitialName;
         _barcode = InitialBarcode;
+        if (Label?.Capture.Draft is { } draft)
+        {
+            _name = draft.ProductName;
+            Fill("calories", draft.Calories);
+            Fill("protein", draft.ProteinGrams);
+            Fill("fat", draft.FatGrams);
+            Fill("carbs", draft.CarbohydratesGrams);
+        }
     }
+
+    // a value the label does not show stays empty: nothing is made up for it
+    private void Fill(string key, decimal? value)
+    {
+        if (value is decimal number)
+        {
+            _values[key] = NutritionText.Amount(number);
+        }
+    }
+
+    private Task<bool> CanLeaveAsync() =>
+        Runner.ConfirmAsync("Выйти без сохранения продукта?", "Значения с этикетки не сохранятся.", "Выйти", "Остаться", destructive: true);
 
     private void OnNutrientChanged(string key, string? value)
     {
@@ -121,15 +176,23 @@
             _errors[BarcodeKey] = barcodeProblem;
         }
 
+        if (Label is not null && LabelText.CheckProblem(Label.Capture.Draft.Basis, _checked) is { } checkProblem)
+        {
+            _errors[CheckedKey] = checkProblem;
+        }
+
         if (_errors.Count > 0)
         {
             await ShowErrorAsync();
             return;
         }
 
-        ProductResponse product = new(name, numbers["calories"], numbers["protein"], numbers["fat"], numbers["carbs"],
-            "ManualInput", _estimated ? "Estimated" : "Exact", "Ручной ввод пользователя", null,
-            string.IsNullOrWhiteSpace(_barcode) ? null : _barcode.Trim());
+        string? barcode = string.IsNullOrWhiteSpace(_barcode) ? null : _barcode.Trim();
+        ProductResponse product = Label is null
+            ? new(name, numbers["calories"], numbers["protein"], numbers["fat"], numbers["carbs"],
+                "ManualInput", _estimated ? "Estimated" : "Exact", "Ручной ввод пользователя", null, barcode)
+            : LabelText.Product(name, numbers["calories"], numbers["protein"], numbers["fat"], numbers["carbs"],
+                _checked, Label.Capture.PhotoReference, barcode);
         bool duplicate = false;
         await Runner.RunAsync(async () =>
         {
@@ -162,6 +225,10 @@
         if (first is not null)
         {
             await first.FocusAsync();
+        }
+        else if (_errors.ContainsKey(CheckedKey) && _checkedSwitch is not null)
+        {
+            await _checkedSwitch.FocusAsync();
         }
     }
 }

@@ -42,6 +42,10 @@ public sealed class BrowserPlatform(IJSRuntime js) : IDisposable
     public async Task<bool> RequestPersistenceAsync() =>
         await (await GetModuleAsync()).InvokeAsync<bool>("requestPersistence");
 
+    // the same request at the start of the app, only where the browser answers without a prompt
+    public async Task<bool> RenewPersistenceAsync() =>
+        await (await GetModuleAsync()).InvokeAsync<bool>("renewPersistence");
+
     public async Task<bool> IsPersistedAsync() =>
         await (await GetModuleAsync()).InvokeAsync<bool>("isPersisted");
 

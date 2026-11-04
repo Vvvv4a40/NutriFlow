@@ -6,6 +6,7 @@ using Bit.Bsqlite.Interop;
 using Microsoft.EntityFrameworkCore;
 using NutriFlow.Infrastructure.Persistence;
 using NutriFlow.Mobile.Core;
+using NutriFlow.Ui;
 
 namespace NutriFlow.Web.Services;
 
@@ -46,7 +47,7 @@ public sealed class WebBackupDatabases(
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"NutriFlow: backup leftovers were not checked. {exception}");
+            UiLog.Error($"NutriFlow: backup leftovers were not checked. {exception}");
             return;
         }
 
@@ -145,7 +146,7 @@ public sealed class WebBackupDatabases(
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"NutriFlow: a backup database was not removed: {name}. {exception}");
+            UiLog.Error($"NutriFlow: a backup database was not removed: {name}. {exception}");
         }
     }
 

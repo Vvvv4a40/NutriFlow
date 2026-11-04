@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Components;
+
 namespace NutriFlow.Ui.Hosting;
 
 // what the screens need from the app that hosts the library: the browser today, a maui BlazorWebView after the port
@@ -22,6 +24,9 @@ public interface IAppHost
 
     Task RequestPersistentStorageAsync();
 
+    // asks again at the start of the app, where the platform can do it without bothering the user
+    Task RenewPersistentStorageAsync();
+
     // the app went to the background or is closing: unsaved input has to be written now
     event Action? Hidden;
 
@@ -31,4 +36,11 @@ public interface IAppHost
     // hands a file to the user (download, share sheet, system save dialog); false when they cancelled.
     // the browser needs the tap that asked for it, so nothing slow may run between the tap and this call
     Task<bool> SaveFileAsync(string fileName, string contentType, byte[] content);
+
+    // a recorder for one voice form; the form disposes it, which also releases the microphone
+    IVoiceRecorder CreateVoiceRecorder();
+
+    // the photo chosen in this file input, in a format the label reader accepts; null when nothing is chosen,
+    // InvalidDataException when the platform cannot read it
+    Task<PickedPhoto?> ReadPhotoAsync(ElementReference input);
 }

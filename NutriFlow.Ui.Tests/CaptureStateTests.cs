@@ -9,7 +9,7 @@ using NutriFlow.Ui.Pages;
 
 namespace NutriFlow.Ui.Tests;
 
-public sealed class CaptureStateTests : IDisposable
+public sealed class CaptureStateTests : IAsyncLifetime
 {
     private static readonly DateOnly Today = DateOnly.FromDateTime(DateTime.Today);
     private readonly string _root = Path.Combine(Path.GetTempPath(), "nutriflow-capture-" + Guid.NewGuid().ToString("N"));
@@ -19,6 +19,7 @@ public sealed class CaptureStateTests : IDisposable
     private readonly LocalProfileStore _profiles;
     private readonly LocalInputDraftStore _drafts;
     private readonly LocalMealClient _meals;
+    private readonly List<CaptureState> _states = [];
 
     public CaptureStateTests()
     {
@@ -293,6 +294,7 @@ public sealed class CaptureStateTests : IDisposable
     private async Task<CaptureState> LoadAsync(Guid profileId, TimeSpan? saveDelay = null)
     {
         CaptureState state = new(_meals, _drafts, _settings, _host, saveDelay ?? TimeSpan.FromMilliseconds(1));
+        _states.Add(state);
         await state.LoadAsync(profileId);
         return state;
     }
@@ -370,8 +372,25 @@ public sealed class CaptureStateTests : IDisposable
         }
     }
 
-    public void Dispose()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    // a save still running would write into the folder while it is being removed: «Directory not empty»
+    public async Task DisposeAsync()
     {
+        foreach (CaptureState state in _states)
+        {
+            try
+            {
+                await state.FlushAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // some tests make the save fail on purpose
+            }
+
+            state.Dispose();
+        }
+
         _groq.Dispose();
         if (Directory.Exists(_root))
         {

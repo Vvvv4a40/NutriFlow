@@ -25,6 +25,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- the recorder of the old web client: one file for both, media.mjs imports it from next to itself.
+         without its own content root the dev server looks for it under this wwwroot and answers with an empty file -->
+    <Content Include="../../NutriFlow.Api/wwwroot/js/speech-capture.mjs" Link="wwwroot/js/speech-capture.mjs"
+             ContentRoot="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../NutriFlow.Api/wwwroot/'))" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
   </ItemGroup>
 

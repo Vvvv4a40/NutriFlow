@@ -6,13 +6,19 @@
         {
             <span id="@(_id + "-hint")" class="nf-caption">@Hint</span>
         }
+        @if (Error is not null)
+        {
+            <span id="@(_id + "-error")" class="nf-field__error" data-testid="@(TestId is null ? null : TestId + "-error")">@Error</span>
+        }
     </span>
     <input type="checkbox" role="switch" class="nf-switch" checked="@Checked" data-testid="@TestId"
-           aria-labelledby="@(_id + "-text")" aria-describedby="@(Hint is null ? null : _id + "-hint")" @onchange="OnChangeAsync" />
+           aria-labelledby="@(_id + "-text")" aria-describedby="@DescribedBy" aria-invalid="@(Error is null ? null : "true")"
+           @ref="_input" @onchange="OnChangeAsync" />
 </label>
 
 @code {
     private readonly string _id = "switch-" + Guid.NewGuid().ToString("N")[..8];
+    private ElementReference _input;
 
     [Parameter, EditorRequired]
     public string Text { get; set; } = "";
@@ -27,10 +33,23 @@
     public EventCallback<bool> CheckedChanged { get; set; }
 
     [Parameter]
+    public string? Error { get; set; }
+
+    [Parameter]
     public string? TestId { get; set; }
 
     [Parameter]
     public string? Class { get; set; }
+
+    private string? DescribedBy => (Hint, Error) switch
+    {
+        (null, null) => null,
+        (_, null) => _id + "-hint",
+        (null, _) => _id + "-error",
+        _ => $"{_id}-hint {_id}-error"
+    };
+
+    public ValueTask FocusAsync() => _input.FocusAsync();
 
     private Task OnChangeAsync(ChangeEventArgs args)
     {

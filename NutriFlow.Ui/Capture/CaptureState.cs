@@ -290,7 +290,7 @@ public sealed class CaptureState : IDisposable
         {
             if (version == _saveVersion && ProfileId == profileId)
             {
-                Console.Error.WriteLine(exception);
+                UiLog.Error(exception);
                 _saveError = exception;
                 SaveStatus = CaptureText.SaveFailed;
                 Changed?.Invoke();

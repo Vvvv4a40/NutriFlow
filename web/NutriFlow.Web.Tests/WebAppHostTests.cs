@@ -1,3 +1,4 @@
+using NutriFlow.Ui.Hosting;
 using NutriFlow.Web.Services;
 
 namespace NutriFlow.Web.Tests;
@@ -81,7 +82,7 @@ public sealed class WebAppHostTests : IDisposable
         PersistentDirectory files = new(new OpfsFiles(_js), _root);
         await files.RestoreAsync();
         await File.WriteAllTextAsync(Path.Combine(_root, "profiles.json"), "{}");
-        WebAppHost host = new(new AppInfo(new Version(0, 2, 0), "test"), new BrowserPlatform(_js), files);
+        WebAppHost host = new(new AppInfo(new Version(0, 2, 0), "test"), new BrowserPlatform(_js), new BrowserMedia(_js), files);
 
         await host.SaveProfileFilesAsync();
 
@@ -102,8 +103,87 @@ public sealed class WebAppHostTests : IDisposable
         Assert.Equal([1, 2], content);
     }
 
+    [Fact]
+    public async Task StartRenewsTheRequestThroughTheBrowserRule()
+    {
+        await Create(new BrowserPlatform(_js)).RenewPersistentStorageAsync();
+
+        Assert.Equal(1, _js.Platform.PersistenceRenewals);
+        Assert.Equal(0, _js.Platform.PersistenceRequests);
+    }
+
+    [Fact]
+    public async Task PhotoComesFromTheModuleAndAnUnreadableOneIsReportedAsData()
+    {
+        WebAppHost host = Create(new BrowserPlatform(_js));
+        _js.Media.Photo = new PickedPhoto([1, 2, 3], "image/jpeg");
+
+        PickedPhoto? photo = await host.ReadPhotoAsync(default);
+        Assert.Equal("image/jpeg", photo!.MediaType);
+
+        _js.Media.Photo = null;
+        Assert.Null(await host.ReadPhotoAsync(default));
+
+        _js.Media.PhotoFails = true;
+        await Assert.ThrowsAsync<InvalidDataException>(() => host.ReadPhotoAsync(default));
+    }
+
+    [Fact]
+    public async Task VoiceRecorderWorksThroughTheCaptureOfTheModule()
+    {
+        await using IVoiceRecorder recorder = Create(new BrowserPlatform(_js)).CreateVoiceRecorder();
+        List<VoicePhase> phases = [];
+        List<string> texts = [];
+        recorder.PhaseChanged += phases.Add;
+        recorder.Transcribed += texts.Add;
+
+        await recorder.StartAsync((audio, _) => Task.FromResult($"{audio.MediaType}:{audio.Content.Length}"));
+        await recorder.StopAsync();
+
+        Assert.Equal(["start", "stop"], _js.Media.Capture.Calls);
+        Assert.Equal(WebVoiceRecorder.MaximumMilliseconds, _js.Media.MaximumMilliseconds);
+
+        WebVoiceRecorder web = (WebVoiceRecorder)recorder;
+        web.OnPhaseChanged("recording");
+        web.OnPhaseChanged("transcribing");
+        Assert.Equal("audio/webm:2", await web.OnRecorded([1, 2], "audio/webm"));
+        web.OnTranscribed("гречка");
+
+        Assert.Equal([VoicePhase.Recording, VoicePhase.Transcribing], phases);
+        Assert.Equal(["гречка"], texts);
+    }
+
+    [Fact]
+    public async Task FailedTranscriptionReachesTheScreenWithItsOwnMessage()
+    {
+        await using IVoiceRecorder recorder = Create(new BrowserPlatform(_js)).CreateVoiceRecorder();
+        List<string> failures = [];
+        recorder.Failed += failures.Add;
+        await recorder.StartAsync((_, _) => throw new InvalidOperationException("Не удалось связаться с Groq."));
+        WebVoiceRecorder web = (WebVoiceRecorder)recorder;
+
+        // the script gets an empty text and reports its own message about silence
+        Assert.Equal("", await web.OnRecorded([1], "audio/webm"));
+        web.OnFailed("Речь не распознана.");
+        // a later failure of the microphone has nothing to do with that request
+        web.OnFailed("Нет доступа к микрофону.");
+
+        Assert.Equal(["Не удалось связаться с Groq.", "Нет доступа к микрофону."], failures);
+    }
+
+    [Fact]
+    public async Task ClosingTheFormReleasesTheMicrophone()
+    {
+        IVoiceRecorder recorder = Create(new BrowserPlatform(_js)).CreateVoiceRecorder();
+        await recorder.StartAsync((_, _) => Task.FromResult("текст"));
+
+        await recorder.DisposeAsync();
+
+        Assert.Equal(["start", "dispose"], _js.Media.Capture.Calls);
+    }
+
     private WebAppHost Create(BrowserPlatform platform, string channel = "test") =>
-        new(new AppInfo(new Version(0, 2, 0), channel), platform, new PersistentDirectory(new OpfsFiles(_js), _root));
+        new(new AppInfo(new Version(0, 2, 0), channel), platform, new BrowserMedia(_js), new PersistentDirectory(new OpfsFiles(_js), _root));
 
     public void Dispose()
     {

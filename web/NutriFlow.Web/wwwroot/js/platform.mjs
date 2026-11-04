@@ -11,6 +11,15 @@ export async function isPersisted() {
     return await navigator.storage?.persisted?.().catch(() => false) ?? false;
 }
 
+// a browser that refused at the first profile may agree after the installation or more visits, so every start asks
+// again. firefox puts this question to the user instead of deciding silently: there it stays the one at the first profile
+export async function renewPersistence(browser = globalThis.navigator) {
+    const storage = browser.storage;
+    if (await storage?.persisted?.().catch(() => false) ?? false) return true;
+    if (/\bFirefox\//.test(browser.userAgent ?? "")) return false;
+    return await storage?.persist?.().catch(() => false) ?? false;
+}
+
 // chrome and edge offer installation through beforeinstallprompt, often before .NET has started, so boot.mjs
 // registers this first; keeping the event lets the app show its own button instead of the browser infobar
 export function captureInstallPrompt(target) {

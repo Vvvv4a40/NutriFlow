@@ -73,7 +73,7 @@ public sealed class ProductSearch : IDisposable
         {
             if (ReferenceEquals(_search, search))
             {
-                Console.Error.WriteLine(exception);
+                UiLog.Error(exception);
                 Failed = true;
                 Changed?.Invoke();
             }

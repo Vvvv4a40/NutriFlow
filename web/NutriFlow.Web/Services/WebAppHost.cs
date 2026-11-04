@@ -1,8 +1,9 @@
+using Microsoft.AspNetCore.Components;
 using NutriFlow.Ui.Hosting;
 
 namespace NutriFlow.Web.Services;
 
-public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, PersistentDirectory files) : IAppHost
+public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, BrowserMedia media, PersistentDirectory files) : IAppHost
 {
     public string VersionText => info.VersionText;
 
@@ -31,9 +32,15 @@ public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, Persisten
 
     public Task RequestPersistentStorageAsync() => platform.RequestPersistenceAsync();
 
+    public Task RenewPersistentStorageAsync() => platform.RenewPersistenceAsync();
+
     // profiles.json, drafts and label photos live in memory; nothing else copies them to opfs
     public Task SaveProfileFilesAsync() => files.FlushAsync();
 
     public Task<bool> SaveFileAsync(string fileName, string contentType, byte[] content) =>
         platform.SaveFileAsync(fileName, contentType, content);
+
+    public IVoiceRecorder CreateVoiceRecorder() => media.CreateVoiceRecorder();
+
+    public Task<PickedPhoto?> ReadPhotoAsync(ElementReference input) => media.ReadPhotoAsync(input);
 }

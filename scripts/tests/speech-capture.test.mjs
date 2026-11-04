@@ -41,6 +41,7 @@ function createFixture(options = {}) {
 
     const capture = createSpeechCapture({
         ...(options.maximumDuration === undefined ? {} : { maximumDurationInMilliseconds: options.maximumDuration }),
+        ...(options.messages === undefined ? {} : { messages: options.messages }),
         Recorder,
         getUserMedia: options.getUserMedia ?? (async constraints => {
             assert.deepEqual(constraints, { audio: true });
@@ -307,4 +308,25 @@ test("dispose stops resources, blocks reuse and suppresses late transcription", 
     assert.equal(fixture.states.length, stateCount);
     assert.deepEqual(fixture.transcripts, []);
     assert.equal(fixture.requests[0].signal.aborted, true);
+});
+
+test("own messages replace the texts about a denied microphone and an unsupported browser", async () => {
+    const messages = { unsupported: "Не записывает.", microphoneDenied: "Нет доступа." };
+    const denied = createFixture({ messages, getUserMedia: async () => { throw { name: "NotAllowedError" }; } });
+    await denied.capture.start();
+    assert.deepEqual(denied.errors, ["Нет доступа."]);
+
+    const unsupported = createFixture({ messages, supportedTypes: [] });
+    await unsupported.capture.start();
+    assert.deepEqual(unsupported.errors, ["Не записывает."]);
+
+    const missing = createFixture({ messages, getUserMedia: async () => { throw { name: "NotFoundError" }; } });
+    await missing.capture.start();
+    assert.match(missing.errors[0], /Микрофон не найден/);
+});
+
+test("without own messages the old web client keeps its texts", async () => {
+    const unsupported = createFixture({ supportedTypes: [] });
+    await unsupported.capture.start();
+    assert.deepEqual(unsupported.errors, ["Этот браузер не поддерживает запись нужного аудиоформата."]);
 });

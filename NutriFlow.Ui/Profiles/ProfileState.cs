@@ -16,6 +16,10 @@ public sealed class ProfileState(LocalProfileStore profiles, IProfileSettings se
         Current = await profiles.GetSelectedAsync();
         await ApplyThemeAsync();
         Changed?.Invoke();
+        if (Current is not null)
+        {
+            _ = RenewStorageAsync();
+        }
     }
 
     public Task<IReadOnlyList<LocalProfile>> ListAsync() => profiles.ListAsync();
@@ -32,7 +36,8 @@ public sealed class ProfileState(LocalProfileStore profiles, IProfileSettings se
         await host.SaveProfileFilesAsync();
         Current = created;
         await ApplyThemeAsync();
-        // asked once: firefox shows a prompt for it, chrome and safari decide silently
+        // the only question firefox hears, it shows a prompt for it; chrome and safari decide silently and are
+        // asked again at every start
         if (first)
         {
             await host.RequestPersistentStorageAsync();
@@ -40,6 +45,19 @@ public sealed class ProfileState(LocalProfileStore profiles, IProfileSettings se
 
         Changed?.Invoke();
         return created;
+    }
+
+    // the diary must not wait for this answer and does not depend on it
+    private async Task RenewStorageAsync()
+    {
+        try
+        {
+            await host.RenewPersistentStorageAsync();
+        }
+        catch (Exception exception)
+        {
+            UiLog.Error(exception);
+        }
     }
 
     public async Task SelectAsync(Guid profileId)

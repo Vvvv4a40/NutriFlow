@@ -97,7 +97,7 @@
             }
             catch (Exception exception) when (CatalogText.IsBarcodeMissing(exception))
             {
-                Console.Error.WriteLine(exception);
+                UiLog.Error(exception);
             }
             catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
             {

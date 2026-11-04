@@ -153,7 +153,7 @@ else if (_slow)
         {
             if (version == _version)
             {
-                Console.Error.WriteLine(exception);
+                UiLog.Error(exception);
                 _progress = null;
                 _loadError = DiaryText.LoadFailed;
             }

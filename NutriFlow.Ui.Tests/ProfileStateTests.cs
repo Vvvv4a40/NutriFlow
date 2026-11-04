@@ -75,6 +75,39 @@ public sealed class ProfileStateTests : IDisposable
     }
 
     [Fact]
+    public async Task StartWithAProfileAsksToKeepTheStorageAgain()
+    {
+        ProfileState first = Create();
+        await first.CreateAsync("Анна");
+        Assert.Equal(0, _host.PersistenceRenewals);
+
+        await Create().LoadAsync();
+
+        Assert.Equal(1, _host.PersistenceRenewals);
+        Assert.Equal(1, _host.PersistenceRequests);
+    }
+
+    [Fact]
+    public async Task StartWithoutProfilesDoesNotAskToKeepTheStorage()
+    {
+        await Create().LoadAsync();
+
+        Assert.Equal(0, _host.PersistenceRenewals);
+    }
+
+    [Fact]
+    public async Task FailedRenewalDoesNotStopTheStart()
+    {
+        await Create().CreateAsync("Анна");
+        _host.RenewalFails = true;
+        ProfileState state = Create();
+
+        await state.LoadAsync();
+
+        Assert.Equal("Анна", state.Current!.Name);
+    }
+
+    [Fact]
     public async Task RejectedNameLeavesNothingToSave()
     {
         ProfileState state = Create();

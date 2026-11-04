@@ -46,7 +46,8 @@ else
                                  OnAddFood="() => SelectTabAsync(ShellTab.Input)" />
                     break;
                 case ShellTab.Products:
-                    <ProductsScreen @key="profile.Id" Profile="profile" Date="_date" OnStarted="OpenStartedAsync" />
+                    <ProductsScreen @key="profile.Id" Profile="profile" Date="_date" OnStarted="OpenStartedAsync"
+                                    OnOpenSettings="() => SelectTabAsync(ShellTab.Settings)" />
                     break;
                 case ShellTab.Input:
                     <CaptureScreen @key="profile.Id" Profile="profile" Date="_date" FocusPreview="_focusPreview"
@@ -129,7 +130,7 @@ else
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine(exception);
+            UiLog.Error(exception);
             _loadError = DiaryText.LoadFailed;
         }
     }

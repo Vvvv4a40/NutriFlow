@@ -14,6 +14,11 @@
         <IconTile Icon="AppIconKind.Edit" />
         <span class="nf-method__title">Вручную</span>
     </Pressable>
+    <Pressable Class="nf-method" Description="Этикетка" Hint="Добавить продукт по фото этикетки" TestId="product-add-photo"
+               OnClick="() => _label = true">
+        <IconTile Icon="AppIconKind.Camera" />
+        <span class="nf-method__title">Этикетка</span>
+    </Pressable>
     <Pressable Class="nf-method" Description="Штрихкод" Hint="Найти продукт по цифрам штрихкода в Open Food Facts"
                TestId="product-add-barcode" OnClick="() => _barcode = true">
         <IconTile Icon="AppIconKind.Barcode" />
@@ -45,7 +50,7 @@ else if (_search.Results is { } products)
     else if (products.Count == 0)
     {
         <EmptyState Icon="AppIconKind.Products" Title="Нет продуктов" TestId="product-catalog-empty"
-                    Message="Добавьте продукт вручную или по штрихкоду — дальше он считается без интернета." />
+                    Message="Добавьте продукт вручную, по фото этикетки или по штрихкоду — дальше он считается без интернета." />
     }
     else
     {
@@ -70,6 +75,11 @@ else if (_search.Results is { } products)
     <ProductForm ProfileId="Profile.Id" InitialName="@name" OnSaved="OnProductAddedAsync" OnClose="() => _manualName = null" />
 }
 
+@if (_label)
+{
+    <LabelSourceForm ProfileId="Profile.Id" OnOpenSettings="OnOpenSettings" OnSaved="OnProductAddedAsync" OnClose="() => _label = false" />
+}
+
 @if (_barcode)
 {
     <BarcodeForm ProfileId="Profile.Id" Date="Date" OnStarted="OnStarted" OnCatalogChanged="() => _search.SearchNowAsync()"
@@ -82,6 +92,7 @@ else if (_search.Results is { } products)
     private ProductResponse? _portion;
     private string? _manualName;
     private bool _barcode;
+    private bool _label;
 
     [Parameter, EditorRequired]
     public LocalProfile Profile { get; set; } = null!;
@@ -93,6 +104,9 @@ else if (_search.Results is { } products)
     // a calculation is ready: the host opens the food input with it
     [Parameter]
     public EventCallback OnStarted { get; set; }
+
+    [Parameter]
+    public EventCallback OnOpenSettings { get; set; }
 
     private string Summary => CatalogText.SearchSummary(_search);
 

@@ -42,6 +42,7 @@ builder.Services.AddScoped(services => new LocalProfileBackup(
 builder.Services.AddSingleton<WebProfileSettings>();
 builder.Services.AddSingleton<IProfileSettings>(services => services.GetRequiredService<WebProfileSettings>());
 builder.Services.AddSingleton<BrowserPlatform>();
+builder.Services.AddSingleton<BrowserMedia>();
 builder.Services.AddSingleton<IAppHost, WebAppHost>();
 builder.Services.AddNutriFlowUi();
 

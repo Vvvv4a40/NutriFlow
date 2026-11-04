@@ -1,6 +1,10 @@
 const defaultMaximumDurationInMilliseconds = 60_000;
 const maximumAudioSizeInBytes = 8 * 1024 * 1024;
 const maximumTranscriptLength = 4000;
+const defaultMessages = {
+    unsupported: "Этот браузер не поддерживает запись нужного аудиоформата.",
+    microphoneDenied: "Доступ к микрофону запрещён. Разрешите его в настройках браузера и попробуйте снова."
+};
 
 export function getRecordingMimeType(Recorder) {
     if (typeof Recorder?.isTypeSupported !== "function") return null;
@@ -22,6 +26,7 @@ export function createSpeechCapture({
     onStateChange,
     onError,
     maximumDurationInMilliseconds = defaultMaximumDurationInMilliseconds,
+    messages = {},
     getUserMedia =constraints => globalThis.navigator.mediaDevices.getUserMedia(constraints),
     Recorder = globalThis.MediaRecorder,
     setTimeout: scheduleTimeout = globalThis.setTimeout,
@@ -31,6 +36,7 @@ export function createSpeechCapture({
     let activeOperation = null;
     let disposed = false;
     let operationNumber = 0;
+    const texts = { ...defaultMessages, ...messages };
 
     function setPhase(value) {
         if (phase === value) return;
@@ -79,7 +85,7 @@ export function createSpeechCapture({
     function microphoneErrorMessage(error) {
         switch (error?.name) {
             case "NotAllowedError":
-                return "Доступ к микрофону запрещён. Разрешите его в настройках браузера и попробуйте снова.";
+                return texts.microphoneDenied;
             case "NotFoundError":
                 return "Микрофон не найден. Подключите его и попробуйте снова.";
             case "NotReadableError":
@@ -149,7 +155,7 @@ export function createSpeechCapture({
         try {
             operation.mediaType = getRecordingMimeType(Recorder);
             if (!operation.mediaType) {
-                fail(operation, "Этот браузер не поддерживает запись нужного аудиоформата.");
+                fail(operation, texts.unsupported);
                 return;
             }
 

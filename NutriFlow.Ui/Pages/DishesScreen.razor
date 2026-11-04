@@ -90,7 +90,7 @@ else if (_dishes is { } dishes)
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine(exception);
+            UiLog.Error(exception);
             _loadError = DiaryText.LoadFailed;
         }
     }
