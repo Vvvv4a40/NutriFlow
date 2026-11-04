@@ -22,6 +22,14 @@ export function removeFile(path) {
     return send({ operation: "remove", path });
 }
 
+export function writeDatabase(path, bytes) {
+    return send({ operation: "writeDatabase", path, bytes });
+}
+
+export function removeDatabase(path) {
+    return send({ operation: "removeDatabase", path });
+}
+
 function send(message) {
     worker ??= createWorker();
     const id = nextId++;

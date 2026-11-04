@@ -1,11 +1,11 @@
+using System.Data.Common;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using NutriFlow.Domain;
-using NutriFlow.Infrastructure;
 using NutriFlow.Infrastructure.Backups;
 using NutriFlow.Infrastructure.LabelPhotos;
 using NutriFlow.Infrastructure.Persistence;
@@ -23,11 +23,13 @@ public sealed class LocalProfileBackup
     private static readonly string[] OwnerTables =
         ["Products", "ProductAliases", "MealSessions", "DailyGoals", "SavedDishes", "LabelPhotos"];
     private readonly LocalProfileStore _profiles;
+    private readonly LocalProfileBackupDatabases _databases;
 
-    public LocalProfileBackup(LocalProfileStore profiles)
+    public LocalProfileBackup(LocalProfileStore profiles, LocalProfileBackupDatabases? databases = null)
     {
         ArgumentNullException.ThrowIfNull(profiles);
         _profiles = profiles;
+        _databases = databases ?? LocalProfileBackupDatabases.Native;
     }
 
     public Task ExportAsync(Guid profileId, string destinationPath, Guid? activeSessionId = null,
@@ -76,23 +78,7 @@ public sealed class LocalProfileBackup
             string snapshotDirectory = Path.Combine(working, "snapshot");
             Directory.CreateDirectory(snapshotDirectory);
             string snapshotPath = Path.Combine(snapshotDirectory, "nutriflow.db");
-            string sourcePath = _profiles.GetDatabasePath(profileId);
-            if (!File.Exists(sourcePath))
-            {
-                await using NutriFlowDbContext initialized = await LocalProfileDatabase.OpenAsync(sourcePath, profileId, cancellationToken);
-            }
-            if (new FileInfo(sourcePath).Length > MaximumExpandedBytes)
-            {
-                throw new InvalidDataException("База профиля превышает предел резервной копии 512 МБ.");
-            }
-            await using (SqliteConnection source = OpenDatabase(sourcePath, SqliteOpenMode.ReadOnly))
-            await using (SqliteConnection snapshot = OpenDatabase(snapshotPath, SqliteOpenMode.ReadWriteCreate))
-            {
-                await source.OpenAsync(cancellationToken);
-                await snapshot.OpenAsync(cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                source.BackupDatabase(snapshot);
-            }
+            await _databases.SnapshotProfileAsync(_profiles.GetDatabasePath(profileId), profileId, snapshotPath, cancellationToken);
             long snapshotLength = new FileInfo(snapshotPath).Length;
             if (snapshotLength > MaximumExpandedBytes)
             {
@@ -131,7 +117,7 @@ public sealed class LocalProfileBackup
             await ValidateDatabaseAsync(snapshotPath, profileId, activeSessionId, cancellationToken);
             await ValidateDraftContextAsync(snapshotPath, profileId, inputDraft, cancellationToken);
             string dataDirectory = Path.Combine(working, "data");
-            await DataBackup.CreateAsync(snapshotPath, snapshotPhotos, dataDirectory, cancellationToken);
+            await DataBackup.CreateAsync(snapshotPath, snapshotPhotos, dataDirectory, _databases, cancellationToken);
             ProfileManifest manifest = new(inputDraftFile is null ? 1 : 2, profile.Id, profile.Name,
                 DateTimeOffset.UtcNow, activeSessionId, inputDraftFile);
             await WriteJsonAsync(Path.Combine(working, ProfileManifestName), manifest, cancellationToken);
@@ -241,7 +227,7 @@ public sealed class LocalProfileBackup
             string databasePath = Path.Combine(dataDirectory, "nutriflow.db");
             await ValidateDatabaseAsync(databasePath, manifest.ProfileId, manifest.ActiveSessionId, cancellationToken);
             await ValidateDraftContextAsync(databasePath, manifest.ProfileId, inputDraft, cancellationToken);
-            await DataBackup.VerifyAsync(dataDirectory, cancellationToken);
+            await DataBackup.VerifyAsync(dataDirectory, _databases, cancellationToken);
             Guid restoredId = Guid.NewGuid();
             await RemapOwnerAsync(databasePath, manifest.ProfileId, restoredId, cancellationToken);
             await ValidateDatabaseAsync(databasePath, restoredId, manifest.ActiveSessionId, cancellationToken);
@@ -250,14 +236,24 @@ public sealed class LocalProfileBackup
             {
                 File.Move(Path.Combine(extracted, InputDraftName), Path.Combine(dataDirectory, InputDraftName));
             }
-            LocalProfile profile = await _profiles.PublishRestoredAsync(restoredId, restoredName, dataDirectory, cancellationToken);
+            await _databases.InstallRestoredAsync(restoredId, dataDirectory, cancellationToken);
+            LocalProfile profile;
+            try
+            {
+                profile = await _profiles.PublishRestoredAsync(restoredId, restoredName, dataDirectory, cancellationToken);
+            }
+            catch
+            {
+                await _databases.DiscardRestoredAsync(restoredId, CancellationToken.None);
+                throw;
+            }
             return new LocalProfileBackupResult(profile, manifest.ActiveSessionId);
         }
         catch (JsonException exception)
         {
             throw new InvalidDataException("Описание резервной копии повреждено.", exception);
         }
-        catch (SqliteException exception)
+        catch (DbException exception)
         {
             throw new InvalidDataException("База данных резервной копии повреждена или несовместима.", exception);
         }
@@ -267,14 +263,15 @@ public sealed class LocalProfileBackup
         }
     }
 
-    private static async Task ValidateDatabaseAsync(string path, Guid ownerId, Guid? activeSessionId,
+    private Task ValidateDatabaseAsync(string path, Guid ownerId, Guid? activeSessionId,
+        CancellationToken cancellationToken) =>
+        _databases.UseAsync(path, writable: false,
+            (database, token) => ValidateDatabaseAsync(database, ownerId, activeSessionId, token), cancellationToken);
+
+    private async Task<bool> ValidateDatabaseAsync(DbConnection database, Guid ownerId, Guid? activeSessionId,
         CancellationToken cancellationToken)
     {
-        DbContextOptions<NutriFlowDbContext> options = new DbContextOptionsBuilder<NutriFlowDbContext>()
-            .UseSqlite(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()).Options;
-        await using NutriFlowDbContext model = new(options);
-        await using SqliteConnection database = OpenDatabase(path, SqliteOpenMode.ReadOnly);
-        await database.OpenAsync(cancellationToken);
+        await using NutriFlowDbContext model = _databases.CreateContext(database);
         string[] expectedMigrations = model.Database.GetMigrations().ToArray();
         List<string> migrations = await ReadStringsAsync(database,
             "SELECT MigrationId FROM __EFMigrationsHistory ORDER BY MigrationId;", cancellationToken);
@@ -298,9 +295,8 @@ public sealed class LocalProfileBackup
             {
                 throw new InvalidDataException("База содержит неподдерживаемые объекты.");
             }
-            using SqliteCommand command = database.CreateCommand();
-            command.CommandText = $"PRAGMA table_info(\"{item[6..]}\");";
-            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            await using DbCommand command = BackupDatabaseFiles.Command(database, $"PRAGMA table_info(\"{item[6..]}\");");
+            await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
             Dictionary<string, string> actual = new();
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -315,10 +311,9 @@ public sealed class LocalProfileBackup
         {
             throw new InvalidDataException("В базе отсутствуют обязательные таблицы.");
         }
-        using (SqliteCommand command = database.CreateCommand())
+        await using (DbCommand command = BackupDatabaseFiles.Command(database,
+            "SELECT COUNT(*) FROM Users WHERE Id = $owner AND IsLegacyLocal = 0;", ("$owner", ownerId)))
         {
-            command.CommandText = "SELECT COUNT(*) FROM Users WHERE Id = $owner AND IsLegacyLocal = 0;";
-            command.Parameters.AddWithValue("$owner", ownerId);
             if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 1)
             {
                 throw new InvalidDataException("Владелец резервной копии не найден.");
@@ -342,8 +337,8 @@ public sealed class LocalProfileBackup
             if (activeSessionId.HasValue)
             {
                 command.CommandText = "SELECT COUNT(*) FROM MealSessions WHERE Id = $session AND UserId = $owner AND Status != $confirmed;";
-                command.Parameters.AddWithValue("$session", activeSessionId.Value);
-                command.Parameters.AddWithValue("$confirmed", (int)MealSessionStatus.Confirmed);
+                AddParameter(command, "$session", activeSessionId.Value);
+                AddParameter(command, "$confirmed", (int)MealSessionStatus.Confirmed);
                 if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 1)
                 {
                     throw new InvalidDataException("Активный черновик не принадлежит профилю или уже подтверждён.");
@@ -370,17 +365,20 @@ public sealed class LocalProfileBackup
         {
             throw new InvalidDataException("Общий продукт не содержит проверяемый внешний источник.");
         }
+        return true;
     }
 
-    private static async Task RemapOwnerAsync(string path, Guid sourceId, Guid destinationId, CancellationToken cancellationToken)
+    private Task RemapOwnerAsync(string path, Guid sourceId, Guid destinationId, CancellationToken cancellationToken) =>
+        _databases.UseAsync(path, writable: true,
+            (database, token) => RemapOwnerAsync(database, sourceId, destinationId, token), cancellationToken);
+
+    private static async Task<bool> RemapOwnerAsync(DbConnection database, Guid sourceId, Guid destinationId,
+        CancellationToken cancellationToken)
     {
-        await using SqliteConnection database = OpenDatabase(path, SqliteOpenMode.ReadWrite);
-        await database.OpenAsync(cancellationToken);
-        using SqliteTransaction transaction = database.BeginTransaction();
-        using SqliteCommand command = database.CreateCommand();
+        await using DbTransaction transaction = await database.BeginTransactionAsync(cancellationToken);
+        await using DbCommand command = BackupDatabaseFiles.Command(database, "",
+            ("$source", sourceId), ("$destination", destinationId));
         command.Transaction = transaction;
-        command.Parameters.AddWithValue("$source", sourceId);
-        command.Parameters.AddWithValue("$destination", destinationId);
         command.CommandText = "INSERT INTO Users (Id, CreatedAtUtc, IsLegacyLocal, LegacyLabelPhotosImported) SELECT $destination, CreatedAtUtc, 0, LegacyLabelPhotosImported FROM Users WHERE Id = $source;";
         await command.ExecuteNonQueryAsync(cancellationToken);
         foreach (string table in OwnerTables)
@@ -391,7 +389,8 @@ public sealed class LocalProfileBackup
         command.CommandText = "DELETE FROM Users WHERE Id = $source;";
         await command.ExecuteNonQueryAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        transaction.Commit();
+        await transaction.CommitAsync(cancellationToken);
+        return true;
     }
 
     private static void ValidateArchiveName(string name)
@@ -479,22 +478,21 @@ public sealed class LocalProfileBackup
         return new BackupFile(InputDraftName, input.Length, Convert.ToHexString(hash));
     }
 
-    private static async Task ValidateDraftContextAsync(string databasePath, Guid profileId, LocalInputDraft? draft,
+    private async Task ValidateDraftContextAsync(string databasePath, Guid profileId, LocalInputDraft? draft,
         CancellationToken cancellationToken)
     {
-        if (draft?.SessionId is null)
+        if (draft?.SessionId is not Guid sessionId)
         {
             return;
         }
-        await using SqliteConnection database = OpenDatabase(databasePath, SqliteOpenMode.ReadOnly);
-        await database.OpenAsync(cancellationToken);
-        using SqliteCommand command = database.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM MealSessions WHERE Id = $session AND UserId = $owner AND MealDate = $date AND Purpose = $purpose;";
-        command.Parameters.AddWithValue("$session", draft.SessionId.Value);
-        command.Parameters.AddWithValue("$owner", profileId);
-        command.Parameters.AddWithValue("$date", draft.MealDate);
-        command.Parameters.AddWithValue("$purpose", (int)draft.Purpose);
-        if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 1)
+        long matches = await _databases.UseAsync(databasePath, writable: false, async (database, token) =>
+        {
+            await using DbCommand command = BackupDatabaseFiles.Command(database,
+                "SELECT COUNT(*) FROM MealSessions WHERE Id = $session AND UserId = $owner AND MealDate = $date AND Purpose = $purpose;",
+                ("$session", sessionId), ("$owner", profileId), ("$date", draft.MealDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)), ("$purpose", (int)draft.Purpose));
+            return Convert.ToInt64(await command.ExecuteScalarAsync(token));
+        }, cancellationToken);
+        if (matches != 1)
         {
             throw new InvalidDataException("Сохранённый ввод ссылается на отсутствующую сессию или другой контекст.");
         }
@@ -536,11 +534,10 @@ public sealed class LocalProfileBackup
         }
     }
 
-    private static async Task<List<string>> ReadStringsAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    private static async Task<List<string>> ReadStringsAsync(DbConnection connection, string sql, CancellationToken cancellationToken)
     {
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = sql;
-        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using DbCommand command = BackupDatabaseFiles.Command(connection, sql);
+        await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         List<string> values = [];
         while (await reader.ReadAsync(cancellationToken))
         {
@@ -553,8 +550,13 @@ public sealed class LocalProfileBackup
         return values;
     }
 
-    private static SqliteConnection OpenDatabase(string path, SqliteOpenMode mode) => new(
-        new SqliteConnectionStringBuilder { DataSource = path, Mode = mode, Pooling = false, ForeignKeys = true }.ToString());
+    private static void AddParameter(DbCommand command, string name, object value)
+    {
+        DbParameter parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
 
     private static void TryDeleteWorkingDirectory(string path)
     {

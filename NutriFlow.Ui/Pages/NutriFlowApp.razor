@@ -25,7 +25,7 @@ else if (!_loaded)
 }
 else if (Profiles.Current is not { } profile)
 {
-    <WelcomeScreen OnStart="() => _creatingProfile = true" />
+    <WelcomeScreen OnStart="() => _creatingProfile = true" OnRestore="() => _restoringBackup = true" />
 }
 else
 {
@@ -58,7 +58,8 @@ else
                                   OnOpenInput="() => SelectTabAsync(ShellTab.Input)" />
                     break;
                 case ShellTab.Settings:
-                    <SettingsScreen @key="profile.Id" Profile="profile" OnChooseProfile="ChooseProfileAsync" DeveloperTools="DeveloperTools" />
+                    <SettingsScreen @key="profile.Id" Profile="profile" OnChooseProfile="ChooseProfileAsync"
+                                    OnRestoreBackup="() => _restoringBackup = true" DeveloperTools="DeveloperTools" />
                     break;
             }
         </ChildContent>
@@ -70,10 +71,16 @@ else
     <ProfileForm OnClose="() => _creatingProfile = false" />
 }
 
+@if (_restoringBackup)
+{
+    <RestoreBackupForm OnClose="() => _restoringBackup = false" OnRestored="OnRestoredAsync" />
+}
+
 @code {
     private bool _loaded;
     private string? _loadError;
     private bool _creatingProfile;
+    private bool _restoringBackup;
     private AppShell? _shell;
     private Guid? _shownProfileId;
     private bool _focusShell;
@@ -145,11 +152,25 @@ else
         {
             _creatingProfile = true;
         }
+        else if (choice == ProfileChoices.Restore)
+        {
+            _restoringBackup = true;
+        }
         else if (choices.Find(choice) is { } selected && selected.Id != Profiles.Current?.Id)
         {
             await Profiles.SelectAsync(selected.Id);
         }
     });
+
+    // the restored profile is the current one already, its diary is under the closed form
+    private async Task OnRestoredAsync(LocalProfile restored)
+    {
+        _restoringBackup = false;
+        _tab = ShellTab.Diary;
+        StateHasChanged();
+        bool others = (await Profiles.ListAsync()).Count > 1;
+        await Runner.AlertAsync("Восстановлено", BackupText.Restored(restored.Name, others), "Готово");
+    }
 
     // a calculation made in the catalog or the dishes: the food input shows it for the confirmation
     private async Task OpenStartedAsync()
@@ -190,7 +211,7 @@ else
             _focusPreview = false;
         }
 
-        if (_focusShell && !_creatingProfile && _shell is not null)
+        if (_focusShell && !_creatingProfile && !_restoringBackup && _shell is not null)
         {
             _focusShell = false;
             await _shell.FocusTitleAsync();

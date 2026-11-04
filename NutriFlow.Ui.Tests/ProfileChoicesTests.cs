@@ -13,7 +13,7 @@ public sealed class ProfileChoicesTests
     {
         ProfileChoices choices = new([Anna, Odd], Anna.Id);
 
-        Assert.Equal(["1. Анна ✓", "2. Создать профиль", "Создать профиль"], choices.Buttons);
+        Assert.Equal(["1. Анна ✓", "2. Создать профиль", "Создать профиль", "Восстановить из копии"], choices.Buttons);
     }
 
     [Fact]
@@ -24,6 +24,7 @@ public sealed class ProfileChoicesTests
         Assert.Same(Odd, choices.Find("2. Создать профиль"));
         Assert.Same(Anna, choices.Find("1. Анна ✓"));
         Assert.Null(choices.Find(ProfileChoices.Create));
+        Assert.Null(choices.Find(ProfileChoices.Restore));
         Assert.Null(choices.Find(null));
     }
 }

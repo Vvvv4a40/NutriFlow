@@ -33,4 +33,7 @@ public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, Persisten
 
     // profiles.json, drafts and label photos live in memory; nothing else copies them to opfs
     public Task SaveProfileFilesAsync() => files.FlushAsync();
+
+    public Task<bool> SaveFileAsync(string fileName, string contentType, byte[] content) =>
+        platform.SaveFileAsync(fileName, contentType, content);
 }

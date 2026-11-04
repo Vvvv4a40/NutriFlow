@@ -1,0 +1,72 @@
+@using Microsoft.AspNetCore.Components.Forms
+@* a labelled file choice: the input is transparent over the whole row, so the system picker opens from any point of it.
+   InputFile works in the browser and in a maui BlazorWebView alike *@
+<div class="nf-field @Class">
+    <span class="nf-field__label" aria-hidden="true">@Label</span>
+    <label class="nf-file @(Error is null ? null : "nf-file--invalid")">
+        <InputFile @ref="_input" class="nf-file__input" accept="@Accept" OnChange="OnChangeAsync"
+                   aria-label="@AccessibleName" aria-invalid="@(Error is null ? null : "true")"
+                   aria-describedby="@(Error is null ? null : _id + "-error")" data-testid="@TestId" />
+        <IconTile Icon="AppIconKind.Archive" />
+        <span class="nf-file__text">
+            <span class="nf-file__name">@(File?.Name ?? Prompt)</span>
+            @if (File is not null)
+            {
+                <span class="nf-file__size">@SizeText(File.Size)</span>
+            }
+        </span>
+        <span class="nf-file__action" aria-hidden="true">@(File is null ? "Выбрать" : "Заменить")</span>
+    </label>
+    @if (Error is not null)
+    {
+        <p id="@(_id + "-error")" class="nf-field__error" data-testid="@(TestId is null ? null : TestId + "-error")">@Error</p>
+    }
+</div>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Russian = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+    private readonly string _id = "file-" + Guid.NewGuid().ToString("N")[..8];
+    private InputFile? _input;
+
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = "";
+
+    // what the row says before a file is chosen
+    [Parameter, EditorRequired]
+    public string Prompt { get; set; } = "";
+
+    [Parameter]
+    public string? Accept { get; set; }
+
+    [Parameter]
+    public IBrowserFile? File { get; set; }
+
+    [Parameter]
+    public EventCallback<IBrowserFile?> FileChanged { get; set; }
+
+    [Parameter]
+    public string? Error { get; set; }
+
+    [Parameter]
+    public string? TestId { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    public static string SizeText(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} Б",
+        < 1024 * 1024 => string.Create(Russian, $"{bytes / 1024d:0.#} КБ"),
+        _ => string.Create(Russian, $"{bytes / (1024d * 1024):0.#} МБ")
+    };
+
+    private string AccessibleName => File is null ? $"{Label}: файл не выбран" : $"{Label}: {File.Name}";
+
+    public ValueTask FocusAsync() => _input?.Element is { } element ? element.FocusAsync() : ValueTask.CompletedTask;
+
+    private Task OnChangeAsync(InputFileChangeEventArgs args)
+    {
+        File = args.File;
+        return FileChanged.InvokeAsync(File);
+    }
+}

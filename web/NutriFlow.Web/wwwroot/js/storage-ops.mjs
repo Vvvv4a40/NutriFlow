@@ -3,6 +3,8 @@
 // "<name>.nf-pending" and only then to "<name>", so an interrupted write always leaves one complete copy
 
 export const pendingSuffix = ".nf-pending";
+// files the sqlite engine of bsqlite keeps next to a database
+const databaseSuffixes = ["-journal", "-wal"];
 const magic = [0x4e, 0x46, 0x4d, 0x31];
 const headerLength = 40;
 
@@ -88,6 +90,25 @@ export async function removeEntry(root, path) {
 
     await removeIfPresent(parent.directory, parent.name);
     await removeIfPresent(parent.directory, parent.name + pendingSuffix);
+}
+
+// a sqlite database for bsqlite: a plain file without the header, under a name no open database uses
+export async function writeDatabase(root, path, bytes) {
+    const { directory, name } = await locate(root, path, true);
+    for (const suffix of databaseSuffixes) await removeIfPresent(directory, name + suffix);
+    await writeWhole(directory, name, bytes);
+}
+
+export async function removeDatabase(root, path) {
+    let parent;
+    try {
+        parent = await locate(root, path, false);
+    } catch (error) {
+        if (isMissing(error)) return;
+        throw error;
+    }
+
+    for (const suffix of ["", ...databaseSuffixes]) await removeIfPresent(parent.directory, parent.name + suffix);
 }
 
 async function writeWhole(directory, name, content) {

@@ -130,6 +130,21 @@ public sealed class PersistentDirectoryTests : IDisposable
     }
 
     [Fact]
+    public async Task BackupWorkingFolderStaysInMemory()
+    {
+        PersistentDirectory directory = Create();
+        await directory.RestoreAsync();
+        string working = Path.Combine(_root, $".profile-backup-{Guid.NewGuid():N}", "snapshot");
+        Directory.CreateDirectory(working);
+        await File.WriteAllBytesAsync(Path.Combine(working, "nutriflow.db"), new byte[1024]);
+        await File.WriteAllTextAsync(Path.Combine(_root, "profiles.json"), "{}");
+
+        await directory.FlushAsync();
+
+        Assert.Equal([$"{Storage}/profiles.json"], Module.Writes);
+    }
+
+    [Fact]
     public async Task ProfileStoreWorksOnTheRestoredFolder()
     {
         PersistentDirectory first = Create();

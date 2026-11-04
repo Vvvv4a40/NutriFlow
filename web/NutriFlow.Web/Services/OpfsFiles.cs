@@ -19,6 +19,13 @@ public sealed class OpfsFiles(IJSRuntime js)
     public async Task RemoveAsync(string path, CancellationToken cancellationToken = default) =>
         await (await GetModuleAsync()).InvokeVoidAsync("removeFile", cancellationToken, path);
 
+    // a database file for bsqlite, without the header of the mirrored files
+    public async Task WriteDatabaseAsync(string path, byte[] content, CancellationToken cancellationToken = default) =>
+        await (await GetModuleAsync()).InvokeVoidAsync("writeDatabase", cancellationToken, path, content);
+
+    public async Task RemoveDatabaseAsync(string path, CancellationToken cancellationToken = default) =>
+        await (await GetModuleAsync()).InvokeVoidAsync("removeDatabase", cancellationToken, path);
+
     private Task<IJSObjectReference> GetModuleAsync() =>
         _module ??= js.InvokeAsync<IJSObjectReference>("import", "./js/storage.mjs").AsTask();
 }

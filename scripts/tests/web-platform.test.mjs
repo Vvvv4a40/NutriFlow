@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureInstallPrompt, promptInstall, watchInstall, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
+import { captureInstallPrompt, promptInstall, saveFile, watchInstall, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
 
 // a window that dispatches the two install events of chrome
 function browser() {
@@ -88,4 +88,63 @@ test("a hidden page asks .NET to write unsaved input, a visible one does not", (
     document.dispatch("visibilitychange");
 
     assert.deepEqual(dotnet.calls, [["OnHidden", undefined]]);
+});
+
+// a page with File, blob urls and a share sheet, as safari on an iphone or chrome on a computer has them
+function savingPage({ userAgent, maxTouchPoints = 0, share = null }) {
+    const clicks = [];
+    const revoked = [];
+    const timers = [];
+    const page = {
+        File: class { constructor(parts, name, options) { this.parts = parts; this.name = name; this.type = options.type; } },
+        URL: { createObjectURL: file => `blob:${file.name}`, revokeObjectURL: url => revoked.push(url) },
+        setTimeout: (callback, delay) => timers.push({ callback, delay }),
+        navigator: { userAgent, maxTouchPoints },
+        document: {
+            body: { append() { } },
+            createElement: () => ({ click() { clicks.push({ href: this.href, download: this.download }); }, remove() { } })
+        },
+        clicks,
+        revoked,
+        timers
+    };
+    if (share) {
+        page.navigator.canShare = ({ files }) => files.length === 1;
+        page.navigator.share = share;
+    }
+    return page;
+}
+
+test("an iphone gets the share sheet, and closing it is reported as cancelled", async () => {
+    const shared = [];
+    const iphone = savingPage({
+        userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)",
+        share: async ({ files }) => shared.push(files[0])
+    });
+
+    assert.equal(await saveFile("NutriFlow.zip", "application/zip", new Uint8Array([1]), iphone), "saved");
+    assert.equal(shared[0].name, "NutriFlow.zip");
+    assert.equal(shared[0].type, "application/zip");
+    assert.deepEqual(iphone.clicks, []);
+
+    const closed = savingPage({
+        userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        maxTouchPoints: 5,
+        share: async () => { throw new DOMException("Share canceled", "AbortError"); }
+    });
+    assert.equal(await saveFile("NutriFlow.zip", "application/zip", new Uint8Array([1]), closed), "cancelled");
+});
+
+test("other browsers download the file and free its url later", async () => {
+    const computer = savingPage({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/142.0",
+        share: async () => assert.fail("a computer downloads instead of sharing")
+    });
+
+    assert.equal(await saveFile("NutriFlow.zip", "application/zip", new Uint8Array([1]), computer), "saved");
+
+    assert.deepEqual(computer.clicks, [{ href: "blob:NutriFlow.zip", download: "NutriFlow.zip" }]);
+    assert.deepEqual(computer.revoked, []);
+    computer.timers[0].callback();
+    assert.deepEqual(computer.revoked, ["blob:NutriFlow.zip"]);
 });

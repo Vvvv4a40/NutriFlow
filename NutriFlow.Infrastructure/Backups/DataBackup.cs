@@ -1,6 +1,6 @@
+using System.Data.Common;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Data.Sqlite;
 
 namespace NutriFlow.Infrastructure.Backups;
 
@@ -39,12 +39,21 @@ public static class DataBackup
         return target is null ? resolved : ResolvePhysicalPath(target.FullName);
     }
 
+    public static Task<BackupManifest> CreateAsync(
+        string databasePath,
+        string labelPhotosPath,
+        string destinationPath,
+        CancellationToken cancellationToken = default) =>
+        CreateAsync(databasePath, labelPhotosPath, destinationPath, BackupDatabaseFiles.Native, cancellationToken);
+
     public static async Task<BackupManifest> CreateAsync(
         string databasePath,
         string labelPhotosPath,
         string destinationPath,
+        BackupDatabaseFiles databases,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(databases);
         cancellationToken.ThrowIfCancellationRequested();
         databasePath = BackupFiles.FullPath(databasePath);
         labelPhotosPath = BackupFiles.FullPath(labelPhotosPath);
@@ -95,8 +104,8 @@ public static class DataBackup
             }
 
             string backupDatabasePath = Path.Combine(stagingPath, DatabaseName);
-            await CreateDatabaseSnapshotAsync(rawDatabasePath, backupDatabasePath, backupPhotoPath, cancellationToken);
-            await ValidateDatabaseAsync(backupDatabasePath, backupPhotoPath, cancellationToken);
+            await CreateDatabaseSnapshotAsync(rawDatabasePath, backupDatabasePath, backupPhotoPath, databases, cancellationToken);
+            await ValidateDatabaseAsync(backupDatabasePath, backupPhotoPath, databases, cancellationToken);
             BackupFiles.DeleteOwnedDirectory(rawPath);
             files.Insert(0, await BackupFiles.DescribeAsync(backupDatabasePath, DatabaseName, cancellationToken));
 
@@ -142,9 +151,14 @@ public static class DataBackup
         }
     }
 
+    public static Task<BackupManifest> VerifyAsync(
+        string backupPath, CancellationToken cancellationToken = default) =>
+        VerifyAsync(backupPath, BackupDatabaseFiles.Native, cancellationToken);
+
     public static async Task<BackupManifest> VerifyAsync(
-        string backupPath, CancellationToken cancellationToken = default)
+        string backupPath, BackupDatabaseFiles databases, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(databases);
         cancellationToken.ThrowIfCancellationRequested();
         backupPath = BackupFiles.FullPath(backupPath);
         string manifestPath = Path.Combine(backupPath, ManifestName);
@@ -197,7 +211,7 @@ public static class DataBackup
             {
                 throw new InvalidDataException("The backup database changed during verification.");
             }
-            await ValidateDatabaseAsync(checkDatabase, Path.Combine(backupPath, PhotoDirectoryName), cancellationToken);
+            await ValidateDatabaseAsync(checkDatabase, Path.Combine(backupPath, PhotoDirectoryName), databases, cancellationToken);
         }
         finally
         {
@@ -320,25 +334,24 @@ public static class DataBackup
     private static bool FilesMatch(BackupFile expected, BackupFile actual) =>
         expected.Length == actual.Length && expected.Sha256.Equals(actual.Sha256, StringComparison.OrdinalIgnoreCase);
 
-    private static async Task CreateDatabaseSnapshotAsync(
-        string sourcePath, string destinationPath, string photoPath, CancellationToken cancellationToken)
+    private static async Task CreateDatabaseSnapshotAsync(string sourcePath, string destinationPath, string photoPath,
+        BackupDatabaseFiles databases, CancellationToken cancellationToken)
     {
-        await ValidateDatabaseAsync(sourcePath, photoPath, cancellationToken);
-        await using SqliteConnection source = OpenConnection(sourcePath, SqliteOpenMode.ReadWrite);
-        await using SqliteConnection destination = OpenConnection(destinationPath, SqliteOpenMode.ReadWriteCreate);
-        await source.OpenAsync(cancellationToken);
-        await destination.OpenAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        source.BackupDatabase(destination);
-        using SqliteCommand journal = destination.CreateCommand();
-        journal.CommandText = "PRAGMA journal_mode=DELETE;";
-        if (!string.Equals((string?)await journal.ExecuteScalarAsync(cancellationToken), "delete", StringComparison.OrdinalIgnoreCase))
+        await ValidateDatabaseAsync(sourcePath, photoPath, databases, cancellationToken);
+        await databases.CopyAsync(sourcePath, destinationPath, cancellationToken);
+        string? journalMode = await databases.UseAsync(destinationPath, writable: true, async (connection, token) =>
+        {
+            await using DbCommand journal = BackupDatabaseFiles.Command(connection, "PRAGMA journal_mode=DELETE;");
+            return (string?)await journal.ExecuteScalarAsync(token);
+        }, cancellationToken);
+        if (!string.Equals(journalMode, "delete", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("The backup database could not be made self-contained.");
         }
     }
 
-    private static async Task ValidateDatabaseAsync(string path, string photoPath, CancellationToken cancellationToken)
+    private static async Task ValidateDatabaseAsync(string path, string photoPath, BackupDatabaseFiles databases,
+        CancellationToken cancellationToken)
     {
         await using (FileStream file = BackupFiles.OpenRead(path))
         {
@@ -353,61 +366,8 @@ public static class DataBackup
                 throw new InvalidDataException("The file is not a valid SQLite database.");
             }
         }
-        await using SqliteConnection connection = OpenConnection(path, SqliteOpenMode.ReadWrite);
-        await connection.OpenAsync(cancellationToken);
-        using SqliteCommand integrity = connection.CreateCommand();
-        integrity.CommandText = "PRAGMA integrity_check;";
-        await using (SqliteDataReader reader = await integrity.ExecuteReaderAsync(cancellationToken))
-        {
-            if (!await reader.ReadAsync(cancellationToken) || reader.GetString(0) != "ok" ||
-                await reader.ReadAsync(cancellationToken))
-            {
-                throw new InvalidDataException("The SQLite integrity check failed.");
-            }
-        }
-        using SqliteCommand foreignKeys = connection.CreateCommand();
-        foreignKeys.CommandText = "PRAGMA foreign_key_check;";
-        await using (SqliteDataReader reader = await foreignKeys.ExecuteReaderAsync(cancellationToken))
-        {
-            if (await reader.ReadAsync(cancellationToken))
-            {
-                throw new InvalidDataException("The SQLite foreign-key check failed.");
-            }
-        }
-        HashSet<string> requiredPhotos = new(StringComparer.Ordinal);
-        if (await HasTableAsync(connection, "LabelPhotos", cancellationToken))
-        {
-            using SqliteCommand photos = connection.CreateCommand();
-            photos.CommandText = "SELECT FileName FROM LabelPhotos;";
-            await using SqliteDataReader reader = await photos.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                if (reader.IsDBNull(0))
-                {
-                    throw new InvalidDataException("A registered photo has no file name.");
-                }
-                requiredPhotos.Add(reader.GetString(0));
-            }
-        }
-        if (await HasTableAsync(connection, "Products", cancellationToken))
-        {
-            using SqliteCommand columns = connection.CreateCommand();
-            columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Products') WHERE name = 'SourceReference';";
-            if (Convert.ToInt64(await columns.ExecuteScalarAsync(cancellationToken)) != 0)
-            {
-                using SqliteCommand references = connection.CreateCommand();
-                references.CommandText = "SELECT SourceReference FROM Products WHERE SourceReference IS NOT NULL;";
-                await using SqliteDataReader reader = await references.ExecuteReaderAsync(cancellationToken);
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    string reference = reader.GetString(0);
-                    if (reference.StartsWith("label-photo:", StringComparison.Ordinal))
-                    {
-                        requiredPhotos.Add(reference["label-photo:".Length..]);
-                    }
-                }
-            }
-        }
+        // read-write: a raw copy of a wal database cannot be opened read-only without its shared-memory file
+        HashSet<string> requiredPhotos = await databases.UseAsync(path, writable: true, ReadRequiredPhotosAsync, cancellationToken);
         foreach (string name in requiredPhotos)
         {
             BackupFiles.ValidateFileName(name);
@@ -420,14 +380,65 @@ public static class DataBackup
         }
     }
 
-    private static SqliteConnection OpenConnection(string path, SqliteOpenMode mode) => new(
-        new SqliteConnectionStringBuilder { DataSource = path, Mode = mode, Pooling = false, DefaultTimeout = 5 }.ToString());
-
-    private static async Task<bool> HasTableAsync(SqliteConnection connection, string name, CancellationToken cancellationToken)
+    private static async Task<HashSet<string>> ReadRequiredPhotosAsync(DbConnection connection, CancellationToken cancellationToken)
     {
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name COLLATE NOCASE;";
-        command.Parameters.AddWithValue("$name", name);
+        await using (DbCommand integrity = BackupDatabaseFiles.Command(connection, "PRAGMA integrity_check;"))
+        await using (DbDataReader reader = await integrity.ExecuteReaderAsync(cancellationToken))
+        {
+            if (!await reader.ReadAsync(cancellationToken) || reader.GetString(0) != "ok" ||
+                await reader.ReadAsync(cancellationToken))
+            {
+                throw new InvalidDataException("The SQLite integrity check failed.");
+            }
+        }
+        await using (DbCommand foreignKeys = BackupDatabaseFiles.Command(connection, "PRAGMA foreign_key_check;"))
+        await using (DbDataReader reader = await foreignKeys.ExecuteReaderAsync(cancellationToken))
+        {
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                throw new InvalidDataException("The SQLite foreign-key check failed.");
+            }
+        }
+        HashSet<string> requiredPhotos = new(StringComparer.Ordinal);
+        if (await HasTableAsync(connection, "LabelPhotos", cancellationToken))
+        {
+            await using DbCommand photos = BackupDatabaseFiles.Command(connection, "SELECT FileName FROM LabelPhotos;");
+            await using DbDataReader reader = await photos.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (reader.IsDBNull(0))
+                {
+                    throw new InvalidDataException("A registered photo has no file name.");
+                }
+                requiredPhotos.Add(reader.GetString(0));
+            }
+        }
+        if (await HasTableAsync(connection, "Products", cancellationToken))
+        {
+            await using DbCommand columns = BackupDatabaseFiles.Command(connection,
+                "SELECT COUNT(*) FROM pragma_table_info('Products') WHERE name = 'SourceReference';");
+            if (Convert.ToInt64(await columns.ExecuteScalarAsync(cancellationToken)) != 0)
+            {
+                await using DbCommand references = BackupDatabaseFiles.Command(connection,
+                    "SELECT SourceReference FROM Products WHERE SourceReference IS NOT NULL;");
+                await using DbDataReader reader = await references.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    string reference = reader.GetString(0);
+                    if (reference.StartsWith("label-photo:", StringComparison.Ordinal))
+                    {
+                        requiredPhotos.Add(reference["label-photo:".Length..]);
+                    }
+                }
+            }
+        }
+        return requiredPhotos;
+    }
+
+    private static async Task<bool> HasTableAsync(DbConnection connection, string name, CancellationToken cancellationToken)
+    {
+        await using DbCommand command = BackupDatabaseFiles.Command(connection,
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $name COLLATE NOCASE;", ("$name", name));
         return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken)) != 0;
     }
 }

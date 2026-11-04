@@ -1,3 +1,5 @@
+import { isAppleMobile } from "./startup.mjs";
+
 let installPrompt = null;
 let installWatcher = null;
 
@@ -48,6 +50,34 @@ export function watchVisibility(watcher, target = globalThis.document) {
             watcher.invokeMethodAsync("OnHidden");
         }
     });
+}
+
+// "saved", "cancelled": an installed app on iphone has no downloads, its share sheet offers «Save to Files»;
+// everywhere else the browser downloads the file. sharing needs the tap that called this, so it must come first
+export async function saveFile(name, type, bytes, environment = globalThis) {
+    const file = new environment.File([bytes], name, { type });
+    const navigator = environment.navigator;
+    if (isAppleMobile(navigator) && navigator.canShare?.({ files: [file] })) {
+        try {
+            await navigator.share({ files: [file] });
+            return "saved";
+        } catch (error) {
+            if (error?.name === "AbortError") return "cancelled";
+            throw error;
+        }
+    }
+
+    const url = environment.URL.createObjectURL(file);
+    const link = environment.document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.hidden = true;
+    environment.document.body.append(link);
+    link.click();
+    link.remove();
+    // the download reads the blob after this returns
+    environment.setTimeout(() => environment.URL.revokeObjectURL(url), 60000);
+    return "saved";
 }
 
 function notifyInstall() {

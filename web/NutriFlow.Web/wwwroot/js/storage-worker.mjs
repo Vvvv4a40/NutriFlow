@@ -1,4 +1,4 @@
-import { removeEntry, writeEntry } from "./storage-ops.mjs";
+import { removeDatabase, removeEntry, writeDatabase, writeEntry } from "./storage-ops.mjs";
 
 // one operation at a time: a sync access handle is exclusive, so two writes of one file would collide
 let queue = Promise.resolve();
@@ -14,6 +14,10 @@ async function run({ id, operation, path, bytes }) {
             await writeEntry(root, path, bytes);
         } else if (operation === "remove") {
             await removeEntry(root, path);
+        } else if (operation === "writeDatabase") {
+            await writeDatabase(root, path, bytes);
+        } else if (operation === "removeDatabase") {
+            await removeDatabase(root, path);
         } else {
             throw new Error(`Unknown storage operation: ${operation}`);
         }

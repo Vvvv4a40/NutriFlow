@@ -2,7 +2,7 @@
 @inject IAppHost Host
 @inject ActionRunner Runner
 
-@* first start without profiles (RenderWelcome in MainPage.Navigation.cs); restoring a backup arrives with step 8 *@
+@* first start without profiles (RenderWelcome in MainPage.Navigation.cs) *@
 <main class="nf-welcome" data-testid="welcome">
     <div class="nf-welcome__intro">
         <IconTile Icon="AppIconKind.Sparkle" Large="true" />
@@ -25,12 +25,16 @@
         {
             <ActionButton Text="Установить приложение" Secondary="true" TestId="welcome-install" OnClick="() => AppInstall.RunAsync(Runner, Host)" />
         }
+        <GhostButton Text="Восстановить из копии" TestId="welcome-backup-restore" OnClick="OnRestore" />
     </div>
 </main>
 
 @code {
     [Parameter]
     public EventCallback OnStart { get; set; }
+
+    [Parameter]
+    public EventCallback OnRestore { get; set; }
 
     protected override void OnInitialized() => Host.Changed += OnHostChanged;
 

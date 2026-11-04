@@ -27,4 +27,8 @@ public interface IAppHost
 
     // profile files changed in memory reach durable storage only here; a host that writes files directly does nothing
     Task SaveProfileFilesAsync();
+
+    // hands a file to the user (download, share sheet, system save dialog); false when they cancelled.
+    // the browser needs the tap that asked for it, so nothing slow may run between the tap and this call
+    Task<bool> SaveFileAsync(string fileName, string contentType, byte[] content);
 }

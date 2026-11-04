@@ -6,7 +6,9 @@ import {
     listEntries,
     pendingSuffix,
     readEntry,
+    removeDatabase,
     removeEntry,
+    writeDatabase,
     writeEntry
 } from "../../web/NutriFlow.Web/wwwroot/js/storage-ops.mjs";
 
@@ -204,4 +206,25 @@ test("paths that leave the folder or name a pending copy are rejected", async ()
     for (const path of ["nutriflow/../profiles.json", "nutriflow//profiles.json", "/profiles.json", "profiles.json" + pendingSuffix]) {
         await assert.rejects(writeEntry(root, path, text("x")), /Invalid storage path/, path);
     }
+});
+
+test("a database for bsqlite is a plain file that replaces a stale journal, and goes away with its journals", async () => {
+    const root = new FakeDirectory();
+    const folder = await root.getDirectoryHandle("nutriflow", { create: true });
+    (await folder.getFileHandle("backup-a.db-journal", { create: true })).bytes = text("stale");
+    (await folder.getFileHandle("backup-a.db-wal", { create: true })).bytes = text("stale");
+    (await folder.getFileHandle("profile-b.db", { create: true })).bytes = text("other");
+    const image = text("SQLite format 3  pages");
+
+    await writeDatabase(root, "nutriflow/backup-a.db", image);
+
+    assert.deepEqual([...folder.entriesByName.keys()].sort(), ["backup-a.db", "profile-b.db"]);
+    assert.deepEqual((await folder.getFileHandle("backup-a.db")).bytes, image);
+
+    (await folder.getFileHandle("backup-a.db-wal", { create: true })).bytes = text("written by sqlite");
+    await removeDatabase(root, "nutriflow/backup-a.db");
+    await removeDatabase(root, "nutriflow/missing.db");
+    await removeDatabase(root, "elsewhere/missing.db");
+
+    assert.deepEqual([...folder.entriesByName.keys()], ["profile-b.db"]);
 });

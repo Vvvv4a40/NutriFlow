@@ -366,6 +366,72 @@
     overflow-wrap: anywhere;
 }
 
+/* a file choice: a transparent input covers the row, so a tap, the keyboard and the screen reader frame all hit it */
+.nf-file {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 10px 14px 10px 10px;
+    border: 1px solid var(--field-stroke);
+    border-radius: var(--field-radius);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.nf-file:active {
+    background: var(--surface-pressed);
+}
+
+.nf-file__input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.nf-file:has(input:focus-visible) {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.nf-file--invalid,
+.nf-file--invalid:has(input:focus-visible) {
+    border-color: var(--danger);
+    outline-color: var(--danger);
+}
+
+/* with a large font the action moves under the name, as a value does in a row */
+.nf-file__text {
+    display: flex;
+    flex: 1 1 12ch;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+}
+
+.nf-file__name {
+    overflow-wrap: anywhere;
+}
+
+.nf-file__size {
+    color: var(--muted);
+    font-size: 0.8125rem;
+}
+
+.nf-file__action {
+    flex: none;
+    margin-inline-start: auto;
+    color: var(--accent);
+    font-weight: var(--font-medium);
+}
+
 .nf-picker {
     position: relative;
 }
@@ -1175,10 +1241,11 @@
     gap: 14px;
 }
 
+/* one word that must not break: with a large system font it stops growing at the width of a phone */
 .nf-welcome__title {
     margin: 0;
     color: var(--text-primary);
-    font-size: 2.75rem;
+    font-size: min(2.75rem, 16vw);
     font-weight: 700;
     letter-spacing: -0.03em;
     line-height: 1.1;
@@ -1595,6 +1662,10 @@
 @media (hover: hover) {
     .nf-link:hover {
         text-decoration: underline;
+    }
+
+    .nf-file:hover {
+        background: var(--surface-pressed);
     }
 
     .nf-button--primary:hover:not(:disabled) {

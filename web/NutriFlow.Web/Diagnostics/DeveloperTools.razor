@@ -1,6 +1,11 @@
-@* development only: a quick diary entry without Groq, and the component showcase in every theme *@
+@* development only: a quick diary entry or label-photo product without Groq, and the component showcase in every theme *@
+@using NutriFlow.Infrastructure.LabelPhotos
+@using NutriFlow.Infrastructure.Persistence
+@using NutriFlow.Ui.Hosting
 @using NutriFlow.Web.Services
 @inject LocalMealClient Meals
+@inject WebProfileDatabase Databases
+@inject IAppHost Host
 @inject WebProfileSettings Settings
 @inject ThemeManager Themes
 @inject ActionRunner Runner
@@ -13,6 +18,7 @@
     {
         <Caption TestId="dev-added">@_added</Caption>
     }
+    <ActionButton Text="Добавить продукт с фото этикетки" Secondary="true" TestId="dev-add-label-product" OnClick="AddLabelProductAsync" />
     <ActionButton Text="Открыть витрину компонентов" Secondary="true" TestId="dev-showcase" OnClick="() => _showcase = true" />
 </Card>
 
@@ -50,6 +56,28 @@
         await Meals.ConfirmAsync(ProfileId, session.Id, session.PreviewToken);
         _added = $"Добавлено за сегодня: {product.Name}, 150 г.";
     });
+
+    // a product read from a label photo, without groq: the photo goes where the label reader puts it, so backups
+    // and the profile files carry it like a real one
+    private Task AddLabelProductAsync() => Runner.RunAsync(async () =>
+    {
+        string photos = Path.Combine(PersistentDirectory.MemoryRoot, "profiles", ProfileId.ToString("N"), "label-photos");
+        string reference;
+        await using (NutriFlowDbContext context = await Databases.OpenAsync("", ProfileId, default))
+        {
+            reference = await new LabelPhotoStore(context, photos, ProfileId).SaveAsync(LabelPhotoValidator.Validate(TestPng, "image/png"));
+        }
+
+        await Host.SaveProfileFilesAsync();
+        string name = $"Йогурт с этикетки {Random.Shared.Next(100, 1000)} (тест)";
+        await Meals.AddProductAsync(ProfileId, new ProductResponse(name, 80m, 4m, 2.5m, 10m, "LabelPhoto", "Estimated",
+            "Фото этикетки", reference, null));
+        _added = $"Добавлен продукт «{name}» с фото этикетки.";
+    });
+
+    // a 1x1 png
+    private static readonly byte[] TestPng = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==");
 
     // the showcase switches themes freely, the profile keeps its own
     private async Task CloseShowcaseAsync()

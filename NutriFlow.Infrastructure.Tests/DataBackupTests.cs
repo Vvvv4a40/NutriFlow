@@ -49,6 +49,26 @@ public sealed class DataBackupTests
     }
 
     [Fact]
+    public async Task CreateAndVerifyAsync_RunEverySqliteStepThroughTheGivenDatabaseFiles()
+    {
+        using BackupFixture fixture = new();
+        await fixture.CreateDatabaseAsync();
+        Dictionary<string, string> sourceSnapshot = fixture.SourceSnapshot();
+        RecordingDatabaseFiles databases = new();
+
+        await DataBackup.CreateAsync(fixture.DatabasePath, fixture.PhotosPath, fixture.BackupPath, databases);
+        int usesWhileCreating = databases.Uses;
+        await DataBackup.VerifyAsync(fixture.BackupPath, databases);
+
+        Assert.Equal(1, databases.Copies);
+        Assert.True(usesWhileCreating >= 3);
+        Assert.True(databases.Uses > usesWhileCreating);
+        Assert.Equal(sourceSnapshot, fixture.SourceSnapshot());
+        await DataBackup.VerifyAsync(fixture.BackupPath);
+        Assert.Equal("Рагу", await fixture.ReadBackupValueAsync("SELECT Name FROM Products"));
+    }
+
+    [Fact]
     public async Task CreateAsync_IncludesCommittedWalDataWithoutChangingDatabaseOrSidecars()
     {
         using BackupFixture fixture = new();
@@ -495,6 +515,26 @@ public sealed class DataBackupTests
             .Order(StringComparer.Ordinal)
             .ToDictionary(path => Path.GetRelativePath(directoryPath, path),
                 path => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))), StringComparer.Ordinal);
+
+    private sealed class RecordingDatabaseFiles : BackupDatabaseFiles
+    {
+        public int Copies { get; private set; }
+
+        public int Uses { get; private set; }
+
+        public override Task CopyAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
+        {
+            Copies++;
+            return base.CopyAsync(sourcePath, destinationPath, cancellationToken);
+        }
+
+        public override Task<T> UseAsync<T>(string path, bool writable,
+            Func<System.Data.Common.DbConnection, CancellationToken, Task<T>> work, CancellationToken cancellationToken)
+        {
+            Uses++;
+            return base.UseAsync(path, writable, work, cancellationToken);
+        }
+    }
 
     private sealed class BackupFixture : IDisposable
     {

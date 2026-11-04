@@ -71,6 +71,14 @@ internal sealed class FakeAppHost : IAppHost
         SavedFiles++;
         return Task.CompletedTask;
     }
+
+    public List<(string Name, string ContentType, byte[] Content)> HandedFiles { get; } = [];
+
+    public Task<bool> SaveFileAsync(string fileName, string contentType, byte[] content)
+    {
+        HandedFiles.Add((fileName, contentType, content));
+        return Task.FromResult(true);
+    }
 }
 
 internal sealed class FakeProfileSettings : IProfileSettings

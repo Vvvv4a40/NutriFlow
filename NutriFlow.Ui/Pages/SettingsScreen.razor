@@ -14,7 +14,7 @@
 <GroqCard ProfileId="Profile.Id" />
 
 <SectionHeader Title="Данные" />
-<DataCard />
+<DataCard ProfileId="Profile.Id" OnRestore="OnRestoreBackup" />
 
 @if (DeveloperTools is not null)
 {
@@ -29,6 +29,9 @@
 
     [Parameter]
     public EventCallback OnChooseProfile { get; set; }
+
+    [Parameter]
+    public EventCallback OnRestoreBackup { get; set; }
 
     [Parameter]
     public RenderFragment<Guid>? DeveloperTools { get; set; }

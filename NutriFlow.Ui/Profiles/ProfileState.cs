@@ -20,10 +20,14 @@ public sealed class ProfileState(LocalProfileStore profiles, IProfileSettings se
 
     public Task<IReadOnlyList<LocalProfile>> ListAsync() => profiles.ListAsync();
 
-    public async Task CreateAsync(string name)
+    public Task CreateAsync(string name) => AddAsync(() => profiles.CreateAsync(name));
+
+    // a new profile, created or restored from a backup, becomes the current one
+    public async Task<LocalProfile> AddAsync(Func<Task<LocalProfile>> add)
     {
+        ArgumentNullException.ThrowIfNull(add);
         bool first = (await profiles.ListAsync()).Count == 0;
-        LocalProfile created = await profiles.CreateAsync(name);
+        LocalProfile created = await add();
         await profiles.SelectAsync(created.Id);
         await host.SaveProfileFilesAsync();
         Current = created;
@@ -35,6 +39,7 @@ public sealed class ProfileState(LocalProfileStore profiles, IProfileSettings se
         }
 
         Changed?.Invoke();
+        return created;
     }
 
     public async Task SelectAsync(Guid profileId)

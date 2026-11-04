@@ -1,0 +1,100 @@
+@using Microsoft.AspNetCore.Components.Forms
+@inject ProfileState Profiles
+@inject ProfileBackups Backups
+@inject ActionRunner Runner
+
+@* restore a zip backup into a new profile (RestoreBackupPageAsync in MainPage.Backups.cs). The file comes first:
+   a browser does not always report a closed picker, so the picker cannot be a step of the button action *@
+<FormPage Title="Восстановление" TestId="backup-form" OnClose="OnClose">
+    <ChildContent>
+        <IconTile Icon="AppIconKind.Refresh" Large="true" />
+        <h2 class="nf-title">Профиль из копии</h2>
+        <BodyText Muted="true">Копия восстановится в новый профиль. Существующие профили и их данные не изменятся.</BodyText>
+        <FileField @ref="_fileField" Label="Файл копии" Prompt="ZIP-файл NutriFlow" Accept=".zip,application/zip"
+                   Error="@_fileError" TestId="backup-file" @bind-File="_file" @bind-File:after="CheckFile" />
+        <Field @ref="_nameField" Label="Имя нового профиля" Placeholder="Например, Восстановленный" MaxLength="80"
+               EnterKeyHint="done" Error="@_nameError" TestId="backup-profile-name"
+               @bind-Value="_name" @bind-Value:after="() => _nameError = null" OnEnter="RestoreAsync" />
+        <Caption>Ключ Groq в копию не входит — его нужно будет добавить заново.</Caption>
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Восстановить" ProgressKey="backup-import" TestId="backup-import" OnClick="RestoreAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private FileField? _fileField;
+    private Field? _nameField;
+    private IBrowserFile? _file;
+    private string? _fileError;
+    private string? _name;
+    private string? _nameError;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    // the profile became the current one; the owner closes the form and confirms
+    [Parameter]
+    public EventCallback<LocalProfile> OnRestored { get; set; }
+
+    private static string? FileProblem(IBrowserFile file) =>
+        file.Size > ProfileBackups.MaximumFileBytes ? BackupText.FileTooLarge : null;
+
+    // the size is known as soon as the file is chosen
+    private void CheckFile() => _fileError = _file is null ? null : FileProblem(_file);
+
+    private async Task RestoreAsync()
+    {
+        string name = (_name ?? "").Trim();
+        _fileError = _file is null ? BackupText.ChooseFile : FileProblem(_file);
+        _nameError = name.Length == 0 ? BackupText.EnterName : null;
+        if (_fileError is null && _nameError is null)
+        {
+            await Runner.RunAsync(async () =>
+            {
+                // the whole copy is checked before the name is, so a taken name is caught first
+                if ((await Profiles.ListAsync()).Any(profile => profile.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _nameError = BackupText.DuplicateName;
+                    return;
+                }
+
+                Runner.ShowProgress("backup-import", "Проверяю копию…");
+                LocalProfile restored;
+                try
+                {
+                    await using Stream source = _file!.OpenReadStream(ProfileBackups.MaximumFileBytes);
+                    restored = await Backups.RestoreAsync(source, name);
+                }
+                // a name the store refuses belongs to the field, like in the profile form
+                catch (ArgumentException exception) when (exception.ParamName is "name" or "restoredName")
+                {
+                    _nameError = UiErrors.Describe(exception);
+                    return;
+                }
+                // the chosen file is the input that is wrong
+                catch (InvalidDataException exception)
+                {
+                    _fileError = exception.Message;
+                    return;
+                }
+
+                await OnRestored.InvokeAsync(restored);
+            });
+        }
+
+        if (_fileError is not null || _nameError is not null)
+        {
+            StateHasChanged();
+            await Task.Yield();
+            if (_fileError is not null)
+            {
+                await _fileField!.FocusAsync();
+            }
+            else
+            {
+                await _nameField!.FocusAsync();
+            }
+        }
+    }
+}

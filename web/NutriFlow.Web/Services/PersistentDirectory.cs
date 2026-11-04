@@ -10,6 +10,8 @@ public sealed class PersistentDirectory
     public const string StorageRoot = "nutriflow/files";
     // small files are compared by content: two writes within one millisecond keep the same time and maybe the same length
     private const long ContentComparisonLimit = 256 * 1024;
+    // LocalProfileStore.CreateBackupWorkingDirectory
+    private const string BackupWorkingPrefix = ".profile-backup-";
     private readonly string _root;
     private readonly string _storageRoot;
     private readonly OpfsFiles _files;
@@ -77,6 +79,12 @@ public sealed class PersistentDirectory
             foreach (FileInfo file in new DirectoryInfo(_root).EnumerateFiles("*", SearchOption.AllDirectories))
             {
                 string relativePath = Path.GetRelativePath(_root, file.FullName).Replace(Path.DirectorySeparatorChar, '/');
+                // a backup works in its own folder next to the profiles and removes it at the end
+                if (relativePath.StartsWith(BackupWorkingPrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 present.Add(relativePath);
                 _stored.TryGetValue(relativePath, out FileState? previous);
                 if (previous is not null && file.Length > ContentComparisonLimit && previous.Matches(FileState.Capture(file, null)))

@@ -45,6 +45,10 @@ public sealed class BrowserPlatform(IJSRuntime js) : IDisposable
     public async Task<bool> IsPersistedAsync() =>
         await (await GetModuleAsync()).InvokeAsync<bool>("isPersisted");
 
+    // false when the user closed the share sheet; a download cannot report whether the file was kept
+    public async Task<bool> SaveFileAsync(string fileName, string contentType, byte[] content) =>
+        await (await GetModuleAsync()).InvokeAsync<string>("saveFile", fileName, contentType, content) == "saved";
+
     private Task<IJSObjectReference> GetModuleAsync() =>
         _module ??= js.InvokeAsync<IJSObjectReference>("import", "./js/platform.mjs").AsTask();
 

@@ -1,3 +1,4 @@
+using Bit.Bsqlite.Data;
 using Bit.Bsqlite.Interop;
 using Microsoft.EntityFrameworkCore;
 using NutriFlow.Infrastructure;
@@ -36,6 +37,18 @@ public sealed class WebProfileDatabase(IBsqliteSessionFactory sessions)
         NutriFlowDbContext context = await LocalProfileDatabase.OpenAsync(options, ownerId, cancellationToken);
         _prepared.Add(ownerId);
         return context;
+    }
+
+    // the profile database as a sqlite file image, consistent as of the last committed write
+    public async Task<byte[]> ExportAsync(Guid ownerId, CancellationToken cancellationToken)
+    {
+        // a profile that never opened its database gets the migrated one first, as LocalProfileDatabase does on the phone
+        await using (await OpenAsync("", ownerId, cancellationToken))
+        {
+        }
+
+        BsqliteSession session = await GetSessionAsync(ownerId, cancellationToken);
+        return await WebBackupDatabases.ExportAsync((BsqliteConnection)session.Connection, cancellationToken);
     }
 
     internal static async Task<T> RetryWhileFileLockedAsync<T>(

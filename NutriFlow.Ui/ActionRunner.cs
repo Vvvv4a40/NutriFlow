@@ -56,6 +56,8 @@ public sealed class ActionRunner
         }
         catch (Exception exception)
         {
+            // the dialog shows a next step only; the cause stays for the browser console or the debugger
+            Console.Error.WriteLine(exception);
             failure = exception;
         }
         finally

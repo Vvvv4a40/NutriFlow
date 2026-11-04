@@ -1,8 +1,9 @@
 @implements IDisposable
 @inject IAppHost Host
 @inject ActionRunner Runner
+@inject ProfileBackups Backups
 
-@* where the diary lives and what can erase it; backup and restore join this card in step 8 *@
+@* where the diary lives, what can erase it, and the zip backup that keeps it (MainPage.Settings.cs) *@
 <Card TestId="settings-data">
     <BodyText TestId="settings-storage-note">@Host.StorageNote</BodyText>
     @if (_persisted == false)
@@ -16,10 +17,23 @@
     {
         <ActionButton Text="Установить приложение" Secondary="true" TestId="settings-install" OnClick="() => AppInstall.RunAsync(Runner, Host)" />
     }
+    <Caption TestId="settings-backup-note">@BackupText.Note</Caption>
 </Card>
+<RowList>
+    <Row Title="Сохранить копию" Subtitle="ZIP-архив текущего профиля" Icon="AppIconKind.Archive"
+         Description="Сохранить копию профиля в ZIP-архив" TestId="settings-backup-export" OnClick="ExportAsync" />
+    <Row Title="Восстановить из копии" Subtitle="В новый профиль, текущие данные не изменятся" Icon="AppIconKind.Refresh"
+         Description="Восстановить из копии в новый профиль" TestId="settings-backup-restore" OnClick="OnRestore" />
+</RowList>
 
 @code {
     private bool? _persisted;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    [Parameter]
+    public EventCallback OnRestore { get; set; }
 
     private RenderFragment Install => @<GhostButton Text="Установить приложение" TestId="settings-install" OnClick="() => AppInstall.RunAsync(Runner, Host)" />;
 
@@ -28,6 +42,20 @@
         Host.Changed += OnHostChanged;
         _persisted = await Host.IsStoragePersistentAsync();
     }
+
+    // the archive is made first; the file is handed over from the tap in the dialog, as the share sheet of ios requires
+    private Task ExportAsync() => Runner.RunAsync(async () =>
+    {
+        Runner.ShowProgress("backup-export", "Готовлю копию…");
+        byte[] archive = await Backups.CreateAsync(ProfileId);
+        string fileName = ProfileBackups.FileName(DateTime.Now);
+        // «Не сохранять» is the safe answer the dialog focuses first, so it says the archive goes away
+        if (await Runner.ConfirmAsync(BackupText.ReadyTitle, BackupText.Ready, "Сохранить файл", "Не сохранять") &&
+            await Host.SaveFileAsync(fileName, ProfileBackups.ContentType, archive))
+        {
+            await Runner.AlertAsync(BackupText.SavedTitle, BackupText.Saved, "Готово");
+        }
+    });
 
     private void OnHostChanged() => _ = InvokeAsync(StateHasChanged);
 

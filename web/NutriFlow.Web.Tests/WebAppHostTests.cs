@@ -88,6 +88,20 @@ public sealed class WebAppHostTests : IDisposable
         Assert.Equal(["nutriflow/files/profiles.json"], _js.Storage.Writes);
     }
 
+    [Theory]
+    [InlineData("saved", true)]
+    [InlineData("cancelled", false)]
+    public async Task SavingAFileHandsItToTheBrowser(string outcome, bool saved)
+    {
+        _js.Platform.SaveOutcome = outcome;
+
+        Assert.Equal(saved, await Create(new BrowserPlatform(_js)).SaveFileAsync("NutriFlow.zip", "application/zip", [1, 2]));
+
+        (string name, string contentType, byte[] content) = Assert.Single(_js.Platform.SavedFiles);
+        Assert.Equal(("NutriFlow.zip", "application/zip"), (name, contentType));
+        Assert.Equal([1, 2], content);
+    }
+
     private WebAppHost Create(BrowserPlatform platform, string channel = "test") =>
         new(new AppInfo(new Version(0, 2, 0), channel), platform, new PersistentDirectory(new OpfsFiles(_js), _root));
 

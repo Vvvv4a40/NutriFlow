@@ -52,6 +52,14 @@ internal sealed class FakeStorageModule : IJSObjectReference
 
     public bool FailWrites { get; set; }
 
+    // database files for bsqlite, written without the header of the mirrored files
+    public Dictionary<string, byte[]> Databases { get; } = new(StringComparer.Ordinal);
+
+    public List<string> DatabaseRemovals { get; } = [];
+
+    // removals that fail as if a closing bsqlite worker still held the file
+    public int LockedDatabaseRemovals { get; set; }
+
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
         InvokeAsync<TValue>(identifier, CancellationToken.None, args);
 
@@ -63,7 +71,7 @@ internal sealed class FakeStorageModule : IJSObjectReference
         switch (identifier)
         {
             case "listFiles":
-                result = Files.Keys.Where(key => key.StartsWith(path + "/", StringComparison.Ordinal))
+                result = Files.Keys.Concat(Databases.Keys).Where(key => key.StartsWith(path + "/", StringComparison.Ordinal))
                     .Select(key => key[(path.Length + 1)..]).Order(StringComparer.Ordinal).ToArray();
                 break;
             case "readFile":
@@ -82,6 +90,21 @@ internal sealed class FakeStorageModule : IJSObjectReference
             case "removeFile":
                 Files.Remove(path);
                 Removals.Add(path);
+                result = null;
+                break;
+            case "writeDatabase":
+                Databases[path] = ((byte[])values[1]!).ToArray();
+                result = null;
+                break;
+            case "removeDatabase":
+                if (LockedDatabaseRemovals > 0)
+                {
+                    LockedDatabaseRemovals--;
+                    throw new JSException("NoModificationAllowedError: An attempt was made to modify an object where modifications are not allowed.");
+                }
+
+                Databases.Remove(path);
+                DatabaseRemovals.Add(path);
                 result = null;
                 break;
             default:
@@ -104,6 +127,10 @@ internal sealed class FakePlatformModule : IJSObjectReference
     public bool Persisted { get; set; }
 
     public int PersistenceRequests { get; private set; }
+
+    public string SaveOutcome { get; set; } = "saved";
+
+    public List<(string Name, string ContentType, byte[] Content)> SavedFiles { get; } = [];
 
     public object? Watcher { get; private set; }
 
@@ -134,6 +161,10 @@ internal sealed class FakePlatformModule : IJSObjectReference
             case "requestPersistence":
                 PersistenceRequests++;
                 result = Persisted;
+                break;
+            case "saveFile":
+                SavedFiles.Add(((string)args![0]!, (string)args[1]!, (byte[])args[2]!));
+                result = SaveOutcome;
                 break;
             default:
                 throw new InvalidOperationException($"Unexpected call: {identifier}");
