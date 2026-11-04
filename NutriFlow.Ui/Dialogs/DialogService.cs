@@ -29,6 +29,10 @@ public sealed class DialogService
         return ShowAsync(new DialogRequest(title, null, choices, cancel, true));
     }
 
+    // for choices named by the user: the answer is the Key of the button, so a name cannot pass for another button
+    public Task<string?> ChooseAsync(string title, string cancel, IReadOnlyList<DialogButton> choices) =>
+        ShowAsync(new DialogRequest(title, null, choices, cancel, true));
+
     internal void Resolve(DialogRequest request, string? answer)
     {
         if (Current != request)
@@ -65,7 +69,7 @@ public sealed class DialogRequest(string title, string? message, IReadOnlyList<D
     internal TaskCompletionSource<string?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
-public sealed record DialogButton(string Text, DialogButtonRole Role);
+public sealed record DialogButton(string Text, DialogButtonRole Role, string? Key = null, bool Current = false);
 
 public enum DialogButtonRole
 {

@@ -2,11 +2,20 @@
 @* a labelled text field; numbers take a comma or a dot and are parsed with NutritionText.TryParseNumber.
    an error stays under the field until the owner clears it, usually in @bind-Value:after *@
 <div class="nf-field @Class">
-    @if (Label is not null)
+    @if (Password && Label is not null)
+    {
+        @* a pasted key is checked by eye: one missing character only shows up later as a refused request *@
+        <div class="nf-field__label-row">
+            <label class="nf-field__label" for="@_id">@Label</label>
+            <button type="button" class="nf-field__reveal" aria-label="@(_revealed ? "Скрыть" : "Показать"): @Label"
+                    data-testid="@(TestId is null ? null : TestId + "-reveal")" @onclick="() => _revealed = !_revealed">@(_revealed ? "Скрыть" : "Показать")</button>
+        </div>
+    }
+    else if (Label is not null)
     {
         <label class="nf-field__label" for="@_id">@Label</label>
     }
-    <input id="@_id" class="nf-field__input" type="@(Password ? "password" : "text")" value="@Value" placeholder="@Placeholder"
+    <input id="@_id" class="nf-field__input" type="@(Password && !_revealed ? "password" : "text")" value="@Value" placeholder="@Placeholder"
            inputmode="@(Digits ? "numeric" : Number ? "decimal" : null)" enterkeyhint="@EnterKeyHint" maxlength="@MaxLength"
            autocomplete="off" autocapitalize="@(Plain ? "off" : null)" autocorrect="@(Plain ? "off" : null)"
            spellcheck="@(Number || Digits || Plain ? "false" : null)"
@@ -25,6 +34,7 @@
 @code {
     private readonly string _id = "field-" + Guid.NewGuid().ToString("N")[..8];
     private ElementReference _input;
+    private bool _revealed;
 
     [Parameter]
     public string? Label { get; set; }

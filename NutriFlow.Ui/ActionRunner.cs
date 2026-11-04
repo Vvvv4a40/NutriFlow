@@ -105,6 +105,9 @@ public sealed class ActionRunner
     public Task<string?> ChooseAsync(string title, string cancel, string? destruction, params string[] buttons) =>
         WithDialogAsync(() => _dialogs.ChooseAsync(title, cancel, destruction, buttons));
 
+    public Task<string?> ChooseAsync(string title, string cancel, IReadOnlyList<DialogButton> choices) =>
+        WithDialogAsync(() => _dialogs.ChooseAsync(title, cancel, choices));
+
     private async Task<T> WithDialogAsync<T>(Func<Task<T>> show)
     {
         _dialogsOpen++;

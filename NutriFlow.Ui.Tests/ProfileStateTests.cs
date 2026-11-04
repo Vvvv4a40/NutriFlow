@@ -115,7 +115,7 @@ public sealed class ProfileStateTests : IDisposable
 
         ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() => state.CreateAsync("анна"));
 
-        Assert.StartsWith("Профиль с таким названием уже существует.", error.Message);
+        Assert.StartsWith("Профиль с таким именем уже есть. Выберите другое имя.", error.Message);
         Assert.Equal(1, _host.SavedFiles);
         Assert.Equal("Анна", state.Current!.Name);
     }

@@ -1,0 +1,26 @@
+@implements IDisposable
+@inject IAppHost Host
+@inject CaptureState Capture
+@inject ActionRunner Runner
+
+@* lives in the shell, so an open form covers it until the form is closed; the live region exists before its text *@
+<div class="nf-update" role="status" data-testid="update-status">
+    @if (Host.UpdateAvailable)
+    {
+        <p class="nf-text nf-update__text">Доступна новая версия</p>
+        <ActionButton Text="Обновить" Secondary="Secondary" ProgressKey="@AppUpdate.ProgressKey" TestId="update-apply"
+                      OnClick="() => AppUpdate.RunAsync(Runner, Capture, Host)" />
+    }
+</div>
+
+@code {
+    // on a screen whose main action is something else
+    [Parameter]
+    public bool Secondary { get; set; }
+
+    protected override void OnInitialized() => Host.Changed += OnHostChanged;
+
+    private void OnHostChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Host.Changed -= OnHostChanged;
+}

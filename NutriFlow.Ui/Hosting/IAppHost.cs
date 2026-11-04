@@ -14,11 +14,20 @@ public interface IAppHost
 
     bool CanInstall { get; }
 
-    // raised when installation becomes available or unavailable
+    // raised when installation or a new version becomes available or unavailable
     event Action? Changed;
 
     // true when the user accepted the installation
     Task<bool> InstallAsync();
+
+    // a new version is ready and waits for the user
+    bool UpdateAvailable { get; }
+
+    // restarts the app in the new version; unsaved input has to be written before this call
+    Task ApplyUpdateAsync();
+
+    // what has to be written when the platform closes the app on its own, for example in favour of the installed app
+    Func<Task>? SaveBeforeLeaving { set; }
 
     Task<bool> IsStoragePersistentAsync();
 

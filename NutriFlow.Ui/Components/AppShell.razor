@@ -20,6 +20,7 @@
     </header>
     <main class="nf-shell__body">@ChildContent</main>
     <div class="nf-shell__bottom">
+        @Banner
         @if (ActionBar is not null)
         {
             <div class="nf-shell__action-bar">@ActionBar</div>
@@ -62,6 +63,9 @@
 
     [Parameter]
     public RenderFragment? ActionBar { get; set; }
+
+    [Parameter]
+    public RenderFragment? Banner { get; set; }
 
     [Parameter]
     public RenderFragment? ChildContent { get; set; }

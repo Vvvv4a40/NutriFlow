@@ -53,6 +53,22 @@ internal sealed class FakeAppHost : IAppHost
 
     public void Hide() => Hidden?.Invoke();
 
+    public bool UpdateAvailable => false;
+
+    public int AppliedUpdates { get; private set; }
+
+    // files saved when the update started, to see that the input was written first
+    public int SavedFilesBeforeUpdate { get; private set; }
+
+    public Task ApplyUpdateAsync()
+    {
+        AppliedUpdates++;
+        SavedFilesBeforeUpdate = SavedFiles;
+        return Task.CompletedTask;
+    }
+
+    public Func<Task>? SaveBeforeLeaving { get; set; }
+
     public Task<bool> InstallAsync()
     {
         Changed?.Invoke();
@@ -77,10 +93,12 @@ internal sealed class FakeAppHost : IAppHost
         return RenewalFails ? Task.FromException(new InvalidOperationException("blocked")) : Task.CompletedTask;
     }
 
+    public bool SaveFails { get; set; }
+
     public Task SaveProfileFilesAsync()
     {
         SavedFiles++;
-        return Task.CompletedTask;
+        return SaveFails ? Task.FromException(new IOException("quota")) : Task.CompletedTask;
     }
 
     public List<(string Name, string ContentType, byte[] Content)> HandedFiles { get; } = [];

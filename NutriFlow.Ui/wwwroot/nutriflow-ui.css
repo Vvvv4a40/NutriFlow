@@ -52,7 +52,8 @@
 .nf-title {
     margin: 0;
     color: var(--highlight);
-    font-size: 1.75rem;
+    /* with 200 % system text one long word still fits the column */
+    font-size: min(1.75rem, 12vw);
     font-weight: 700;
     letter-spacing: -0.02em;
     line-height: 1.2;
@@ -314,6 +315,28 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+.nf-field__label-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0 12px;
+}
+
+.nf-field__reveal {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    margin-block: -10px;
+    padding: 0 0 0 12px;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: var(--font-medium);
+    cursor: pointer;
 }
 
 .nf-field__label {
@@ -827,12 +850,11 @@
     background: var(--background);
 }
 
+/* large system text wraps the title instead of cutting it */
 .nf-shell__title {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 /* takes the focus only from code, after the welcome screen is gone */
@@ -885,6 +907,52 @@
     position: sticky;
     bottom: 0;
     z-index: 10;
+}
+
+/* a new version waits. the text keeps a limited size: the banner may stay for the whole session */
+.nf-update {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 8px 8px 16px;
+    border-radius: var(--button-radius);
+    background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--background);
+}
+
+.nf-update:empty {
+    display: none;
+}
+
+.nf-update__text {
+    flex: 1 1 8rem;
+    margin: 0;
+    font-size: min(1rem, 20px);
+}
+
+.nf-update .nf-button {
+    flex: none;
+    width: auto;
+    font-size: min(1rem, 20px);
+}
+
+/* in the shell it lies over the content above the bars, so appearing or hiding moves nothing under the finger */
+.nf-shell__bottom .nf-update {
+    position: absolute;
+    bottom: 100%;
+    inset-inline: 0;
+    padding-inline: var(--screen-padding);
+    border-top: 1px solid var(--stroke);
+    border-radius: 0;
+}
+
+.nf-shell:has(.nf-update:not(:empty)) .nf-shell__body {
+    padding-bottom: 7rem;
+}
+
+/* no distraction and no covered field while the user types */
+.nf-shell:has(.nf-shell__body :is(input, textarea):focus) .nf-update {
+    visibility: hidden;
 }
 
 .nf-shell__action-bar {
@@ -947,6 +1015,12 @@
     font-weight: var(--font-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+@media (max-width: 340px) {
+    .nf-nav__caption {
+        font-size: 11px;
+    }
 }
 
 .nf-nav__tab--selected .nf-nav__indicator {
@@ -1028,8 +1102,7 @@
     color: var(--text-primary);
     font-size: 1.25rem;
     font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 .nf-form__title:focus {
@@ -1150,11 +1223,34 @@
     gap: 0;
 }
 
+.nf-dialog__current {
+    flex: none;
+    color: var(--accent);
+}
+
+.nf-dialog__button[aria-current] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
 .nf-dialog--sheet .nf-dialog__button {
     width: 100%;
     padding: 14px 16px;
     color: var(--text-primary);
     text-align: start;
+}
+
+/* the actions after the list of a sheet do not read as more of its items */
+.nf-dialog--sheet .nf-dialog__button--primary {
+    color: var(--accent);
+}
+
+.nf-dialog--sheet .nf-dialog__button:not(.nf-dialog__button--primary) + .nf-dialog__button--primary {
+    margin-top: 4px;
+    border-top: 1px solid var(--stroke);
+    border-radius: 0 0 14px 14px;
 }
 
 .nf-dialog--sheet .nf-dialog__button--destructive {

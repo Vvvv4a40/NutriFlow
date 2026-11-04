@@ -1,4 +1,5 @@
 using Microsoft.JSInterop;
+using NutriFlow.Ui;
 
 namespace NutriFlow.Web.Services;
 
@@ -9,17 +10,25 @@ public sealed class BrowserPlatform(IJSRuntime js) : IDisposable
 
     public bool CanInstall { get; private set; }
 
-    public event Action? InstallChanged;
+    public bool UpdateAvailable { get; private set; }
+
+    // installation or a new version became available or unavailable
+    public event Action? Changed;
 
     public event Action? Hidden;
 
-    // boot.mjs keeps the install prompt from the first moments of the page; from here on it reports changes
+    // what has to be written before the page goes away on its own
+    public Func<Task>? BeforeLeaving { get; set; }
+
+    // boot.mjs keeps the install prompt and registers the offline worker on its own schedule; from here on they report changes
     public async Task StartAsync()
     {
         _reference ??= DotNetObjectReference.Create(this);
         IJSObjectReference module = await GetModuleAsync();
         CanInstall = await module.InvokeAsync<bool>("watchInstall", _reference);
+        UpdateAvailable = await module.InvokeAsync<bool>("watchUpdates", _reference);
         await module.InvokeVoidAsync("watchVisibility", _reference);
+        await module.InvokeVoidAsync("watchInstalledApp", _reference);
     }
 
     [JSInvokable]
@@ -31,9 +40,41 @@ public sealed class BrowserPlatform(IJSRuntime js) : IDisposable
         if (CanInstall != available)
         {
             CanInstall = available;
-            InstallChanged?.Invoke();
+            Changed?.Invoke();
         }
     }
+
+    [JSInvokable]
+    public void OnUpdateAvailabilityChanged(bool available)
+    {
+        if (UpdateAvailable != available)
+        {
+            UpdateAvailable = available;
+            Changed?.Invoke();
+        }
+    }
+
+    // the installed app opened: false keeps this tab, and the app explains that another window is open
+    [JSInvokable]
+    public async Task<bool> OnLeaveRequested()
+    {
+        try
+        {
+            if (BeforeLeaving is { } save)
+            {
+                await save();
+            }
+
+            return true;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            UiLog.Error(exception);
+            return false;
+        }
+    }
+
+    public async Task ApplyUpdateAsync() => await (await GetModuleAsync()).InvokeVoidAsync("applyUpdate");
 
     public async Task<bool> InstallAsync() =>
         await (await GetModuleAsync()).InvokeAsync<string>("promptInstall") == "accepted";

@@ -15,6 +15,8 @@
 html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* a field that takes the focus from code stays clear of the pinned header and the bars above the navigation */
+    scroll-padding-block: calc(env(safe-area-inset-top) + min(4.5rem, 12vh)) min(10rem, 25vh);
 }
 
 body {

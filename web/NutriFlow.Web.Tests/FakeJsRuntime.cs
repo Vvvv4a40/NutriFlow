@@ -199,6 +199,14 @@ internal sealed class FakePlatformModule : IJSObjectReference
 
     public object? VisibilityWatcher { get; private set; }
 
+    public bool UpdateWaiting { get; set; }
+
+    public object? UpdateWatcher { get; private set; }
+
+    public object? InstalledAppWatcher { get; private set; }
+
+    public int AppliedUpdates { get; private set; }
+
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
         InvokeAsync<TValue>(identifier, CancellationToken.None, args);
 
@@ -209,6 +217,18 @@ internal sealed class FakePlatformModule : IJSObjectReference
         {
             case "watchVisibility":
                 VisibilityWatcher = args![0];
+                result = null;
+                break;
+            case "watchUpdates":
+                UpdateWatcher = args![0];
+                result = UpdateWaiting;
+                break;
+            case "watchInstalledApp":
+                InstalledAppWatcher = args![0];
+                result = null;
+                break;
+            case "applyUpdate":
+                AppliedUpdates++;
                 result = null;
                 break;
             case "watchInstall":

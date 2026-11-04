@@ -3,6 +3,10 @@
 export const instanceLockName = "nutriflow-app";
 // a reloaded or updated page releases the lock of the previous one with a delay
 export const instanceLockTimeoutInMilliseconds = 3000;
+// the installed app also waits for a browser tab that saves its input before it gives way
+export const installedAppLockTimeoutInMilliseconds = 6000;
+export const windowsChannelName = "nutriflow-windows";
+export const movedToAppKey = "nutriflow.moved-to-app";
 
 export async function isSupported(environment = globalThis) {
     if (typeof environment.WebAssembly?.instantiate !== "function") return false;
@@ -50,7 +54,20 @@ export function acquireInstanceLock(locks, {
 
 export async function chooseStartupScreen(environment = globalThis, acquireLock = acquireInstanceLock) {
     if (!await isSupported(environment)) return "unsupported";
-    if (isAppleMobile(environment.navigator) && !isStandalone(environment)) return "install";
-    if (!await acquireLock(environment.navigator.locks)) return "second-instance";
+    const standalone = isStandalone(environment);
+    if (isAppleMobile(environment.navigator) && !standalone) return "install";
+    if (!standalone && environment.sessionStorage?.getItem(movedToAppKey)) return "moved";
+    if (standalone) askBrowserTabToLeave(environment);
+    const lockOptions = standalone ? { timeoutInMilliseconds: installedAppLockTimeoutInMilliseconds } : undefined;
+    if (!await acquireLock(environment.navigator.locks, lockOptions)) return "second-instance";
     return "app";
+}
+
+// after the installation the tab that installed the app still holds the profile; a live tab answers through
+// watchInstalledApp in platform.mjs, a frozen one does not, and the app shows the second instance screen
+function askBrowserTabToLeave(environment) {
+    if (typeof environment.BroadcastChannel !== "function") return;
+    const channel = new environment.BroadcastChannel(windowsChannelName);
+    channel.postMessage("installed-app-opened");
+    channel.close();
 }

@@ -1,7 +1,18 @@
 @* section heading in capitals; the capitals come from css so screen readers read the normal word *@
-<h2 class="nf-overline @Class">@ChildContent</h2>
+@if (Caption)
+{
+    <p class="nf-overline @Class">@ChildContent</p>
+}
+else
+{
+    <h2 class="nf-overline @Class">@ChildContent</h2>
+}
 
 @code {
+    // the same look for a caption of a block, which does not start a section of the page
+    [Parameter]
+    public bool Caption { get; set; }
+
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 

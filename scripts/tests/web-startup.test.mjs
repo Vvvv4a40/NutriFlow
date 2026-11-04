@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import {
     acquireInstanceLock,
     chooseStartupScreen,
+    installedAppLockTimeoutInMilliseconds,
     instanceLockName,
     isAppleMobile,
     isStandalone,
-    isSupported
+    isSupported,
+    movedToAppKey,
+    windowsChannelName
 } from "../../web/NutriFlow.Web/wwwroot/js/startup.mjs";
 
 const iPhone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
@@ -128,4 +131,35 @@ test("startup screens follow the order: unsupported, install on apple devices, s
     assert.equal(await chooseStartupScreen(createEnvironment({ userAgent: android }), lock(false)), "second-instance");
     assert.equal(await chooseStartupScreen(createEnvironment(), lock(true)), "app");
     assert.equal(lockRequests, 3);
+});
+
+test("a tab that gave way to the installed app does not take the lock again", async () => {
+    let lockRequests = 0;
+    const lock = async () => { lockRequests++; return true; };
+    const environment = createEnvironment();
+    environment.sessionStorage = { getItem: key => key === movedToAppKey ? "1" : null };
+
+    assert.equal(await chooseStartupScreen(environment, lock), "moved");
+    assert.equal(lockRequests, 0);
+
+    environment.sessionStorage = { getItem: () => null };
+    assert.equal(await chooseStartupScreen(environment, lock), "app");
+});
+
+test("the installed app asks a browser tab to leave and waits longer for its lock", async () => {
+    const messages = [];
+    const environment = createEnvironment({ standalone: true });
+    environment.sessionStorage = { getItem: () => "1" };
+    environment.BroadcastChannel = class {
+        constructor(name) { this.name = name; }
+        postMessage(message) { messages.push([this.name, message]); }
+        close() { }
+    };
+    let options;
+
+    const screen = await chooseStartupScreen(environment, async (_, lockOptions) => { options = lockOptions; return true; });
+
+    assert.equal(screen, "app");
+    assert.deepEqual(messages, [[windowsChannelName, "installed-app-opened"]]);
+    assert.equal(options.timeoutInMilliseconds, installedAppLockTimeoutInMilliseconds);
 });

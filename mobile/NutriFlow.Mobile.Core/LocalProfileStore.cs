@@ -63,7 +63,7 @@ public sealed class LocalProfileStore
         name = name.Trim().Normalize();
         if (name.Length > 80 || name.Any(char.IsControl))
         {
-            throw new ArgumentException("Название профиля должно содержать от 1 до 80 обычных символов.", nameof(name));
+            throw new ArgumentException("Введите имя профиля: от 1 до 80 обычных символов.", nameof(name));
         }
 
         await _gate.WaitAsync(cancellationToken);
@@ -72,7 +72,7 @@ public sealed class LocalProfileStore
             ProfileCatalog catalog = await ReadAsync(cancellationToken);
             if (catalog.Profiles.Any(profile => profile.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Профиль с таким названием уже существует.", nameof(name));
+                throw new ArgumentException("Профиль с таким именем уже есть. Выберите другое имя.", nameof(name));
             }
 
             if (catalog.Profiles.Count >= 30)
@@ -125,7 +125,7 @@ public sealed class LocalProfileStore
         name = name.Trim().Normalize();
         if (name.Length > 80 || name.Any(char.IsControl))
         {
-            throw new ArgumentException("Название профиля должно содержать от 1 до 80 обычных символов.", nameof(name));
+            throw new ArgumentException("Введите имя профиля: от 1 до 80 обычных символов.", nameof(name));
         }
 
         await _gate.WaitAsync(cancellationToken);
@@ -136,7 +136,7 @@ public sealed class LocalProfileStore
             ProfileCatalog catalog = await ReadAsync(cancellationToken);
             if (catalog.Profiles.Any(profile => profile.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ArgumentException("Профиль с таким названием уже существует.", nameof(name));
+                throw new ArgumentException("Профиль с таким именем уже есть. Выберите другое имя.", nameof(name));
             }
             if (catalog.Profiles.Count >= 30)
             {

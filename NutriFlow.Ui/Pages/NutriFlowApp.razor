@@ -15,6 +15,8 @@
         </div>
         <div class="nf-welcome__space"></div>
         <div class="nf-welcome__actions">
+            @* a new version may be what repairs this *@
+            <UpdateBanner Secondary="true" />
             <ActionButton Text="Повторить" TestId="startup-retry" OnClick="LoadAsync" />
         </div>
     </main>
@@ -31,6 +33,7 @@ else
 {
     <AppShell @ref="_shell" Title="@TitleText" ProfileName="@profile.Name" Selected="_tab" SelectedChanged="SelectTabAsync" OnProfile="ChooseProfileAsync"
               ActionBar="@(_tab == ShellTab.Input && Capture.Session is not null ? ConfirmBar : null)">
+        <Banner><UpdateBanner /></Banner>
         <ChildContent>
             @if (_tab != ShellTab.Input && Capture.ProfileId == profile.Id && Capture.Blocked)
             {
@@ -148,7 +151,7 @@ else
     {
         await Capture.FlushAsync();
         ProfileChoices choices = new(await Profiles.ListAsync(), Profiles.Current?.Id);
-        string? choice = await Runner.ChooseAsync("Профили на этом устройстве", "Отмена", null, choices.Buttons);
+        string? choice = await Runner.ChooseAsync("Профили на этом устройстве", "Отмена", choices.Buttons);
         if (choice == ProfileChoices.Create)
         {
             _creatingProfile = true;

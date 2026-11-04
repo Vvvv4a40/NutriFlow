@@ -5,6 +5,7 @@ using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
 using NutriFlow.Mobile.Core;
 using NutriFlow.Ui.Capture;
+using NutriFlow.Ui.Dialogs;
 using NutriFlow.Ui.Pages;
 
 namespace NutriFlow.Ui.Tests;
@@ -290,6 +291,60 @@ public sealed class CaptureStateTests : IAsyncLifetime
     }
 
     private async Task<Guid> CreateProfileAsync(string name = "Тест") => (await _profiles.CreateAsync(name)).Id;
+
+    [Fact]
+    public async Task UpdateWritesTheTypedTextBeforeTheRestart()
+    {
+        Guid profileId = await CreateProfileAsync();
+        // the delay never passes: only the update itself can write the text
+        CaptureState state = await LoadAsync(profileId, TimeSpan.FromHours(1));
+        state.SetText("гречка 150 г");
+        ActionRunner runner = new(new DialogService());
+
+        await AppUpdate.RunAsync(runner, state, _host);
+
+        Assert.Equal(1, _host.AppliedUpdates);
+        Assert.True(_host.SavedFilesBeforeUpdate > 0);
+        CaptureState restarted = await LoadAsync(profileId);
+        Assert.Equal("гречка 150 г", restarted.Text);
+    }
+
+    [Fact]
+    public async Task UpdateKeepsTheOldVersionWhenTheTextCannotBeSaved()
+    {
+        Guid profileId = await CreateProfileAsync();
+        CaptureState state = await LoadAsync(profileId, TimeSpan.FromHours(1));
+        state.SetText("гречка 150 г");
+        _host.SaveFails = true;
+        DialogService dialogs = new();
+        ActionRunner runner = new(dialogs);
+
+        Task update = AppUpdate.RunAsync(runner, state, _host);
+        for (int attempt = 0; attempt < 100 && dialogs.Current is null; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        DialogRequest shown = Assert.IsType<DialogRequest>(dialogs.Current);
+        Assert.Contains("Не удалось сохранить набранный текст", shown.Message, StringComparison.Ordinal);
+        dialogs.Resolve(shown, null);
+        await update;
+
+        Assert.Equal(0, _host.AppliedUpdates);
+        _host.SaveFails = false;
+    }
+
+    [Fact]
+    public async Task LeavingForTheInstalledAppWritesTheTypedText()
+    {
+        Guid profileId = await CreateProfileAsync();
+        CaptureState state = await LoadAsync(profileId, TimeSpan.FromHours(1));
+        state.SetText("гречка 150 г");
+
+        await _host.SaveBeforeLeaving!();
+
+        Assert.Equal("гречка 150 г", (await LoadAsync(profileId)).Text);
+    }
 
     private async Task<CaptureState> LoadAsync(Guid profileId, TimeSpan? saveDelay = null)
     {

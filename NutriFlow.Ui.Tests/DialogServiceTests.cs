@@ -75,7 +75,7 @@ public sealed class DialogServiceTests
         { new IOException("disk"), "Не удалось прочитать или сохранить файл. Проверьте свободное место и повторите." },
         { new ArgumentException("Вес: введите положительное число."), "Вес: введите положительное число." },
         // LocalProfileStore passes nameof(name); the user should not see «(Parameter 'name')»
-        { new ArgumentException("Профиль с таким названием уже существует.", "name"), "Профиль с таким названием уже существует." },
+        { new ArgumentException("Профиль с таким именем уже есть. Выберите другое имя.", "name"), "Профиль с таким именем уже есть. Выберите другое имя." },
         { new InvalidOperationException("На этом устройстве уже создано 30 профилей."), "На этом устройстве уже создано 30 профилей." },
         { new ArgumentNullException("name"), "Проверьте введённые данные и повторите." },
         { new InvalidOperationException("Sequence contains no elements"), "Проверьте введённые данные и повторите." }

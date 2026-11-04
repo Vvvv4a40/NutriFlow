@@ -23,7 +23,14 @@
             }
             @foreach (DialogButton button in request.Buttons)
             {
-                <button type="button" class="nf-dialog__button @RoleClass(button.Role)" @onclick="() => AnswerAsync(request, button.Text)">@button.Text</button>
+                <button type="button" class="nf-dialog__button @RoleClass(button.Role)" aria-current="@(button.Current ? "true" : null)"
+                        @onclick="() => AnswerAsync(request, button.Key ?? button.Text)">
+                    @button.Text
+                    @if (button.Current)
+                    {
+                        <AppIcon Kind="AppIconKind.Check" Size="18" Class="nf-dialog__current" />
+                    }
+                </button>
             }
             @if (request.Sheet)
             {

@@ -40,8 +40,16 @@
     <template id="startup-second-instance">
         <main class="screen gate" data-testid="startup-second-instance">
             <h1 class="nf-title">NutriFlow уже открыт</h1>
-            <p class="nf-text">Закройте другую вкладку или окно с NutriFlow и обновите эту страницу.</p>
+            <p class="nf-text">Закройте другую вкладку или окно с NutriFlow, в том числе в браузере, и нажмите «Обновить».</p>
             <button class="nf-button nf-button--primary" type="button" data-action="reload">Обновить</button>
+        </main>
+    </template>
+
+    <template id="startup-moved">
+        <main class="screen gate" data-testid="startup-moved">
+            <h1 class="nf-title">NutriFlow открыт в приложении</h1>
+            <p class="nf-text">Записи те же, эту вкладку можно закрыть. Чтобы работать здесь, сначала закройте приложение.</p>
+            <button class="nf-button nf-button--secondary" type="button" data-action="open-here">Открыть здесь</button>
         </main>
     </template>
 

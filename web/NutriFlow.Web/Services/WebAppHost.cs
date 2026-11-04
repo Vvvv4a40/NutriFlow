@@ -14,11 +14,20 @@ public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, BrowserMe
 
     public bool CanInstall => platform.CanInstall;
 
+    public bool UpdateAvailable => platform.UpdateAvailable;
+
     public event Action? Changed
     {
-        add => platform.InstallChanged += value;
-        remove => platform.InstallChanged -= value;
+        add => platform.Changed += value;
+        remove => platform.Changed -= value;
     }
+
+    public Func<Task>? SaveBeforeLeaving
+    {
+        set => platform.BeforeLeaving = value;
+    }
+
+    public Task ApplyUpdateAsync() => platform.ApplyUpdateAsync();
 
     public event Action? Hidden
     {

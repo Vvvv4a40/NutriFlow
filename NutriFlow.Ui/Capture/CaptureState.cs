@@ -36,6 +36,7 @@ public sealed class CaptureState : IDisposable
         _host = host;
         _saveDelay = saveDelay;
         _host.Hidden += SaveNow;
+        _host.SaveBeforeLeaving = FlushAsync;
     }
 
     public Guid? ProfileId { get; private set; }

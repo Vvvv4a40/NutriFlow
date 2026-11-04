@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { captureInstallPrompt, promptInstall, renewPersistence, saveFile, watchInstall, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
+import { applyUpdate, captureInstallPrompt, promptInstall, renewPersistence, saveFile, startUpdates, watchInstall, watchInstalledApp, watchUpdates, watchVisibility } from "../../web/NutriFlow.Web/wwwroot/js/platform.mjs";
+import { movedToAppKey } from "../../web/NutriFlow.Web/wwwroot/js/startup.mjs";
 
 // a window that dispatches the two install events of chrome
 function browser() {
@@ -201,4 +202,184 @@ test("a browser without the storage manager or with a failing one simply stays n
         }
     };
     assert.equal(await renewPersistence(failing), false);
+});
+
+// the service worker api of a page: tests move the registration through its states
+function workerPage({ controlled = true, waiting = null } = {}) {
+    const listeners = new Map();
+    const documentListeners = [];
+    const page = {
+        reloads: 0,
+        updates: 0,
+        timers: [],
+        registration: null,
+        navigator: {
+            serviceWorker: {
+                controller: controlled ? {} : null,
+                register: async () => page.registration,
+                addEventListener(type, listener) { listeners.set(type, listener); }
+            }
+        },
+        document: {
+            visibilityState: "visible",
+            addEventListener(_, listener) { documentListeners.push(listener); }
+        },
+        location: { reload() { page.reloads++; } },
+        setTimeout(callback) { page.timers.push(callback); },
+        controllerChange: () => listeners.get("controllerchange")(),
+        returnToApp: () => documentListeners.forEach(listener => listener())
+    };
+    const registrationListeners = new Map();
+    page.registration = {
+        waiting,
+        installing: null,
+        addEventListener(type, listener) { registrationListeners.set(type, listener); },
+        update: async () => { page.updates++; }
+    };
+    page.install = worker => {
+        const stateListeners = [];
+        page.registration.installing = { addEventListener: (_, listener) => stateListeners.push(listener) };
+        registrationListeners.get("updatefound")();
+        page.registration.installing = null;
+        page.registration.waiting = worker;
+        stateListeners.forEach(listener => listener());
+    };
+    return page;
+}
+
+function waitingWorker() {
+    const messages = [];
+    return { messages, postMessage: message => messages.push(message) };
+}
+
+test("a new version installed while the app runs is reported to .NET once", async () => {
+    const page = workerPage();
+    const dotnet = watcher();
+    await startUpdates(page);
+    assert.equal(watchUpdates(dotnet), false);
+
+    page.install(waitingWorker());
+    page.install(waitingWorker());
+
+    assert.deepEqual(dotnet.calls, [["OnUpdateAvailabilityChanged", true]]);
+});
+
+test("a worker left waiting by the previous start shows up at once", async () => {
+    await startUpdates(workerPage({ waiting: waitingWorker() }));
+    assert.equal(watchUpdates(watcher()), true);
+});
+
+test("the first worker of a page without a controller is not an update", async () => {
+    const page = workerPage({ controlled: false });
+    const dotnet = watcher();
+    await startUpdates(page);
+    watchUpdates(dotnet);
+
+    page.install(waitingWorker());
+
+    assert.deepEqual(dotnet.calls, []);
+});
+
+test("the waiting worker takes over only on request and the page then reloads once", async () => {
+    const worker = waitingWorker();
+    const page = workerPage({ waiting: worker });
+    await startUpdates(page);
+    assert.deepEqual(worker.messages, []);
+
+    applyUpdate(page);
+    assert.deepEqual(worker.messages, [{ type: "SKIP_WAITING" }]);
+    assert.equal(page.reloads, 0);
+
+    page.controllerChange();
+    page.timers[0]();
+    assert.equal(page.reloads, 1);
+});
+
+test("the page reloads even when the worker never takes over", async () => {
+    const page = workerPage({ waiting: waitingWorker() });
+    await startUpdates(page);
+
+    applyUpdate(page);
+    page.timers[0]();
+
+    assert.equal(page.reloads, 1);
+});
+
+test("returning to the app looks for a new version, and no network is not an error", async () => {
+    const page = workerPage();
+    await startUpdates(page);
+
+    page.returnToApp();
+    assert.equal(page.updates, 1);
+
+    page.document.visibilityState = "hidden";
+    page.returnToApp();
+    assert.equal(page.updates, 1);
+
+    page.document.visibilityState = "visible";
+    page.registration.update = () => Promise.reject(new TypeError("Failed to fetch"));
+    page.returnToApp();
+    await new Promise(resolve => setImmediate(resolve));
+});
+
+test("a failed registration leaves the app running", async () => {
+    const page = workerPage();
+    page.navigator.serviceWorker.register = async () => { throw new DOMException("Denied", "SecurityError"); };
+    const warn = console.warn;
+    console.warn = () => { };
+    try {
+        await startUpdates(page);
+    } finally {
+        console.warn = warn;
+    }
+
+    assert.equal(watchUpdates(watcher()), false);
+});
+
+function tabWithChannel({ standalone = false, canLeave = true } = {}) {
+    const stored = new Map();
+    let listener = null;
+    const tab = {
+        stored,
+        reloads: 0,
+        matchMedia: () => ({ matches: standalone }),
+        navigator: {},
+        sessionStorage: { setItem: (key, value) => stored.set(key, value) },
+        location: { reload() { tab.reloads++; } },
+        BroadcastChannel: class {
+            addEventListener(_, callback) { listener = callback; }
+        },
+        open: () => listener?.(),
+        dotnet: { invokeMethodAsync: async () => canLeave }
+    };
+    return tab;
+}
+
+test("a browser tab gives way to the installed app after .NET saved the input", async () => {
+    const tab = tabWithChannel();
+    watchInstalledApp(tab.dotnet, tab);
+
+    await tab.open();
+
+    assert.equal(tab.reloads, 1);
+    assert.equal(tab.stored.get(movedToAppKey), "1");
+});
+
+test("a tab that could not save its input stays and the installed app explains", async () => {
+    const tab = tabWithChannel({ canLeave: false });
+    watchInstalledApp(tab.dotnet, tab);
+
+    await tab.open();
+
+    assert.equal(tab.reloads, 0);
+    assert.equal(tab.stored.size, 0);
+});
+
+test("the installed app itself never gives way", async () => {
+    const app = tabWithChannel({ standalone: true });
+    watchInstalledApp(app.dotnet, app);
+
+    await app.open();
+
+    assert.equal(app.reloads, 0);
 });

@@ -30,6 +30,59 @@ public sealed class WebAppHostTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateBannerFollowsTheWaitingWorker()
+    {
+        BrowserPlatform platform = new(_js);
+        WebAppHost host = Create(platform);
+        int changes = 0;
+        host.Changed += () => changes++;
+
+        await platform.StartAsync();
+        Assert.False(host.UpdateAvailable);
+
+        platform.OnUpdateAvailabilityChanged(true);
+        platform.OnUpdateAvailabilityChanged(true);
+        Assert.True(host.UpdateAvailable);
+        Assert.Equal(1, changes);
+
+        await host.ApplyUpdateAsync();
+        Assert.Equal(1, _js.Platform.AppliedUpdates);
+    }
+
+    [Fact]
+    public async Task AWorkerThatWaitedSinceThePreviousStartShowsTheBannerAtOnce()
+    {
+        _js.Platform.UpdateWaiting = true;
+        BrowserPlatform platform = new(_js);
+
+        await platform.StartAsync();
+
+        Assert.True(Create(platform).UpdateAvailable);
+    }
+
+    [Fact]
+    public async Task TabGivesWayToTheInstalledAppOnlyAfterTheInputIsSaved()
+    {
+        BrowserPlatform platform = new(_js);
+        WebAppHost host = Create(platform);
+        await platform.StartAsync();
+        Assert.NotNull(_js.Platform.InstalledAppWatcher);
+        Assert.True(await platform.OnLeaveRequested());
+
+        bool saved = false;
+        host.SaveBeforeLeaving = () =>
+        {
+            saved = true;
+            return Task.CompletedTask;
+        };
+        Assert.True(await platform.OnLeaveRequested());
+        Assert.True(saved);
+
+        host.SaveBeforeLeaving = () => Task.FromException(new InvalidOperationException("quota"));
+        Assert.False(await platform.OnLeaveRequested());
+    }
+
+    [Fact]
     public async Task HiddenPageIsReportedToTheScreens()
     {
         BrowserPlatform platform = new(_js);
