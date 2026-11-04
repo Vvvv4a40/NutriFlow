@@ -10,6 +10,11 @@ namespace NutriFlow.Ui.Pages;
 
 public sealed record PreviewStatusText(Tone Tone, AppIconKind Icon, string Context, string Title, string Hint);
 
+public sealed record MealReviewLine(int DishIndex, string Name, string Detail, decimal? Grams, NutritionResponse? Nutrition,
+    bool Estimated, string? MissingProduct, ProductResponse? Product);
+
+public sealed record MealReviewSummary(IReadOnlyList<MealReviewLine> Lines, NutritionResponse Total, bool Estimated, bool LacksNutrition);
+
 // texts of the food input and the preview, as MainPage.Input.cs and MainPage.Preview.cs build them on android
 public static class CaptureText
 {
@@ -45,7 +50,8 @@ public static class CaptureText
             : $"Запись попадёт в дневник за {DiaryDay(date, today)}. Перед сохранением вы увидите расчёт.";
 
     public static string Placeholder(bool clarifying, MealSessionPurpose purpose) =>
-        clarifying ? "Ответьте на вопросы или поправьте состав…"
+        clarifying && purpose == MealSessionPurpose.Diary ? "Что-то не так? Например: гречки было 150 г, ещё чай с сахаром"
+        : clarifying ? "Ответьте на вопросы или поправьте состав…"
         : purpose == MealSessionPurpose.CreateDish ? "Например: фарш 600 г, лук 150 г, рис 200 г сухого. Готовое блюдо 1180 г"
         : "Например: гречка 200 г, куриная грудка 150 г и огурец";
 
@@ -76,6 +82,54 @@ public static class CaptureText
         };
         string context = IsDish(session) ? "Своё блюдо" : $"В дневник · {DiaryDay(session.MealDate, today)}";
         return new PreviewStatusText(tone, icon, context, title, hint);
+    }
+
+    public static bool IsDiary(MealSessionResponse session) => !IsDish(session);
+
+    // the calculation of a diary meal as the user thinks of it: foods and what they come to
+    public static MealReviewSummary Review(MealSessionResponse session)
+    {
+        List<MealReviewLine> lines = [];
+        decimal calories = 0m, protein = 0m, fat = 0m, carbohydrates = 0m;
+        for (int index = 0; index < session.Dishes.Count; index++)
+        {
+            DishPreviewResponse dish = session.Dishes[index];
+            NutritionResponse[] portions = dish.Portions.Select(portion => portion.Nutrition).OfType<NutritionResponse>().ToArray();
+            NutritionResponse? nutrition = portions.Length == 0 || portions.Length != dish.Portions.Count ? null : new NutritionResponse(
+                portions.Sum(portion => portion.Calories), portions.Sum(portion => portion.ProteinGrams),
+                portions.Sum(portion => portion.FatGrams), portions.Sum(portion => portion.CarbohydratesGrams));
+            calories += nutrition?.Calories ?? 0m;
+            protein += nutrition?.ProteinGrams ?? 0m;
+            fat += nutrition?.FatGrams ?? 0m;
+            carbohydrates += nutrition?.CarbohydratesGrams ?? 0m;
+            decimal? grams = dish.Portions.Count > 0 && dish.Portions.All(portion => portion.WeightInGrams is not null)
+                ? dish.Portions.Sum(portion => portion.WeightInGrams!.Value)
+                : dish.Ingredients is [{ WeightInGrams: { } only }] ? only : null;
+            bool weightEstimated = dish.Portions.Any(portion => portion.WeightQuality == "Estimated") ||
+                dish.Ingredients.Any(ingredient => ingredient.WeightQuality == "Estimated");
+            bool estimated = nutrition is not null && (weightEstimated ||
+                dish.Portions.Any(portion => portion.NutritionQuality == "Estimated") ||
+                dish.Ingredients.Any(ingredient => ingredient.ResolvedProduct?.DataQuality == "Estimated"));
+            string weight = grams is null ? "вес не указан" : $"{(weightEstimated ? "≈ " : "")}{Weight(grams)}";
+            string detail = dish.Ingredients.Count > 1
+                ? $"{weight} · {string.Join(", ", dish.Ingredients.Select(ingredient => ingredient.ResolvedProduct?.Name ?? ingredient.ProductName))}"
+                : weight;
+            string? missing = dish.Ingredients.FirstOrDefault(ingredient => ingredient.ResolvedProduct is null)?.ProductName;
+            lines.Add(new MealReviewLine(index, dish.Name, detail, grams, nutrition, estimated, missing,
+                dish.Ingredients is [{ ResolvedProduct: { } product }] ? product : null));
+        }
+
+        return new MealReviewSummary(lines, new NutritionResponse(calories, protein, fat, carbohydrates),
+            lines.Any(line => line.Estimated), lines.Any(line => line.MissingProduct is not null));
+    }
+
+    public static string ReviewLineDescription(MealReviewLine line)
+    {
+        string amount = line.Grams is decimal grams ? $"{NutritionText.Amount(grams)} граммов" : "вес не указан";
+        string energy = line.Nutrition is { } nutrition
+            ? $"{(line.Estimated ? "примерно " : "")}{NutritionText.Amount(nutrition.Calories)} килокалорий"
+            : line.MissingProduct is null ? "нужен вес" : "нет пищевой ценности";
+        return $"{line.Name}, {amount}, {energy}";
     }
 
     public static string Weight(decimal? grams) => grams is decimal value ? $"{NutritionText.Amount(value)} г" : "вес не указан";
@@ -158,6 +212,10 @@ public static class CaptureText
     {
         HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden } =>
             $"Groq не принял ключ. Проверьте ключ в настройках или {manualWay}.",
+        GroqRateLimitException { IsDailyLimit: true } =>
+            $"Дневной лимит этого ключа в Groq закончился. Продолжите завтра или {manualWay}.",
+        GroqRateLimitException { Wait: { } wait } =>
+            $"Groq просит подождать {WaitText(wait)} и повторить: лимит этого ключа на минуту закончился.",
         HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } =>
             "Groq временно ограничил запросы по этому ключу. Подождите минуту и повторите.",
         HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.NotFound } =>
@@ -169,4 +227,8 @@ public static class CaptureText
         InvalidDataException => "Groq вернул неполный ответ. Повторите запрос.",
         _ => UiErrors.Describe(exception)
     };
+
+    private static string WaitText(TimeSpan wait) => wait.TotalSeconds < 90
+        ? $"{Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds))} с"
+        : $"{(int)Math.Ceiling(wait.TotalMinutes)} мин";
 }

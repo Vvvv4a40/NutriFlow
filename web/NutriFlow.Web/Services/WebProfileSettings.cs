@@ -35,8 +35,11 @@ public sealed class WebProfileSettings(IJSRuntime js) : IProfileSettings
     public async Task<bool> HasGroqAsync(Guid profileId) =>
         !string.IsNullOrWhiteSpace(await GetAsync(Key(profileId, "groq-key")));
 
-    public async Task<string> GetTextModelAsync(Guid profileId) =>
-        await GetAsync(Key(profileId, "text-model")) ?? Defaults.TextModel;
+    public async Task<string> GetTextModelAsync(Guid profileId)
+    {
+        string? saved = await GetAsync(Key(profileId, "text-model"));
+        return saved is null or GroqSettings.RetiredTextModel ? Defaults.TextModel : saved;
+    }
 
     public async Task<string> GetVisionModelAsync(Guid profileId) =>
         await GetAsync(Key(profileId, "vision-model")) ?? Defaults.VisionModel;

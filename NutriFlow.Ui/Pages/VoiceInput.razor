@@ -1,0 +1,121 @@
+@implements IAsyncDisposable
+@inject IAppHost Host
+@inject LocalMealClient Meals
+@inject IProfileSettings Settings
+@inject ActionRunner Runner
+
+@* speech goes straight into the field of the screen it was started from, the words are there to check before sending *@
+<Pressable Class="@($"nf-voice-chip {(_voice.Phase == VoicePhase.Recording ? "nf-voice-chip--recording" : null)}")"
+           Description="@VoiceText.ChipDescription(_voice)" Hint="Распознанный текст появится в этом поле" TestId="input-voice" OnClick="ToggleAsync">
+    @if (_voice.Phase == VoicePhase.Transcribing)
+    {
+        <Spinner />
+    }
+    else
+    {
+        <AppIcon Kind="AppIconKind.Microphone" Size="20" />
+    }
+    <span data-testid="voice-status">@VoiceText.Chip(_voice)</span>
+</Pressable>
+@if (_voice.Error is { } error)
+{
+    <div class="nf-voice-note" role="alert">
+        <Notice Tone="Tone.Danger" TestId="voice-error">
+            <ChildContent>@error</ChildContent>
+            <Action>
+                @if (_voice.CanRetry)
+                {
+                    <GhostButton Text="Повторить распознавание" TestId="voice-retry" OnClick="RetryAsync" />
+                }
+            </Action>
+        </Notice>
+    </div>
+}
+else if (_voice.Recognised && _voice.StoppedByItself)
+{
+    <div class="nf-voice-note" role="status">
+        <Caption TestId="voice-stopped">@VoiceText.StoppedByItself(_voice.ElapsedSeconds)</Caption>
+    </div>
+}
+
+@code {
+    private VoiceCapture _voice = null!;
+    private VoicePhase _lastPhase;
+    private bool _lastRecognised;
+    private bool _warnedAboutLimit;
+
+    [Parameter, EditorRequired]
+    public Guid ProfileId { get; set; }
+
+    // the text of the field: new words join it, and it can be edited while a recording is being recognised
+    [Parameter]
+    public string? Text { get; set; }
+
+    [Parameter]
+    public EventCallback<string> TextChanged { get; set; }
+
+    protected override void OnInitialized()
+    {
+        _voice = new VoiceCapture(Host.CreateVoiceRecorder(), Meals, Settings, ProfileId);
+        _voice.Changed += OnVoiceChanged;
+    }
+
+    protected override void OnParametersSet() => _voice.SetText(Text);
+
+    private Task ToggleAsync() => _voice.Phase switch
+    {
+        VoicePhase.Idle => _voice.StartAsync(),
+        VoicePhase.Recording => _voice.StopAsync(),
+        _ => Task.CompletedTask
+    };
+
+    private Task RetryAsync() => _voice.RetryAsync();
+
+    private void OnVoiceChanged()
+    {
+        if (_voice.Phase != _lastPhase)
+        {
+            _lastPhase = _voice.Phase;
+            // the recording itself starts silently: a screen reader talking over it would end up in the text
+            string? announcement = _voice.Phase switch
+            {
+                VoicePhase.Requesting => "Начинаю запись",
+                VoicePhase.Transcribing when _voice.StoppedByItself => "Запись остановилась. Распознаю запись",
+                VoicePhase.Transcribing => "Распознаю запись",
+                _ => null
+            };
+            if (announcement is not null)
+            {
+                Runner.Announce(announcement);
+            }
+
+            _warnedAboutLimit = _warnedAboutLimit && _voice.Phase == VoicePhase.Recording;
+        }
+
+        string? recognised = _voice.Recognised && !_lastRecognised ? _voice.Text : null;
+        _lastRecognised = _voice.Recognised;
+        // the status changes every second while recording, a screen reader only hears that the limit is near
+        if (VoiceText.LimitIsNear(_voice) && !_warnedAboutLimit)
+        {
+            _warnedAboutLimit = true;
+            Runner.Announce("Осталось 10 секунд");
+        }
+
+        _ = InvokeAsync(async () =>
+        {
+            if (recognised is not null)
+            {
+                await TextChanged.InvokeAsync(recognised);
+                Runner.Announce("Текст добавлен в описание");
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _voice.Changed -= OnVoiceChanged;
+        await _voice.DisposeAsync();
+    }
+}

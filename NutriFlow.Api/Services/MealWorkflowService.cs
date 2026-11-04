@@ -328,6 +328,46 @@ public sealed class MealWorkflowService
         return MapSession(session, DeserializePreview(session.PreviewJson), session.Status);
     }
 
+    // a change made without the parser; the note joins the messages, so the next parse of all messages keeps the change
+    public async Task<MealSessionResponse?> ChangeDraftAsync(
+        Guid id,
+        Func<MealDraft, MealDraft> change,
+        Func<MealDraft, string> describe,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ArgumentNullException.ThrowIfNull(describe);
+        StoredMealSession? existing = await _sessionStore.FindAsync(id, cancellationToken);
+
+        if (existing is null)
+        {
+            return null;
+        }
+
+        if (existing.Status == MealSessionStatus.Confirmed)
+        {
+            throw new InvalidOperationException(
+                "A confirmed meal session cannot be changed.");
+        }
+
+        MealDraft draft = change(existing.Draft);
+        IReadOnlyList<string> messages = ValidateMessages(
+            existing.Messages.Cast<string?>().Append(describe(existing.Draft)).ToList());
+        MealEvaluation evaluation = await EvaluateAsync(draft, messages, cancellationToken, existing.Purpose);
+        StoredMealSession session = await _sessionStore.ReplaceDraftAsync(
+            id,
+            existing.PreviewToken,
+            messages,
+            draft,
+            evaluation.PreviewJson,
+            evaluation.PreviewToken,
+            evaluation.Status,
+            cancellationToken,
+            null);
+
+        return MapSession(session, DeserializePreview(session.PreviewJson), session.Status);
+    }
+
     private async Task<MealSessionResponse> ReuseMessageAsync(
         StoredMealSession session,
         string originalHash,

@@ -8,7 +8,8 @@ namespace NutriFlow.Web.Diagnostics;
 
 // development only: with the Groq key «fake» the requests of the app are answered here, without network or a real key.
 // Text: «name 150 г» items separated by commas or «и», with a question about a missing weight, which is enough to walk
-// through parsing, clarifications and the preview. Speech: a fixed transcript in that format. A label photo: fixed values
+// through parsing, clarifications and the preview. Foods the catalog does not know get fixed estimated values. Speech: a
+// fixed transcript in that format. A label photo: fixed values
 // per 100 g, whatever is on the photo. With «fake-serving» the label has values per a serving and a question, with
 // «fake-down» every request fails as if Groq were down. Every other key goes to the real Groq
 public sealed partial class FakeGroqHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
@@ -47,8 +48,10 @@ public sealed partial class FakeGroqHandler(HttpMessageHandler inner) : Delegati
         // only the request with a photo sends its user part as a list of text and image
         JsonObject answer = messages[1]!["content"] is JsonArray
             ? Label(key == ServingKey)
-            : Parse(messages[1]!["content"]!.GetValue<string>(),
-                messages[0]!["content"]!.GetValue<string>().Contains("The session purpose is CreateDish", StringComparison.Ordinal));
+            : body["response_format"]?["json_schema"]?["name"]?.GetValue<string>() == "nutriflow_nutrition_estimate"
+                ? Estimate(messages[1]!["content"]!.GetValue<string>())
+                : Parse(messages[1]!["content"]!.GetValue<string>(),
+                    messages[0]!["content"]!.GetValue<string>().Contains("The session purpose is CreateDish", StringComparison.Ordinal));
         return Json(new JsonObject
         {
             ["choices"] = new JsonArray(new JsonObject
@@ -85,6 +88,28 @@ public sealed partial class FakeGroqHandler(HttpMessageHandler inner) : Delegati
             ["carbohydratesGrams"] = 6.8m,
             ["clarificationQuestions"] = new JsonArray()
         };
+
+    // fixed values for every food, except a name with «неизвестно»: the model does not know it
+    internal static JsonObject Estimate(string input)
+    {
+        JsonArray items = [];
+        foreach (JsonNode? food in JsonNode.Parse(input[input.IndexOf('[')..])!.AsArray())
+        {
+            string name = food!.GetValue<string>();
+            bool known = !name.Contains("неизвестно", StringComparison.CurrentCultureIgnoreCase);
+            items.Add(new JsonObject
+            {
+                ["name"] = name,
+                ["known"] = known,
+                ["calories"] = known ? 120m : 0m,
+                ["proteinGrams"] = known ? 8m : 0m,
+                ["fatGrams"] = known ? 3m : 0m,
+                ["carbohydratesGrams"] = known ? 15m : 0m
+            });
+        }
+
+        return new JsonObject { ["items"] = items };
+    }
 
     // the user part of the request lists the messages as «1. text»; a later message overrides an earlier weight
     internal static JsonObject Parse(string input, bool dish)

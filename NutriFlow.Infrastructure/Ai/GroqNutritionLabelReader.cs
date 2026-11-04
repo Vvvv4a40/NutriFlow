@@ -1,16 +1,12 @@
-using System.Net.Http.Json;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using NutriFlow.Domain;
 
 namespace NutriFlow.Infrastructure.Ai;
 
 public sealed class GroqNutritionLabelReader : INutritionLabelReader
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    // groq reserves this budget against the tokens per minute of the key; a photo already costs about 2000
+    private const int MaximumTokens = 1200;
+    private const int MaximumTokensOfSecondLook = 2500;
 
     private readonly HttpClient _httpClient;
     private readonly string _model;
@@ -38,120 +34,83 @@ public sealed class GroqNutritionLabelReader : INutritionLabelReader
 
         string imageDataUrl =
             $"data:{mediaType};base64,{Convert.ToBase64String(image.Span)}";
-        object requestBody = new
-        {
-            model = _model,
-            messages = new object[]
-            {
-                new
-                {
-                    role = "system",
-                    content = AiNutritionLabelContract.Instructions
-                },
-                new
-                {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new
-                        {
-                            type = "text",
-                            text = AiNutritionLabelContract.InputPrompt
-                        },
-                        new
-                        {
-                            type = "image_url",
-                            image_url = new
-                            {
-                                url = imageDataUrl
-                            }
-                        }
-                    }
-                }
-            },
-            response_format = new
-            {
-                type = "json_schema",
-                json_schema = new
-                {
-                    name = AiNutritionLabelContract.SchemaName,
-                    strict = true,
-                    schema = AiNutritionLabelContract.Schema
-                }
-            },
-            max_completion_tokens = 1500,
-            stream = false,
-            reasoning_effort = "none"
-        };
-
-        GroqChatResponse? responseBody = await SendAsync(
-            requestBody,
-            cancellationToken);
-        string structuredOutput = ExtractStructuredOutput(responseBody);
-
-        return AiNutritionLabelContract.Deserialize(structuredOutput, "Groq");
-    }
-
-    private async Task<GroqChatResponse?> SendAsync(
-        object requestBody,
-        CancellationToken cancellationToken)
-    {
-        using HttpRequestMessage request = new(
-            HttpMethod.Post,
-            "chat/completions")
-        {
-            Content = JsonContent.Create(requestBody)
-        };
-        using HttpResponseMessage response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseContentRead,
-            cancellationToken);
-
-        response.EnsureSuccessStatusCode();
+        NutritionLabelDraft? draft = null;
 
         try
         {
-            return await response.Content.ReadFromJsonAsync<GroqChatResponse>(
-                SerializerOptions,
-                cancellationToken);
+            draft = await ReadOnceAsync(imageDataUrl, null, MaximumTokens, cancellationToken);
         }
-        catch (JsonException exception)
+        catch (InvalidDataException)
         {
-            throw new InvalidDataException(
-                "Groq returned malformed response JSON.",
-                exception);
+            // an impossible number, 125 g of protein in 100 g: the same misreading as numbers that disagree
+        }
+
+        if (draft is not null && !NeedsSecondLook(draft))
+        {
+            return draft;
+        }
+
+        // a digit was misread: only this case is worth the tokens of reasoning
+        try
+        {
+            NutritionLabelDraft second = await ReadOnceAsync(imageDataUrl, "medium", MaximumTokensOfSecondLook, cancellationToken);
+            return draft is not null && NeedsSecondLook(second) ? draft : second;
+        }
+        catch (Exception exception) when (draft is not null && exception is HttpRequestException or InvalidDataException)
+        {
+            return draft;
         }
     }
 
-    private static string ExtractStructuredOutput(GroqChatResponse? response)
+    private static bool NeedsSecondLook(NutritionLabelDraft draft) =>
+        draft is { Calories: { } calories, ProteinGrams: { } protein, FatGrams: { } fat, CarbohydratesGrams: { } carbohydrates } &&
+        !NutritionPlausibility.MacrosMatchCalories(calories, protein, fat, carbohydrates);
+
+    private async Task<NutritionLabelDraft> ReadOnceAsync(
+        string imageDataUrl,
+        string? reasoningEffort,
+        int maximumTokens,
+        CancellationToken cancellationToken)
     {
-        GroqChoice? choice = response?.Choices?.FirstOrDefault();
+        object[] messages =
+        [
+            new
+            {
+                role = "system",
+                content = AiNutritionLabelContract.Instructions
+            },
+            new
+            {
+                role = "user",
+                content = new object[]
+                {
+                    new
+                    {
+                        type = "text",
+                        text = AiNutritionLabelContract.InputPrompt
+                    },
+                    new
+                    {
+                        type = "image_url",
+                        image_url = new
+                        {
+                            url = imageDataUrl
+                        }
+                    }
+                }
+            }
+        ];
+        string structuredOutput = await GroqChatCompletion.CompleteAsync(
+            _httpClient,
+            GroqChatCompletion.CreateBody(
+                _model,
+                messages,
+                AiNutritionLabelContract.SchemaName,
+                AiNutritionLabelContract.Schema,
+                maximumTokens,
+                reasoningEffort),
+            cancellationToken);
 
-        if (choice is null ||
-            !string.Equals(
-                choice.FinishReason,
-                "stop",
-                StringComparison.Ordinal) ||
-            string.IsNullOrWhiteSpace(choice.Message?.Content))
-        {
-            throw new InvalidDataException(
-                "Groq response does not contain complete structured label output.");
-        }
-
-        return choice.Message.Content;
+        return AiNutritionLabelContract.Deserialize(structuredOutput, "Groq");
     }
-
-    private sealed record GroqChatResponse(
-        [property: JsonPropertyName("choices")]
-        IReadOnlyList<GroqChoice?>? Choices);
-
-    private sealed record GroqChoice(
-        [property: JsonPropertyName("message")]
-        GroqMessage? Message,
-        [property: JsonPropertyName("finish_reason")]
-        string? FinishReason);
-
-    private sealed record GroqMessage(
-        [property: JsonPropertyName("content")]
-        string? Content);
 }

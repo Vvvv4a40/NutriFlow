@@ -58,7 +58,6 @@
     letter-spacing: -0.02em;
     line-height: 1.2;
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-headline {
@@ -68,7 +67,6 @@
     font-weight: 700;
     line-height: 1.25;
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-headline--small {
@@ -81,7 +79,6 @@
     font-size: 0.9375rem;
     line-height: 1.4;
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-text--muted {
@@ -99,7 +96,6 @@
     font-size: 0.8125rem;
     line-height: 1.35;
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-overline {
@@ -144,7 +140,6 @@
     line-height: 1.25;
     text-align: center;
     overflow-wrap: anywhere;
-    hyphens: auto;
     cursor: pointer;
     touch-action: manipulation;
 }
@@ -589,14 +584,12 @@
     font-size: 1rem;
     font-weight: var(--font-medium);
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-row__subtitle {
     color: var(--muted);
     font-size: 0.8125rem;
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-row__end {
@@ -773,6 +766,18 @@
 .nf-arc__track {
     fill: none;
     stroke: var(--surface-pressed);
+}
+
+/* the goal under what was eaten: a solid pale colour, so the rounded end does not darken where it overlaps its zone */
+.nf-arc__zone {
+    fill: none;
+    stroke: var(--surface-pressed);
+    stroke: color-mix(in srgb, currentColor 32%, var(--surface));
+}
+
+.nf-arc__zone-cap {
+    fill: var(--surface-pressed);
+    fill: color-mix(in srgb, currentColor 32%, var(--surface));
 }
 
 .nf-arc__fill {
@@ -1069,6 +1074,14 @@
 }
 
 /* form page: a secondary screen over the shell */
+
+/* navigation.mjs measures what a fixed element gets */
+.nf-layout-probe {
+    position: fixed;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
 
 .nf-form {
     position: fixed;
@@ -1404,7 +1417,6 @@
     font-size: 0.75rem;
     line-height: 1.25;
     overflow-wrap: anywhere;
-    hyphens: auto;
 }
 
 .nf-theme-picker__name--selected {
@@ -1469,7 +1481,7 @@
 }
 
 .nf-date-pill__step:active,
-.nf-date-pill__button:active {
+.nf-date-pill__current:has(input:active) {
     background: var(--date-pressed);
 }
 
@@ -1477,39 +1489,51 @@
     position: relative;
     display: flex;
     flex: 1;
+    align-items: center;
     justify-content: center;
     min-width: 0;
-}
-
-.nf-date-pill__button {
     min-height: var(--touch-target);
     padding: 6px 12px;
-    border: 0;
     border-radius: 16px;
-    background: transparent;
     color: var(--date-foreground);
-    font: inherit;
     font-size: 1rem;
     font-weight: var(--font-medium);
-    cursor: pointer;
-    touch-action: manipulation;
+    text-align: center;
 }
 
-/* the system picker opens from the visible button; the input only has to be rendered, not seen */
+/* ios opens its date wheel only for a tap on the input itself, a call from script is ignored:
+   so the invisible input covers the date, and its 16 px keep safari from zooming the page */
 .nf-date-pill__input {
     position: absolute;
-    bottom: 0;
-    left: 50%;
-    width: 1px;
-    height: 1px;
+    inset: 0;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
     padding: 0;
     border: 0;
+    background: transparent;
+    font-size: 16px;
     opacity: 0;
-    pointer-events: none;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+/* chrome opens its calendar only from this indicator, so it takes the whole input */
+.nf-date-pill__input::-webkit-calendar-picker-indicator {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
 }
 
 .nf-date-pill__step:focus-visible,
-.nf-date-pill__button:focus-visible {
+.nf-date-pill__current:has(input:focus-visible) {
     outline: 3px solid var(--date-foreground);
     outline-offset: -3px;
 }
@@ -1802,7 +1826,7 @@
     }
 
     .nf-date-pill .nf-date-pill__step:hover,
-    .nf-date-pill__button:hover {
+    .nf-date-pill__current:hover {
         background: var(--date-pressed);
     }
 }
@@ -1884,21 +1908,20 @@
     background: color-mix(in srgb, var(--accent) 22%, var(--accent-soft));
 }
 
-.nf-voice {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    padding-top: 12px;
-    text-align: center;
-}
-
-.nf-voice__status {
+.nf-voice-chip--recording {
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+    color: var(--danger);
     font-variant-numeric: tabular-nums;
 }
 
-.nf-voice__record {
-    width: 100%;
+.nf-voice-chip--recording .nf-icon {
+    animation: nf-voice-pulse 1.6s ease-in-out infinite;
+}
+
+/* the error of a recording takes its own row under the chip in the wrapping tools row */
+.nf-voice-note {
+    flex: 1 0 100%;
+    order: 1;
 }
 
 .nf-button[aria-disabled="true"] {
@@ -1906,20 +1929,118 @@
     cursor: default;
 }
 
-.nf-voice--recording .nf-icon-tile {
-    animation: nf-voice-pulse 1.6s ease-in-out infinite;
-}
-
 @keyframes nf-voice-pulse {
     50% {
-        transform: scale(1.12);
+        transform: scale(1.18);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .nf-voice--recording .nf-icon-tile {
+    .nf-voice-chip--recording .nf-icon {
         animation: none;
     }
+}
+
+/* the calculation of a diary meal: the sum first, then one tappable line per food */
+.nf-review {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: var(--card-padding);
+    scroll-margin-top: 16px;
+}
+
+/* takes the focus only to be read after a new calculation, like the shell title */
+.nf-review:focus {
+    outline: none;
+}
+
+.nf-review__total {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.nf-review__calories {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0;
+    color: var(--highlight);
+    font-size: 2.5rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.nf-review__unit {
+    color: var(--muted);
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    letter-spacing: 0;
+}
+
+.nf-review__lines {
+    display: flex;
+    flex-direction: column;
+    margin: 0 calc(var(--card-padding) * -1);
+    padding: 0;
+    border-top: 1px solid var(--stroke);
+    list-style: none;
+}
+
+.nf-review__line {
+    border-bottom: 1px solid var(--stroke);
+}
+
+.nf-review__row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 10px;
+    min-height: 60px;
+    padding: 8px var(--card-padding);
+}
+
+.nf-review__row:active:not(:disabled) {
+    background: var(--surface-pressed);
+}
+
+.nf-review__text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.nf-review__name {
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.nf-review__value {
+    flex: none;
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: var(--font-medium);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.nf-review__chevron {
+    flex: none;
+    color: var(--subtle);
+}
+
+.nf-composer--compact .nf-composer__text .nf-field__input {
+    min-height: 4rem;
+    font-size: 1rem;
 }
 
 .nf-tips {

@@ -12,6 +12,12 @@ public static class LabelText
     public const string ManualReason = "Этикетка не распознана. Перенесите значения с упаковки сами.";
     public const string CheckedTitle = "Значения сверены с этикеткой";
     public const string MustCheck = "Пересчитайте значения на 100 г и отметьте, что они сверены.";
+    public const string Disagree = "Калории не сходятся с белками, жирами и углеводами: похоже, какая-то цифра прочитана неверно. Сверьте внимательно.";
+
+    // all numbers are there, but they cannot all be true
+    public static bool ValuesDisagree(NutritionLabelDraft draft) =>
+        draft is { Calories: { } calories, ProteinGrams: { } protein, FatGrams: { } fat, CarbohydratesGrams: { } carbohydrates } &&
+        !NutritionPlausibility.MacrosMatchCalories(calories, protein, fat, carbohydrates);
 
     public static string Error(Exception exception) => exception switch
     {

@@ -1,14 +1,10 @@
 @inject LocalMealClient Meals
+@inject IAppHost Host
 @inject ActionRunner Runner
 
-@* a product by the digits under its barcode from Open Food Facts; the camera is not part of the first version
-   (BarcodePageAsync in MainPage.Products.cs) *@
-<FormPage Title="Поиск по штрихкоду" TestId="barcode-form" OnClose="OnClose">
+@* a product by the photo of its barcode, or by the digits under it, from Open Food Facts *@
+<FormPage Title="Штрихкод" TestId="barcode-form" OnClose="OnClose">
     <ChildContent>
-        <BodyText Muted="true">Введите цифры под штрихкодом. Поиск идёт по открытой базе Open Food Facts и требует интернета.</BodyText>
-        <Field @ref="_field" Label="Штрихкод" Placeholder="Например, 4600000000000" Digits="true" Plain="true" MaxLength="20"
-               EnterKeyHint="search" Error="@_error" TestId="barcode-input"
-               @bind-Value="_code" @bind-Value:after="OnCodeChanged" OnEnter="FindAsync" />
         <div class="nf-barcode-result" tabindex="-1" @ref="_result">
             @if (_found is { } product)
             {
@@ -23,12 +19,37 @@
                     <Action><GhostButton Text="Добавить вручную" TestId="barcode-add-manual" OnClick="() => _manual = true" /></Action>
                 </Notice>
             }
+            else if (_unread)
+            {
+                <Notice TestId="barcode-unread">@CatalogText.BarcodeUnread</Notice>
+            }
         </div>
+        @if (_found is null)
+        {
+            <IconTile Icon="AppIconKind.Barcode" Large="true" />
+            <Headline>Сфотографируйте штрихкод</Headline>
+            <BodyText Muted="true">Штрихкод крупно, ровно и без бликов. Продукт найдётся в открытой базе Open Food Facts, нужен интернет.</BodyText>
+            <Field @ref="_field" Label="Или введите цифры под штрихкодом" Placeholder="Например, 4600000000000" Digits="true" Plain="true" MaxLength="20"
+                   EnterKeyHint="search" Error="@_error" TestId="barcode-input"
+                   @bind-Value="_code" @bind-Value:after="OnCodeChanged" OnEnter="FindAsync" />
+            @if (!string.IsNullOrWhiteSpace(_code))
+            {
+                <ActionButton Text="Найти по цифрам" Secondary="true" ProgressKey="barcode-find" TestId="barcode-find" OnClick="FindAsync" />
+            }
+        }
     </ChildContent>
     <Footer>
-        @* one control in both states, so the focus stays on it; another search is Enter in the field *@
-        <ActionButton Text="@(_found is null ? "Найти продукт" : "Записать порцию")" ProgressKey="barcode-find"
-                      TestId="@(_found is null ? "barcode-find" : "barcode-portion")" OnClick="MainActionAsync" />
+        @if (_found is null)
+        {
+            <PhotoButton Text="Сфотографировать" Camera="true" ProgressKey="barcode-camera" TestId="barcode-camera"
+                         OnPicked="input => OnPickedAsync(input, CameraKey)" />
+            <PhotoButton Text="Выбрать из галереи" Secondary="true" ProgressKey="barcode-gallery" TestId="barcode-gallery"
+                         OnPicked="input => OnPickedAsync(input, GalleryKey)" />
+        }
+        else
+        {
+            <ActionButton Text="Записать порцию" TestId="barcode-portion" OnClick="() => _portion = true" />
+        }
     </Footer>
 </FormPage>
 
@@ -43,6 +64,8 @@
 }
 
 @code {
+    private const string CameraKey = "barcode-camera";
+    private const string GalleryKey = "barcode-gallery";
     private Field? _field;
     private ElementReference _result;
     private ElementReference _title;
@@ -51,6 +74,7 @@
     private string? _error;
     private ProductResponse? _found;
     private bool _missing;
+    private bool _unread;
     private bool _portion;
     private bool _manual;
     private bool _focusResult;
@@ -71,6 +95,41 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
+    // the file input is in the footer and stays there during the action, as for a photo of a label
+    private Task OnPickedAsync(ElementReference input, string key) => Runner.RunAsync(async () =>
+    {
+        Runner.ShowProgress(key, "Читаю штрихкод…");
+        _unread = false;
+        _missing = false;
+        _error = null;
+        PickedBarcode? barcode;
+        try
+        {
+            barcode = await Host.ReadBarcodeAsync(input);
+        }
+        catch (InvalidDataException exception)
+        {
+            UiLog.Error(exception);
+            barcode = new PickedBarcode(null);
+        }
+
+        if (barcode is null)
+        {
+            return;
+        }
+
+        if (barcode.Digits is not { } digits || CatalogText.BarcodeProblem(digits) is not null)
+        {
+            _unread = true;
+            _focusResult = true;
+            return;
+        }
+
+        _code = digits;
+        Runner.ShowProgress(key, "Ищу продукт…");
+        await LookUpAsync(digits);
+    });
+
     private async Task FindAsync()
     {
         if (CatalogText.BarcodeProblem(_code) is { } problem)
@@ -86,33 +145,39 @@
         await Runner.RunAsync(async () =>
         {
             Runner.ShowProgress("barcode-find", "Ищу продукт…");
-            // the answer for the previous code must not pass for this one while the request runs
-            _found = null;
-            _missing = false;
-            StateHasChanged();
-            ProductResponse? found = null;
-            try
-            {
-                found = await Meals.LookupBarcodeAsync(ProfileId, code);
-            }
-            catch (Exception exception) when (CatalogText.IsBarcodeMissing(exception))
-            {
-                UiLog.Error(exception);
-            }
-            catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
-            {
-                throw new InvalidOperationException(CatalogText.BarcodeError(exception), exception);
-            }
-
-            _found = found;
-            _missing = found is null;
-            _searched = code;
-            _focusResult = true;
-            if (found is not null)
-            {
-                await OnCatalogChanged.InvokeAsync();
-            }
+            await LookUpAsync(code);
         });
+    }
+
+    private async Task LookUpAsync(string code)
+    {
+        // the answer for the previous code must not pass for this one while the request runs
+        _found = null;
+        _missing = false;
+        _unread = false;
+        StateHasChanged();
+        ProductResponse? found = null;
+        try
+        {
+            found = await Meals.LookupBarcodeAsync(ProfileId, code);
+        }
+        catch (Exception exception) when (CatalogText.IsBarcodeMissing(exception))
+        {
+            UiLog.Error(exception);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        {
+            throw new InvalidOperationException(CatalogText.BarcodeError(exception), exception);
+        }
+
+        _found = found;
+        _missing = found is null;
+        _searched = code;
+        _focusResult = true;
+        if (found is not null)
+        {
+            await OnCatalogChanged.InvokeAsync();
+        }
     }
 
     // the result replaces the old one silently, the focus brings a screen reader to it
@@ -123,27 +188,19 @@
             _focusResult = false;
             await (_found is null ? _result : _title).FocusAsync();
             // a focused block without a role is not read out, the announcement comes after the focus moved
-            Runner.Announce(_found is { } product ? $"Найден продукт «{product.Name}»" : "Продукт не найден");
+            Runner.Announce(_found is { } product ? $"Найден продукт «{product.Name}»"
+                : _unread ? CatalogText.BarcodeUnread
+                : "Продукт не найден");
         }
     }
 
-    private Task MainActionAsync()
-    {
-        if (_found is null)
-        {
-            return FindAsync();
-        }
-
-        _portion = true;
-        return Task.CompletedTask;
-    }
-
-    // the result of the old digits must not stay under new ones: «Записать порцию» would take the wrong product
+    // the result of the old digits must not stay under new ones
     private void OnCodeChanged()
     {
         _error = null;
         _found = null;
         _missing = false;
+        _unread = false;
     }
 
     private Task ClosePortionAsync()

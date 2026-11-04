@@ -70,9 +70,22 @@ export function keyboardInset(viewport, layoutHeight) {
     return Math.max(0, Math.round(layoutHeight - viewport.height - viewport.offsetTop));
 }
 
+// the box of a fixed element is what the form is laid out in. window.innerHeight is not: some ios versions shrink it with
+// the keyboard while fixed elements stay full height, and the inset came out as zero
+export function fixedLayoutHeight(probe, target) {
+    return probe?.getBoundingClientRect().height || target.innerHeight;
+}
+
 function watchKeyboard(viewport, target, root) {
     if (!viewport || !root) return;
-    const update = () => root.style.setProperty("--keyboard-inset", `${keyboardInset(viewport, target.innerHeight)}px`);
+    const probe = root.ownerDocument?.createElement("div");
+    if (probe) {
+        probe.className = "nf-layout-probe";
+        probe.setAttribute("aria-hidden", "true");
+        root.append(probe);
+    }
+
+    const update = () => root.style.setProperty("--keyboard-inset", `${keyboardInset(viewport, fixedLayoutHeight(probe, target))}px`);
     viewport.addEventListener("resize", update);
     viewport.addEventListener("scroll", update);
 }

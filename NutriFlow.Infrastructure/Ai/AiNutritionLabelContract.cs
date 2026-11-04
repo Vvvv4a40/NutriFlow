@@ -7,13 +7,20 @@ internal static class AiNutritionLabelContract
 {
     internal const string Instructions = """
         Extract nutrition facts exactly as printed on the product label image.
+        First copy the nutrition lines character by character into printedTable, including the units and
+        the words that say what the values refer to, then fill the other fields only from printedTable.
+        Labels are often in Russian: "белки" is protein, "жиры" is fat, "углеводы" is carbohydrates,
+        "энергетическая ценность" or "калорийность" is energy, "в 100 г" means per 100 grams.
+        A comma is the decimal separator: "12,5" is 12.5. Do not lose the digit after it.
+        Energy is often printed as both "1582 кДж / 378 ккал": take the number next to "ккал".
         Calories must contain kilocalories (kcal) only. Never copy kilojoules (kJ)
         into calories. If only kJ is printed, return null for calories and add a
         compact clarification question.
         Prefer a table expressed per 100 grams when present. Do not convert between a serving,
         100 milliliters, and 100 grams. Do not infer or complete values that are not readable.
         Use null for every missing or unreadable requested value and add compact clarification questions.
-        Extract only productName, basis, calories, proteinGrams, fatGrams, and carbohydratesGrams.
+        Extract only printedTable, productName, basis, calories, proteinGrams, fatGrams, and carbohydratesGrams.
+        Write productName and questions in the language of the label, using only its alphabet.
         Ask questions only about missing, unreadable, or genuinely ambiguous requested nutrition values
         or their basis. Do not ask about sugar, fiber, salt, ingredients, or other unrequested details.
         Copy the printed carbohydrate value without asking whether it includes sugar or fiber.
@@ -32,6 +39,7 @@ internal static class AiNutritionLabelContract
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "printedTable",
             "productName",
             "basis",
             "calories",
@@ -41,6 +49,7 @@ internal static class AiNutritionLabelContract
             "clarificationQuestions"
           ],
           "properties": {
+            "printedTable": { "type": "string" },
             "productName": { "type": ["string", "null"] },
             "basis": {
               "type": "string",

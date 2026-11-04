@@ -22,7 +22,8 @@
                 <img class="nf-label-photo__image" src="@_url" alt="Фото этикетки" data-testid="label-photo" @onerror="() => _failed = true" />
             }
         </div>
-        <GhostButton Text="@(_enlarged ? "Уменьшить фото" : "Увеличить фото")" Class="nf-label-photo__toggle" TestId="label-photo-toggle"
+        @* only for comparing by eye: what was recognised does not depend on it *@
+        <GhostButton Text="@(_enlarged ? "Показать мельче" : "Посмотреть крупнее")" Class="nf-label-photo__toggle" TestId="label-photo-toggle"
                      OnClick="() => _enlarged = !_enlarged" />
     }
 </div>

@@ -26,7 +26,7 @@ public sealed class CaptureStateTests : IAsyncLifetime
     {
         _profiles = new LocalProfileStore(_root);
         _drafts = new LocalInputDraftStore(_profiles);
-        _meals = new LocalMealClient(_profiles, () => new HttpClient(_groq, disposeHandler: false));
+        _meals = new LocalMealClient(_profiles, () => new HttpClient(_groq, disposeHandler: false), retryDelay: (_, _) => Task.CompletedTask);
     }
 
     [Fact]
@@ -81,6 +81,20 @@ public sealed class CaptureStateTests : IAsyncLifetime
         state.Open(Today);
 
         Assert.Equal(Today.AddDays(-2), state.Date);
+    }
+
+    [Fact]
+    public async Task TheShellHearsAboutTheCalculationOnceItIsThere()
+    {
+        Guid profileId = await CreateProfileAsync();
+        CaptureState state = await LoadAsync(profileId);
+        state.SetText("гречка 150 г");
+        bool sawSession = false;
+        state.Changed += () => sawSession |= state.Session is not null;
+
+        await state.SubmitAsync();
+
+        Assert.True(sawSession);
     }
 
     [Fact]

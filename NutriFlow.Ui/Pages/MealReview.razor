@@ -1,0 +1,85 @@
+@* a diary meal before it is written down: what was understood and how much it comes to, one line per food.
+   everything that can be assumed is assumed and marked «≈»; a line is corrected with one tap *@
+@{
+    MealReviewSummary review = CaptureText.Review(Session);
+}
+<section class="nf-panel nf-review" aria-label="Что записываем" tabindex="-1" data-testid="review" @ref="_top">
+    <p class="nf-caption" data-testid="review-day">В дневник · @CaptureText.DiaryDay(Session.MealDate, DateOnly.FromDateTime(DateTime.Today))</p>
+    <div class="nf-review__total" data-testid="draft-status">
+        <p class="nf-review__calories">
+            <span aria-hidden="true">@(review.Estimated ? "≈ " : null)@NutritionText.Kilocalories(review.Total.Calories)</span>
+            <span class="nf-review__unit" aria-hidden="true">ккал</span>
+            <span class="nf-visually-hidden">@(review.Estimated ? "Примерно " : null)@NutritionText.Amount(review.Total.Calories) килокалорий</span>
+        </p>
+        <MacroLine Protein="review.Total.ProteinGrams" Fat="review.Total.FatGrams" Carbs="review.Total.CarbohydratesGrams" />
+    </div>
+    <ul class="nf-review__lines" role="list" data-testid="draft-ingredients">
+        @foreach (MealReviewLine line in review.Lines)
+        {
+            <li class="nf-review__line">
+                <Pressable Class="nf-review__row" Description="@CaptureText.ReviewLineDescription(line)" Hint="Изменить вес, КБЖУ или убрать"
+                           TestId="review-row" OnClick="() => OnLine.InvokeAsync(line)">
+                    <span class="nf-review__text">
+                        <span class="nf-review__name">@line.Name</span>
+                        <span class="nf-caption">@line.Detail</span>
+                    </span>
+                    @if (line.Nutrition is { } nutrition)
+                    {
+                        <span class="nf-review__value">@(line.Estimated ? "≈ " : null)@NutritionText.Kilocalories(nutrition.Calories) ккал</span>
+                    }
+                    else
+                    {
+                        <Badge Text="@(line.MissingProduct is null ? "нет веса" : "нет КБЖУ")" Tone="Tone.Warning" />
+                    }
+                    <AppIcon Kind="AppIconKind.Next" Size="16" Class="nf-review__chevron" />
+                </Pressable>
+            </li>
+        }
+    </ul>
+    @if (review.Estimated)
+    {
+        <Caption TestId="review-estimated">≈ — примерные значения, их подобрал AI. Нажмите на строку, чтобы поправить.</Caption>
+    }
+</section>
+
+@if (review.LacksNutrition)
+{
+    <Notice Tone="Tone.Warning" TestId="review-missing">
+        <ChildContent>Для некоторых продуктов нет КБЖУ. Нажмите на строку, чтобы указать их самому@(CanEstimate ? ", или подберите автоматически" : null).</ChildContent>
+        <Action>
+            @if (CanEstimate)
+            {
+                <GhostButton Text="Подобрать КБЖУ" TestId="review-estimate" OnClick="OnEstimate" />
+            }
+        </Action>
+    </Notice>
+}
+
+@if (Session.ClarificationQuestions.Count > 0)
+{
+    <Notice Icon="AppIconKind.Warning" Tone="Tone.Accent" TestId="draft-questions">
+        @foreach (string question in Session.ClarificationQuestions)
+        {
+            <span class="nf-label-question">@question</span>
+        }
+    </Notice>
+}
+
+@code {
+    private ElementReference _top;
+
+    [Parameter, EditorRequired]
+    public MealSessionResponse Session { get; set; } = null!;
+
+    [Parameter]
+    public bool CanEstimate { get; set; }
+
+    [Parameter]
+    public EventCallback<MealReviewLine> OnLine { get; set; }
+
+    [Parameter]
+    public EventCallback OnEstimate { get; set; }
+
+    // after a new calculation the sum is the first thing to read
+    public ValueTask FocusAsync() => _top.FocusAsync();
+}

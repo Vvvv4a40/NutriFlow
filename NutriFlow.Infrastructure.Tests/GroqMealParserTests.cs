@@ -59,7 +59,7 @@ public sealed class GroqMealParserTests
         Assert.Equal(
             "none",
             root.GetProperty("reasoning_effort").GetString());
-        Assert.Equal(3000, root.GetProperty("max_completion_tokens").GetInt32());
+        Assert.Equal(2000, root.GetProperty("max_completion_tokens").GetInt32());
         Assert.Equal(
             "system",
             root.GetProperty("messages")[0].GetProperty("role").GetString());
@@ -203,6 +203,23 @@ public sealed class GroqMealParserTests
             () => parser.ParseAsync(session));
 
         Assert.Equal(0, handler.CallCount);
+    }
+
+    [Theory]
+    [InlineData("openai/gpt-oss-120b", "low")]
+    [InlineData("qwen/qwen3.8-27b", "none")]
+    [InlineData("some/other-model", null)]
+    public async Task ParseAsync_SendsOnlyTheReasoningSettingsTheModelAccepts(string model, string? effort)
+    {
+        const string output = """{"dishes":[{"name":"Рис","ingredients":[{"productName":"Рис","weightInGrams":100,"weightQuality":"exact","removedWeightInGrams":0,"removedWeightQuality":"exact"}],"finalWeightInGrams":100,"finalWeightQuality":"exact","portions":[{"weightInGrams":100,"fractionOfDish":null,"weightQuality":"exact"}]}],"clarificationQuestions":[]}""";
+        RecordingHttpMessageHandler handler = new(HttpStatusCode.OK, CreateGroqResponse(output));
+        using HttpClient httpClient = new(handler) { BaseAddress = new Uri("https://api.groq.com/openai/v1/") };
+
+        await new GroqMealParser(httpClient, model, ["Гречка варёная"]).ParseAsync(CreateReadySession("рис 100 г"));
+
+        using JsonDocument request = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(effort, request.RootElement.TryGetProperty("reasoning_effort", out JsonElement value) ? value.GetString() : null);
+        Assert.Contains("Гречка варёная", request.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
     }
 
     private static GroqMealParser CreateParser(HttpMessageHandler handler)

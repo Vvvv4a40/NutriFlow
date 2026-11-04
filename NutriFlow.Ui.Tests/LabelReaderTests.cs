@@ -27,7 +27,7 @@ public sealed class LabelReaderTests : IDisposable
     public LabelReaderTests()
     {
         _profiles = new LocalProfileStore(_root);
-        _meals = new LocalMealClient(_profiles, () => new HttpClient(_groq, disposeHandler: false));
+        _meals = new LocalMealClient(_profiles, () => new HttpClient(_groq, disposeHandler: false), retryDelay: (_, _) => Task.CompletedTask);
         _reader = new LabelReader(_meals, _settings, _host);
     }
 

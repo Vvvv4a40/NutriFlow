@@ -116,6 +116,8 @@ internal sealed class FakeAppHost : IAppHost
     public PickedPhoto? Photo { get; set; }
 
     public Task<PickedPhoto?> ReadPhotoAsync(ElementReference input) => Task.FromResult(Photo);
+
+    public Task<PickedBarcode?> ReadBarcodeAsync(ElementReference input) => Task.FromResult<PickedBarcode?>(null);
 }
 
 // speech-capture.mjs without a browser: the test plays the events of a recording

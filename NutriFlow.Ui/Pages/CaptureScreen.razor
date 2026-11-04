@@ -21,8 +21,15 @@ else
 {
     @if (Capture.Session is { } session)
     {
-        <SessionPreview @ref="_preview" Session="session" OnAddProduct="name => _newProduct = name" OnAnswer="FocusEditorAsync"
-                        OnRefresh="RefreshAsync" />
+        @if (CaptureText.IsDiary(session))
+        {
+            <MealReview @ref="_review" Session="session" CanEstimate="_hasGroq" OnLine="LineActionsAsync" OnEstimate="EstimateAsync" />
+        }
+        else
+        {
+            <SessionPreview @ref="_preview" Session="session" OnAddProduct="name => OpenProductForm(name, null)" OnAnswer="FocusEditorAsync"
+                            OnRefresh="RefreshAsync" />
+        }
     }
 
     @if (Capture.Blocked)
@@ -62,22 +69,22 @@ else
             </Notice>
         }
 
-        <div class="nf-panel nf-composer">
-            @if (Capture.Session is not null)
+        @* a correction of a ready calculation is a short remark, not a new description *@
+        <div class="nf-panel nf-composer @(Capture.Session is not null ? "nf-composer--compact" : null)">
+            @if (Capture.Session is { } current && !CaptureText.IsDiary(current))
             {
                 <Overline>Уточнение</Overline>
             }
-            <TextArea @ref="_editor" Rows="@(Capture.Session is null ? 6 : 4)" MaxLength="MealInputText.MaximumLength"
+            <TextArea @ref="_editor" Rows="@(Capture.Session is null ? 6 : 2)" MaxLength="MealInputText.MaximumLength"
                       AccessibleLabel="@(Capture.Session is null ? "Описание еды" : "Уточнение")"
                       Placeholder="@CaptureText.Placeholder(Capture.Session is not null, Capture.Purpose)"
                       Value="@Capture.Text" ValueChanged="OnTextChanged" Error="@_error"
                       Class="nf-composer__text" TestId="input-description" />
             <div class="nf-composer__tools">
-                <Pressable Class="nf-voice-chip" Description="Голос" Hint="Распознать речь и проверить текст перед использованием"
-                           TestId="input-voice" OnClick="() => _voice = true">
-                    <AppIcon Kind="AppIconKind.Microphone" Size="20" />
-                    <span>Голос</span>
-                </Pressable>
+                @if (_hasGroq)
+                {
+                    <VoiceInput ProfileId="Profile.Id" Text="@Capture.Text" TextChanged="OnTextChanged" />
+                }
                 <Caption Class="nf-composer__status" Tone="@(Capture.SaveFailed ? Tone.Danger : (Tone?)null)" TestId="input-save-status">@Capture.SaveStatus</Caption>
                 @if (Capture.SaveFailed)
                 {
@@ -85,10 +92,13 @@ else
                 }
                 <Caption Class="nf-composer__count">@CaptureText.Counter(Capture.Text.Length)</Caption>
             </div>
-            @* while the calculation waits for answers, sending them is the main step *@
-            <ActionButton Text="@(Capture.Session is null ? "Разобрать описание" : "Добавить уточнение")"
-                          Secondary="@(Capture.Session is { CanConfirm: true })"
-                          ProgressKey="capture-submit" TestId="input-submit" OnClick="SubmitAsync" />
+            @if (Capture.Session is not { CanConfirm: true } || !string.IsNullOrWhiteSpace(Capture.Text))
+            {
+                @* while the calculation waits for answers, sending them is the main step *@
+                <ActionButton Text="@(Capture.Session is null ? "Разобрать описание" : "Отправить уточнение")"
+                              Secondary="@(Capture.Session is { CanConfirm: true })"
+                              ProgressKey="capture-submit" TestId="input-submit" OnClick="SubmitAsync" />
+            }
         </div>
 
         @if (Capture.Session is null)
@@ -118,11 +128,6 @@ else
     }
 }
 
-@if (_voice)
-{
-    <VoiceForm ProfileId="Profile.Id" OnOpenSettings="OnOpenSettings" OnClose="() => _voice = false" />
-}
-
 @if (_buildingDish)
 {
     <DishBuilderForm ProfileId="Profile.Id" Date="Date" OnStarted="OnDishStartedAsync" OnClose="() => _buildingDish = false" />
@@ -130,7 +135,13 @@ else
 
 @if (_newProduct is { } productName)
 {
-    <ProductForm ProfileId="Profile.Id" InitialName="@productName" ExactName="true" OnSaved="OnProductSavedAsync" OnClose="() => _newProduct = null" />
+    <ProductForm ProfileId="Profile.Id" InitialName="@productName" ExactName="true" Initial="_correctedProduct"
+                 OnSaved="OnProductSavedAsync" OnClose="() => _newProduct = null" />
+}
+
+@if (_editingWeight is { } line)
+{
+    <ReviewWeightForm Line="line" OnClose="() => _editingWeight = null" />
 }
 
 @code {
@@ -145,10 +156,12 @@ else
     private bool _hasGroq = true;
     private string? _error;
     private string? _newProduct;
+    private ProductResponse? _correctedProduct;
+    private MealReviewLine? _editingWeight;
     private bool _buildingDish;
-    private bool _voice;
     private TextArea? _editor;
     private SessionPreview? _preview;
+    private MealReview? _review;
     private bool _focusPreview;
     private bool _focusEditor;
     private bool _saveFailed;
@@ -202,7 +215,12 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_focusPreview && _preview is not null)
+        if (_focusPreview && _review is not null && Capture.Session is { } diary && CaptureText.IsDiary(diary))
+        {
+            _focusPreview = false;
+            await _review.FocusAsync();
+        }
+        else if (_focusPreview && _preview is not null)
         {
             _focusPreview = false;
             await _preview.FocusStatusAsync();
@@ -253,6 +271,37 @@ else
             await _editor.FocusAsync();
         }
     }
+
+    private void OpenProductForm(string name, ProductResponse? corrected)
+    {
+        _correctedProduct = corrected;
+        _newProduct = name;
+    }
+
+    // one tap on a line of the calculation: the weight is what usually needs a fix
+    private Task LineActionsAsync(MealReviewLine line) => Runner.RunAsync(async () =>
+    {
+        const string weight = "Изменить вес";
+        const string own = "Указать свои КБЖУ";
+        const string remove = "Убрать из записи";
+        string[] actions = line.Product is not null || line.MissingProduct is not null ? [weight, own] : [weight];
+        string? action = await Runner.ChooseAsync(line.Name, "Отмена", remove, actions);
+        if (action == weight)
+        {
+            _editingWeight = line;
+        }
+        else if (action == own)
+        {
+            OpenProductForm(line.MissingProduct ?? line.Product!.Name, line.Product);
+        }
+        else if (action == remove)
+        {
+            await Capture.RemoveDishAsync(line.DishIndex);
+            Capture.Open(Date);
+        }
+    });
+
+    private Task EstimateAsync() => Runner.RunAsync(Capture.EstimateMissingAsync);
 
     // runs inside the action of the product form, so it does not start one of its own
     private async Task OnProductSavedAsync()

@@ -17,19 +17,23 @@ namespace NutriFlow.Mobile.Core;
 public sealed class LocalMealClient
 {
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ProfileGates = new();
+    private static readonly TimeSpan RateLimitWait = TimeSpan.FromSeconds(25);
     private readonly LocalProfileStore _profiles;
     private readonly Func<HttpClient> _httpClientFactory;
     private readonly Func<string, Guid, CancellationToken, Task<NutriFlowDbContext>> _openDatabase;
+    private readonly Func<TimeSpan, CancellationToken, Task> _retryDelay;
 
     public LocalMealClient(
         LocalProfileStore profiles,
         Func<HttpClient>? httpClientFactory = null,
-        Func<string, Guid, CancellationToken, Task<NutriFlowDbContext>>? openDatabase = null)
+        Func<string, Guid, CancellationToken, Task<NutriFlowDbContext>>? openDatabase = null,
+        Func<TimeSpan, CancellationToken, Task>? retryDelay = null)
     {
         ArgumentNullException.ThrowIfNull(profiles);
         _profiles = profiles;
         _httpClientFactory = httpClientFactory ?? (() => new HttpClient());
         _openDatabase = openDatabase ?? LocalProfileDatabase.OpenAsync;
+        _retryDelay = retryDelay ?? Task.Delay;
     }
 
     public Task<DailyProgressResponse> GetDailyProgressAsync(
@@ -239,11 +243,12 @@ public sealed class LocalMealClient
         Guid profileId, IReadOnlyList<string> messages, DateOnly date, MealSessionPurpose purpose,
         GroqSettings settings, CancellationToken cancellationToken = default)
     {
-        using HttpClient client = CreateGroqClient(settings);
         string[]? capturedMessages = messages?.ToArray();
-        return await WithWorkflowAsync(profileId, new GroqMealParser(client, settings.TextModel), async workflow =>
+        using GroqTextClients clients = CreateTextClients(settings);
+        return await WithContextAsync(profileId, async context =>
         {
-            MealSessionCreationResult result = await workflow.CreateAsync(
+            IMealParser parser = await CreateGroqParserAsync(context, profileId, clients, cancellationToken);
+            MealSessionCreationResult result = await CreateWorkflow(context, profileId, parser).CreateAsync(
                 capturedMessages, date, cancellationToken, Guid.NewGuid(), purpose);
             return result.Session;
         }, cancellationToken);
@@ -262,9 +267,47 @@ public sealed class LocalMealClient
             }
 
             await RequireUnambiguousManualSelectionAsync(context, profileId, session, cancellationToken);
-            using HttpClient client = CreateGroqClient(settings);
-            return await CreateWorkflow(context, profileId, new GroqMealParser(client, settings.TextModel))
-                .AddMessageAsync(sessionId, message, cancellationToken);
+            using GroqTextClients clients = CreateTextClients(settings);
+            IMealParser parser = await CreateGroqParserAsync(context, profileId, clients, cancellationToken);
+            return await CreateWorkflow(context, profileId, parser).AddMessageAsync(sessionId, message, cancellationToken);
+        }, cancellationToken);
+    }
+
+    // one line of the calculation changed by hand; the note keeps the change when a later message parses everything again
+    public Task<MealSessionResponse?> SetDishWeightAsync(
+        Guid profileId, Guid sessionId, int dishIndex, decimal grams, CancellationToken cancellationToken = default)
+    {
+        return WithWorkflowAsync(profileId, null, workflow => workflow.ChangeDraftAsync(sessionId,
+            draft => DraftEdits.SetWeight(draft, dishIndex, grams),
+            draft => $"Исправлено вручную: «{draft.Dishes[dishIndex].Name}» — {grams.ToString("G29", CultureInfo.InvariantCulture)} г.",
+            cancellationToken), cancellationToken);
+    }
+
+    public Task<MealSessionResponse?> RemoveDishAsync(
+        Guid profileId, Guid sessionId, int dishIndex, CancellationToken cancellationToken = default)
+    {
+        return WithWorkflowAsync(profileId, null, workflow => workflow.ChangeDraftAsync(sessionId,
+            draft => DraftEdits.Remove(draft, dishIndex),
+            draft => $"Исправлено вручную: «{draft.Dishes[dishIndex].Name}» не ели, убрать.",
+            cancellationToken), cancellationToken);
+    }
+
+    // the estimate failed when the description was parsed, or a food became unknown later
+    public async Task<MealSessionResponse?> EstimateMissingAsync(
+        Guid profileId, Guid sessionId, GroqSettings settings, CancellationToken cancellationToken = default)
+    {
+        using GroqTextClients clients = CreateTextClients(settings);
+        return await WithContextAsync(profileId, async context =>
+        {
+            StoredMealSession? session = await new MealSessionStore(context, profileId).FindAsync(sessionId, cancellationToken);
+            if (session is null)
+            {
+                return null;
+            }
+
+            await AutoNutritionMealParser.AddEstimatesAsync(new LocalProductCatalog(context, profileId),
+                new SavedDishStore(context, profileId), clients.Estimator, session.Draft, cancellationToken);
+            return await CreateWorkflow(context, profileId, null).FindAsync(sessionId, cancellationToken);
         }, cancellationToken);
     }
 
@@ -477,7 +520,25 @@ public sealed class LocalMealClient
             new DailyDiaryStore(context, profileId), new SavedDishStore(context, profileId));
     }
 
-    private HttpClient CreateGroqClient(GroqSettings settings)
+    private static async Task<IMealParser> CreateGroqParserAsync(
+        NutriFlowDbContext context, Guid profileId, GroqTextClients clients, CancellationToken cancellationToken)
+    {
+        LocalProductCatalog catalog = new(context, profileId);
+        string[] known = (await catalog.SearchAsync(null, 200, cancellationToken)).Select(product => product.Name).ToArray();
+        return new AutoNutritionMealParser(clients.CreateParser(known), catalog, new SavedDishStore(context, profileId), clients.Estimator);
+    }
+
+    private GroqTextClients CreateTextClients(GroqSettings settings)
+    {
+        string reserve = settings.TextModel == GroqSettings.ReserveTextModel ? GroqSettings.DefaultTextModel : GroqSettings.ReserveTextModel;
+        // the main model does not wait for its limit: the reserve answers at once, and only that one is worth waiting for
+        return new GroqTextClients(CreateGroqClient(settings, TimeSpan.Zero), settings.TextModel,
+            CreateGroqClient(settings, RateLimitWait), reserve);
+    }
+
+    private HttpClient CreateGroqClient(GroqSettings settings) => CreateGroqClient(settings, RateLimitWait);
+
+    private HttpClient CreateGroqClient(GroqSettings settings, TimeSpan maximumRateLimitWait)
     {
         ArgumentNullException.ThrowIfNull(settings);
         if (string.IsNullOrWhiteSpace(settings.ApiKey) || settings.ApiKey.Length > 2048 ||
@@ -486,11 +547,31 @@ public sealed class LocalMealClient
             throw new ArgumentException("Укажи свой Groq-ключ в настройках выбранного профиля.", nameof(settings));
         }
 
-        HttpClient client = _httpClientFactory();
-        client.BaseAddress = new Uri("https://api.groq.com/openai/v1/");
-        client.Timeout = TimeSpan.FromSeconds(60);
+        HttpClient transport = _httpClientFactory();
+        transport.Timeout = TimeSpan.FromSeconds(40);
+        HttpClient client = new(new GroqRetryHandler(transport, maximumRateLimitWait, _retryDelay))
+        {
+            BaseAddress = new Uri("https://api.groq.com/openai/v1/"),
+            // every attempt has its own timeout, this one would cut the retries short
+            Timeout = Timeout.InfiniteTimeSpan
+        };
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.ApiKey);
         return client;
+    }
+
+    private sealed class GroqTextClients(HttpClient main, string mainModel, HttpClient reserve, string reserveModel) : IDisposable
+    {
+        public INutritionEstimator Estimator { get; } = new ReserveNutritionEstimator(
+            new GroqNutritionEstimator(main, mainModel), new GroqNutritionEstimator(reserve, reserveModel));
+
+        public IMealParser CreateParser(IReadOnlyList<string> knownProducts) => new ReserveMealParser(
+            new GroqMealParser(main, mainModel, knownProducts), new GroqMealParser(reserve, reserveModel, knownProducts));
+
+        public void Dispose()
+        {
+            main.Dispose();
+            reserve.Dispose();
+        }
     }
 
     private static NutritionValues ToNutrition(NutritionResponse value) =>

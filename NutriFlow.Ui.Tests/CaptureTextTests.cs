@@ -1,6 +1,7 @@
 using System.Net;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Mobile.Core;
 using NutriFlow.Ui.Components;
 using NutriFlow.Ui.Pages;
 
@@ -117,6 +118,66 @@ public sealed class CaptureTextTests
     {
         Assert.StartsWith(start, CaptureText.GroqError(new HttpRequestException("failed", null, status)));
     }
+
+    [Fact]
+    public void ALimitSaysHowLongToWaitAndADailyOneSaysWhatElseToDo()
+    {
+        Assert.StartsWith("Groq просит подождать 10 с", CaptureText.GroqError(new GroqRateLimitException(TimeSpan.FromSeconds(9.5), false)));
+        Assert.StartsWith("Groq просит подождать 2 мин", CaptureText.GroqError(new GroqRateLimitException(TimeSpan.FromSeconds(100), false)));
+        Assert.StartsWith("Дневной лимит этого ключа", CaptureText.GroqError(new GroqRateLimitException(TimeSpan.FromHours(3), true)));
+        Assert.StartsWith("Groq временно ограничил запросы", CaptureText.GroqError(new GroqRateLimitException(null, false)));
+    }
+
+    [Fact]
+    public void TheReviewSumsTheFoodsAndMarksWhatIsEstimated()
+    {
+        ProductResponse exact = new("Творог", 100m, 16m, 5m, 3m, "ManualInput", "Exact", "Ручной ввод", null, null);
+        ProductResponse estimated = exact with { Name = "Гречка варёная", DataQuality = "Estimated" };
+        MealSessionResponse session = Session("ReadyForConfirmation", true) with
+        {
+            Dishes =
+            [
+                Food("Творог", exact, 200m, "Exact", new NutritionResponse(200m, 32m, 10m, 6m), "Exact"),
+                Food("Гречка варёная", estimated, 150m, "Estimated", new NutritionResponse(165m, 6m, 2m, 32m), "Estimated")
+            ]
+        };
+
+        MealReviewSummary review = CaptureText.Review(session);
+
+        Assert.Equal(new NutritionResponse(365m, 38m, 12m, 38m), review.Total);
+        Assert.True(review.Estimated);
+        Assert.False(review.LacksNutrition);
+        Assert.False(review.Lines[0].Estimated);
+        Assert.Equal("200 г", review.Lines[0].Detail);
+        Assert.True(review.Lines[1].Estimated);
+        Assert.Equal("≈ 150 г", review.Lines[1].Detail);
+        Assert.Equal(1, review.Lines[1].DishIndex);
+        Assert.Equal("Гречка варёная, 150 граммов, примерно 165 килокалорий", CaptureText.ReviewLineDescription(review.Lines[1]));
+    }
+
+    [Fact]
+    public void TheReviewNamesAFoodWithoutNutritionAndADishByItsComposition()
+    {
+        ProductResponse known = new("Гречка", 110m, 4m, 1m, 21m, "ManualInput", "Exact", "Ручной ввод", null, null);
+        DishPreviewResponse dish = new("Гречка с курицей", 270m, "Estimated", null, null, null, null,
+            [
+                new IngredientPreviewResponse("Гречка", 150m, "Exact", 0m, "Exact", 150m, known, null),
+                new IngredientPreviewResponse("Курица", 120m, "Exact", 0m, "Exact", 120m, null, null)
+            ],
+            [new PortionPreviewResponse(270m, 1m, "Exact", null, null)]);
+
+        MealReviewLine line = Assert.Single(CaptureText.Review(Session("NeedsProducts", false) with { Dishes = [dish] }).Lines);
+
+        Assert.Equal("Курица", line.MissingProduct);
+        Assert.Null(line.Nutrition);
+        Assert.Equal("270 г · Гречка, Курица", line.Detail);
+        Assert.Equal(270m, line.Grams);
+    }
+
+    private static DishPreviewResponse Food(string name, ProductResponse product, decimal grams, string weightQuality, NutritionResponse nutrition, string quality) =>
+        new(name, grams, weightQuality, nutrition, quality, null, null,
+            [new IngredientPreviewResponse(name, grams, weightQuality, 0m, "Exact", grams, product, nutrition)],
+            [new PortionPreviewResponse(grams, null, weightQuality, nutrition, quality)]);
 
     [Fact]
     public void NoNetworkAndTimeoutAreTheSameForTheUser()

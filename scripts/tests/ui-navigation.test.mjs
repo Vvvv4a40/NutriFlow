@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { back, enterLayer, focus, keyboardInset, leaveLayer, push, setInputBlocked, start } from "../../NutriFlow.Ui/wwwroot/navigation.mjs";
+import { back, enterLayer, fixedLayoutHeight, focus, keyboardInset, leaveLayer, push, setInputBlocked, start } from "../../NutriFlow.Ui/wwwroot/navigation.mjs";
 import { close, isOutside, open } from "../../NutriFlow.Ui/wwwroot/dialog.mjs";
 
 function element(tagName, { reachable = false } = {}) {
@@ -172,6 +172,15 @@ test("the keyboard inset is the part of the layout viewport the on-screen keyboa
     assert.equal(keyboardInset({ height: 480, offsetTop: 40 }, 812), 292);
     assert.equal(keyboardInset({ height: 900, offsetTop: 0 }, 812), 0);
     assert.equal(keyboardInset(undefined, 812), 0);
+});
+
+test("the height of a fixed element counts, not window.innerHeight that shrinks with the keyboard on some ios versions", () => {
+    const probe = { getBoundingClientRect: () => ({ height: 812 }) };
+    const layout = fixedLayoutHeight(probe, { innerHeight: 480 });
+
+    assert.equal(layout, 812);
+    assert.equal(keyboardInset({ height: 480, offsetTop: 0 }, layout), 332);
+    assert.equal(fixedLayoutHeight(undefined, { innerHeight: 700 }), 700);
 });
 
 test("escape on a dialog is turned into its cancel button and the dialog opens modal once", () => {

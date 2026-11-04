@@ -1,0 +1,1 @@
+zxing-wasm 3.1.6, https://www.npmjs.com/package/zxing-wasm

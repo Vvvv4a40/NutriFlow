@@ -14,6 +14,9 @@ public static class CatalogText
     public const string BarcodeNotFound =
         "В Open Food Facts нет этого продукта или его полной пищевой ценности. Добавьте продукт вручную по упаковке.";
 
+    public const string BarcodeUnread =
+        "Не получилось прочитать штрихкод. Снимите его крупнее, ровно и без бликов или введите цифры.";
+
     // the current calculation or the typed text gives way to the new one
     public static Func<Task<bool>> ConfirmReplace(ActionRunner runner) => () => runner.ConfirmAsync("Заменить текущий расчёт?",
         "Неподтверждённый расчёт и набранный текст заменятся новым расчётом. Дневник не изменится.", "Заменить", "Оставить");

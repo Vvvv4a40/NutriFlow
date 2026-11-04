@@ -1,17 +1,28 @@
-@* the diary arc: progress of calories to the goal, coloured by the energy share of each macro; numbers live outside *@
+@* the diary arc: the goal as a pale underlay split by macros, what was eaten over it in full colour; numbers live outside *@
 <svg class="nf-arc @Class" viewBox="0 0 320 176" aria-hidden="true" focusable="false" data-testid="diary-arcs">
-    <path class="nf-arc__track" d="@_geometry.Track.Data" stroke-width="@_geometry.StrokeText" stroke-linecap="round" />
+    @if (_geometry.Zones.Count == 0)
+    {
+        <path class="nf-arc__track" d="@_geometry.Track.Data" stroke-width="@_geometry.StrokeText" stroke-linecap="round" />
+    }
+    @foreach (ArcCap cap in _geometry.ZoneCaps)
+    {
+        <circle class="nf-arc__zone-cap nf-tone-@cap.Tone" cx="@cap.XText" cy="@cap.YText" r="@cap.RadiusText" />
+    }
+    @foreach (ArcPath path in _geometry.Zones)
+    {
+        <path class="nf-arc__zone nf-tone-@path.Tone" d="@path.Data" stroke-width="@_geometry.StrokeText" />
+    }
+    @foreach (ArcCap cap in _geometry.FillCaps)
+    {
+        <circle class="nf-arc__cap nf-tone-@cap.Tone" cx="@cap.XText" cy="@cap.YText" r="@cap.RadiusText" />
+    }
     @foreach (ArcPath path in _geometry.Fill)
     {
         <path class="nf-arc__fill nf-tone-@path.Tone" d="@path.Data" stroke-width="@_geometry.StrokeText" />
     }
-    @foreach (ArcCap cap in _geometry.Caps)
+    @foreach (ArcPath path in _geometry.Exceeded)
     {
-        <circle class="nf-arc__cap nf-tone-@cap.Tone" cx="@cap.XText" cy="@cap.YText" r="@cap.RadiusText" />
-    }
-    @if (_geometry.Exceeded is { } exceeded)
-    {
-        <path class="nf-arc__exceeded" d="@exceeded.Data" stroke-width="3" stroke-linecap="round" />
+        <path class="nf-arc__exceeded" d="@path.Data" stroke-width="3" stroke-linecap="round" />
     }
 </svg>
 

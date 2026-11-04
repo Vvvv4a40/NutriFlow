@@ -6,8 +6,11 @@ internal static class ProfileSettings
 {
     private static string Key(Guid profileId, string setting) => $"nutriflow.{setting}.{profileId:N}";
 
-    public static string TextModel(Guid profileId) =>
-        Preferences.Default.Get(Key(profileId, "text-model"), "qwen/qwen3.8-27b");
+    public static string TextModel(Guid profileId)
+    {
+        string saved = Preferences.Default.Get(Key(profileId, "text-model"), GroqSettings.DefaultTextModel);
+        return saved == GroqSettings.RetiredTextModel ? GroqSettings.DefaultTextModel : saved;
+    }
 
     public static string VisionModel(Guid profileId) =>
         Preferences.Default.Get(Key(profileId, "vision-model"), "qwen/qwen3.8-27b");

@@ -126,6 +126,8 @@ internal sealed class FakeMediaModule : IJSObjectReference
 {
     public PickedPhoto? Photo { get; set; }
 
+    public PickedBarcode? Barcode { get; set; }
+
     public bool PhotoFails { get; set; }
 
     public FakeVoiceCaptureObject Capture { get; } = new();
@@ -147,6 +149,14 @@ internal sealed class FakeMediaModule : IJSObjectReference
                 }
 
                 result = Photo;
+                break;
+            case "readBarcode":
+                if (PhotoFails)
+                {
+                    throw new JSException("EncodingError: The source image cannot be decoded.");
+                }
+
+                result = Barcode;
                 break;
             case "createVoiceCapture":
                 MaximumMilliseconds = (int)args![1]!;

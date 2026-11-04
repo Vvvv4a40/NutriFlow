@@ -52,4 +52,8 @@ public interface IAppHost
     // the photo chosen in this file input, in a format the label reader accepts; null when nothing is chosen,
     // InvalidDataException when the platform cannot read it
     Task<PickedPhoto?> ReadPhotoAsync(ElementReference input);
+
+    // the barcode on the photo chosen in this file input; null when nothing is chosen, Digits is null when none could be
+    // read, InvalidDataException when the platform cannot read the photo itself
+    Task<PickedBarcode?> ReadBarcodeAsync(ElementReference input);
 }

@@ -71,6 +71,43 @@ public sealed class GroqNutritionLabelReaderTests
             .GetBoolean());
     }
 
+    [Fact]
+    public async Task ReadAsync_WhenNumbersDisagree_LooksAgainWithReasoning()
+    {
+        // 3,3 g of fat read as 33
+        const string misread = """
+            {"printedTable":"","productName":"Гречка","basis":"per_100g","calories":378,"proteinGrams":12.5,"fatGrams":33,"carbohydratesGrams":72,"clarificationQuestions":[]}
+            """;
+        const string correct = """
+            {"printedTable":"","productName":"Гречка","basis":"per_100g","calories":378,"proteinGrams":12.5,"fatGrams":3.3,"carbohydratesGrams":72,"clarificationQuestions":[]}
+            """;
+        List<string?> efforts = [];
+        Queue<string> answers = new([misread, correct]);
+        using HttpClient httpClient = new(new DelegateHandler(async request =>
+        {
+            using JsonDocument body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            efforts.Add(body.RootElement.GetProperty("reasoning_effort").GetString());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(CreateGroqResponse(answers.Dequeue()), Encoding.UTF8, "application/json")
+            };
+        }))
+        {
+            BaseAddress = new Uri("https://api.groq.com/openai/v1/")
+        };
+
+        NutritionLabelDraft draft = await new GroqNutritionLabelReader(httpClient, "qwen-vision-test")
+            .ReadAsync(new byte[] { 0xFF, 0xD8, 0xFF, 0x00 }, "image/jpeg");
+
+        Assert.Equal(12.5m, draft.ProteinGrams);
+        Assert.Equal(["none", "medium"], efforts);
+    }
+
+    private sealed class DelegateHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request);
+    }
+
     [Theory]
     [InlineData("{\"choices\":[]}")]
     [InlineData(

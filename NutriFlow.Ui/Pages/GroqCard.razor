@@ -22,9 +22,9 @@
     <hr class="nf-divider" />
     @if (_loaded)
     {
-        <Field @ref="_keyField" Label="@(_hasKey ? "Новый ключ Groq" : "Ключ Groq")" Password="true" Plain="true"
-               Placeholder="@(_hasKey ? "Вставьте новый ключ, чтобы заменить" : "gsk_…")" Error="@_keyError" TestId="settings-api-key"
-               Hint="@(_hasKey ? "Пустое поле оставит текущий ключ. Ключ хранится только в этом профиле." : "Ключ личный и хранится только в этом профиле. Текст, фото и аудио для распознавания отправляются в Groq.")"
+        @* the saved key stays in the field: «Показать» has to show the key the app really uses *@
+        <Field @ref="_keyField" Label="Ключ Groq" Password="true" Plain="true" Placeholder="gsk_…" Error="@_keyError" TestId="settings-api-key"
+               Hint="Ключ личный и хранится только в этом профиле. Текст, фото и аудио для распознавания отправляются в Groq."
                @bind-Value="_key" @bind-Value:after="() => _keyError = null" />
         <a class="nf-button nf-button--ghost nf-link" href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer"
            data-testid="settings-key-console">Получить ключ на console.groq.com<span class="nf-visually-hidden">, откроется в браузере</span></a>
@@ -69,6 +69,7 @@
     protected override async Task OnInitializedAsync()
     {
         _hasKey = await Settings.HasGroqAsync(ProfileId);
+        _key = _hasKey ? (await Settings.GetGroqAsync(ProfileId)).ApiKey : null;
         _textModel = await Settings.GetTextModelAsync(ProfileId);
         _visionModel = await Settings.GetVisionModelAsync(ProfileId);
         _speechModel = await Settings.GetSpeechModelAsync(ProfileId);
@@ -78,7 +79,7 @@
     private async Task SaveAsync()
     {
         string key = (_key ?? "").Trim();
-        _keyError = !_hasKey && key.Length == 0 ? "Вставьте личный ключ Groq." : null;
+        _keyError = key.Length == 0 ? "Вставьте личный ключ Groq." : null;
         _textError = string.IsNullOrWhiteSpace(_textModel) ? ModelRequired : null;
         _visionError = string.IsNullOrWhiteSpace(_visionModel) ? ModelRequired : null;
         _speechError = string.IsNullOrWhiteSpace(_speechModel) ? ModelRequired : null;
@@ -91,7 +92,7 @@
         await Runner.RunAsync(async () =>
         {
             await Settings.SaveGroqAsync(ProfileId, key, _textModel!.Trim(), _visionModel!.Trim(), _speechModel!.Trim());
-            _key = null;
+            _key = key;
             _hasKey = true;
             StateHasChanged();
             await Runner.AlertAsync("Сохранено", "Настройки применены к этому профилю.", "Готово");
@@ -105,6 +106,7 @@
                 "Удалить", "Оставить", destructive: true))
         {
             await Settings.RemoveGroqAsync(ProfileId);
+            _key = null;
             _hasKey = false;
             _focusKey = true;
         }

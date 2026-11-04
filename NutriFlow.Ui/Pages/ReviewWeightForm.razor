@@ -1,0 +1,46 @@
+@inject CaptureState Capture
+@inject ActionRunner Runner
+
+@* a new weight for one line of the calculation, calculated at once without asking the model again *@
+<FormPage Title="Сколько съели" TestId="review-weight-form" OnClose="OnClose">
+    <ChildContent>
+        <Headline>@Line.Name</Headline>
+        <Field @ref="_field" Label="Вес, г" Number="true" EnterKeyHint="done" Error="@_error" TestId="review-weight"
+               @bind-Value="_weight" @bind-Value:after="() => _error = null" OnEnter="SaveAsync" />
+    </ChildContent>
+    <Footer>
+        <ActionButton Text="Сохранить" TestId="review-weight-save" OnClick="SaveAsync" />
+    </Footer>
+</FormPage>
+
+@code {
+    private Field? _field;
+    private string? _weight;
+    private string? _error;
+
+    [Parameter, EditorRequired]
+    public MealReviewLine Line { get; set; } = null!;
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override void OnInitialized() => _weight = Line.Grams is decimal grams ? NutritionText.Amount(grams) : null;
+
+    private async Task SaveAsync()
+    {
+        if (!NutritionText.TryParseNumber(_weight, positive: true, out decimal grams))
+        {
+            _error = "Введите вес в граммах больше нуля, например 150.";
+            StateHasChanged();
+            await Task.Yield();
+            await _field!.FocusAsync();
+            return;
+        }
+
+        await Runner.RunAsync(async () =>
+        {
+            await Capture.SetDishWeightAsync(Line.DishIndex, grams);
+            await OnClose.InvokeAsync();
+        });
+    }
+}

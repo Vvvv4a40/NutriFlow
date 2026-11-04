@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
-import { createVoiceCapture, needsEncoding, readPhoto, voiceMessages } from "../../web/NutriFlow.Web/wwwroot/js/media.mjs";
+import { canSendAsIs, createVoiceCapture, readBarcode, readPhoto, voiceMessages } from "../../web/NutriFlow.Web/wwwroot/js/media.mjs";
+import { prepareZXingModule, readBarcodes } from "../../web/NutriFlow.Web/wwwroot/js/zxing/reader/index.js";
 import { createPhotoUrl, revokePhotoUrl } from "../../NutriFlow.Ui/wwwroot/photo.mjs";
 
 const megabyte = 1024 * 1024;
@@ -13,7 +14,7 @@ function file(type, size = 3, name = "photo") {
 }
 
 // the page around the canvas: records what was drawn and encodes it into a fixed result
-function environment({ width = 4000, height = 3000, decodeError = null, encoded = new Blob([new Uint8Array(5)], { type: "image/jpeg" }) } = {}) {
+function environment({ width = 4000, height = 3000, decodeError = null, encoded = new Blob([new Uint8Array(5)], { type: "image/jpeg" }), picture = null } = {}) {
     const calls = { urls: [], revoked: [], fills: [], drawn: [], encodings: [], canvases: [] };
     return {
         calls,
@@ -41,7 +42,8 @@ function environment({ width = 4000, height = 3000, decodeError = null, encoded 
                     height: 0,
                     getContext: () => ({
                         fillRect: (...args) => calls.fills.push(args),
-                        drawImage: (image, ...args) => calls.drawn.push(args)
+                        drawImage: (image, ...args) => calls.drawn.push(args),
+                        getImageData: () => picture
                     }),
                     toBlob(callback, type, quality) {
                         calls.encodings.push({ type, quality });
@@ -55,29 +57,36 @@ function environment({ width = 4000, height = 3000, decodeError = null, encoded 
     };
 }
 
-test("jpeg, png and webp within the limit stay as they are", () => {
+test("jpeg, png and webp within the limit can be sent as they are when the canvas fails", () => {
     for (const type of ["image/jpeg", "image/png", "image/webp"]) {
-        assert.equal(needsEncoding(file(type)), false, type);
+        assert.equal(canSendAsIs(file(type)), true, type);
     }
+
+    assert.equal(canSendAsIs(file("image/heic")), false);
+    assert.equal(canSendAsIs(file("")), false);
+    assert.equal(canSendAsIs({ type: "image/jpeg", size: 8 * megabyte + 1 }), false);
+    assert.equal(canSendAsIs({ type: "image/jpeg", size: 8 * megabyte }), true);
 });
 
-test("other formats and photos over 8 mb are encoded", () => {
-    assert.equal(needsEncoding(file("image/heic")), true);
-    assert.equal(needsEncoding(file("")), true);
-    assert.equal(needsEncoding({ type: "image/jpeg", size: 8 * megabyte + 1 }), true);
-    assert.equal(needsEncoding({ type: "image/jpeg", size: 8 * megabyte }), false);
-});
-
-test("a photo in a good format reaches .NET unchanged and the input can take the same file again", async () => {
+test("every photo goes through the canvas, which draws it upright, and the input can take the same file again", async () => {
     const page = environment();
-    const input = { files: [file("image/png", 4)], value: "C:\\fakepath\\photo.png" };
+    const input = { files: [file("image/jpeg", 4)], value: "C:\\fakepath\\photo.jpg" };
 
     const photo = await readPhoto(input, page);
 
+    assert.equal(photo.mediaType, "image/jpeg");
+    assert.equal(photo.content.length, 5);
+    assert.equal(page.calls.drawn.length, 1);
+    assert.equal(input.value, "");
+});
+
+test("a good file the canvas cannot draw is sent as it is", async () => {
+    const page = environment({ decodeError: new Error("EncodingError") });
+
+    const photo = await readPhoto({ files: [file("image/png", 4)], value: "" }, page);
+
     assert.equal(photo.mediaType, "image/png");
     assert.equal(photo.content.length, 4);
-    assert.equal(input.value, "");
-    assert.deepEqual(page.calls.urls, []);
 });
 
 test("no file means nothing was chosen", async () => {
@@ -95,7 +104,7 @@ test("heic becomes a jpeg with the long side within 2560 px over a white backgro
     assert.deepEqual([canvas.width, canvas.height], [2560, 1920]);
     assert.deepEqual(page.calls.drawn, [[0, 0, 2560, 1920]]);
     assert.deepEqual(page.calls.fills, [[0, 0, 2560, 1920]]);
-    assert.deepEqual(page.calls.encodings, [{ type: "image/jpeg", quality: 0.9 }]);
+    assert.deepEqual(page.calls.encodings, [{ type: "image/jpeg", quality: 0.92 }]);
     assert.deepEqual(page.calls.revoked, ["blob:photo"]);
 });
 
@@ -128,6 +137,70 @@ test("what the browser cannot decode or encode rejects, cleans up and leaves the
         assert.equal(input.value, "");
         assert.deepEqual(page.calls.revoked, ["blob:photo"]);
     }
+});
+
+// a real picture of an ean-13 barcode, drawn the way a camera would see it: a dark code on a light background
+function barcodePicture(digits, { scale = 4, height = 240, quiet = 60 } = {}) {
+    const left = { 0: "0001101", 1: "0011001", 2: "0010011", 3: "0111101", 4: "0100011", 5: "0110001", 6: "0101111", 7: "0111011", 8: "0110111", 9: "0001011" };
+    const leftEven = Object.fromEntries(Object.entries(left).map(([key, code]) => [key, [...code].map(bit => bit === "0" ? "1" : "0").reverse().join("")]));
+    const right = Object.fromEntries(Object.entries(left).map(([key, code]) => [key, [...code].map(bit => bit === "0" ? "1" : "0").join("")]));
+    const parity = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"][digits[0]];
+    let modules = "101";
+    for (let index = 0; index < 6; index++) modules += (parity[index] === "L" ? left : leftEven)[digits[index + 1]];
+    modules += "01010";
+    for (let index = 7; index < 13; index++) modules += right[digits[index]];
+    modules += "101";
+
+    const width = modules.length * scale + quiet * 2;
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < modules.length * scale; x++) {
+            if (modules[Math.floor(x / scale)] === "1") {
+                const offset = (y * width + x + quiet) * 4;
+                data[offset] = data[offset + 1] = data[offset + 2] = 20;
+            }
+        }
+    }
+
+    return { data, width, height, colorSpace: "srgb" };
+}
+
+async function loadRealReader() {
+    prepareZXingModule({
+        overrides: { wasmBinary: (await readFile(new URL("../../web/NutriFlow.Web/wwwroot/js/zxing/zxing_reader.wasm", import.meta.url))).buffer }
+    });
+    return { readBarcodes };
+}
+
+test("the real reader finds the digits of a barcode on a picture", async () => {
+    const picture = barcodePicture("3017620422003");
+    const input = { files: [file("image/jpeg")], value: "x" };
+
+    const barcode = await readBarcode(input, environment({ width: picture.width, height: picture.height, picture }), loadRealReader);
+
+    assert.deepEqual(barcode, { digits: "3017620422003" });
+    assert.equal(input.value, "");
+});
+
+test("a picture without a barcode gives no digits, no file means nothing was chosen", async () => {
+    const blank = { data: new Uint8ClampedArray(400 * 300 * 4).fill(255), width: 400, height: 300, colorSpace: "srgb" };
+
+    assert.deepEqual(await readBarcode({ files: [file("image/jpeg")], value: "" }, environment({ width: 400, height: 300, picture: blank }), loadRealReader), { digits: null });
+    assert.equal(await readBarcode({ files: [], value: "" }, environment(), loadRealReader), null);
+});
+
+test("a photo the browser cannot decode rejects and leaves the input ready", async () => {
+    const input = { files: [file("image/jpeg")], value: "x" };
+
+    await assert.rejects(readBarcode(input, environment({ decodeError: new Error("EncodingError") }), loadRealReader));
+    assert.equal(input.value, "");
+});
+
+test("the binary of the reader comes from the app itself, never from a public cdn", async () => {
+    const media = await readFile(new URL("../../web/NutriFlow.Web/wwwroot/js/media.mjs", import.meta.url), "utf8");
+
+    assert.match(media, /locateFile/);
+    assert.match(media, /zxing_reader\.wasm/);
 });
 
 test("the voice capture gets the limit of the form and the texts of the app, its events reach .NET", async () => {

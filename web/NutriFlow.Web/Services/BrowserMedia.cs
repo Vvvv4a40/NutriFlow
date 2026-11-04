@@ -22,6 +22,18 @@ public sealed class BrowserMedia(IJSRuntime js)
         }
     }
 
+    public async Task<PickedBarcode?> ReadBarcodeAsync(ElementReference input)
+    {
+        try
+        {
+            return await (await GetModuleAsync()).InvokeAsync<PickedBarcode?>("readBarcode", input);
+        }
+        catch (JSException exception)
+        {
+            throw new InvalidDataException("The browser could not read the photo of the barcode.", exception);
+        }
+    }
+
     private Task<IJSObjectReference> GetModuleAsync() =>
         _module ??= js.InvokeAsync<IJSObjectReference>("import", "./js/media.mjs").AsTask();
 }

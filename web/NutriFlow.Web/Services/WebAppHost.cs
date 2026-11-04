@@ -52,4 +52,6 @@ public sealed class WebAppHost(AppInfo info, BrowserPlatform platform, BrowserMe
     public IVoiceRecorder CreateVoiceRecorder() => media.CreateVoiceRecorder();
 
     public Task<PickedPhoto?> ReadPhotoAsync(ElementReference input) => media.ReadPhotoAsync(input);
+
+    public Task<PickedBarcode?> ReadBarcodeAsync(ElementReference input) => media.ReadBarcodeAsync(input);
 }

@@ -23,6 +23,10 @@
                     <span class="nf-label-question">@question</span>
                 }
             </Notice>
+            @if (LabelText.ValuesDisagree(label.Capture.Draft))
+            {
+                <Notice TestId="label-disagree">@LabelText.Disagree</Notice>
+            }
         }
         else
         {
@@ -99,6 +103,10 @@
     [Parameter]
     public string? InitialBarcode { get; set; }
 
+    // the estimate the user corrects; a product with exact values takes its place in the calculation
+    [Parameter]
+    public ProductResponse? Initial { get; set; }
+
     // why the form opened instead of the screen the user asked for, for example an empty catalog
     [Parameter]
     public string? Reason { get; set; }
@@ -121,6 +129,14 @@
     {
         _name = InitialName;
         _barcode = InitialBarcode;
+        if (Initial is { } initial)
+        {
+            Fill("calories", initial.Calories);
+            Fill("protein", initial.ProteinGrams);
+            Fill("fat", initial.FatGrams);
+            Fill("carbs", initial.CarbohydratesGrams);
+        }
+
         if (Label?.Capture.Draft is { } draft)
         {
             _name = draft.ProductName;

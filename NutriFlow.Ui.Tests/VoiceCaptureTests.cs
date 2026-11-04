@@ -33,8 +33,8 @@ public sealed class VoiceCaptureTests : IAsyncLifetime
         await _voice.StartAsync();
         _recorder.Begin();
         Assert.Equal(VoicePhase.Recording, _voice.Phase);
-        Assert.StartsWith("Запись: 0 с. Максимум 110 с.", VoiceText.Status(_voice));
-        Assert.Equal("Остановить", VoiceText.RecordButton(_voice));
+        Assert.Equal("Стоп · 0:00", VoiceText.Chip(_voice));
+        Assert.Equal("Стоп, идёт запись", VoiceText.ChipDescription(_voice));
 
         await _voice.StopAsync();
         await _recorder.FinishAsync(Audio);
@@ -44,7 +44,7 @@ public sealed class VoiceCaptureTests : IAsyncLifetime
         Assert.Equal("гречка 150 г", _voice.Text);
         Assert.True(_voice.Recognised);
         Assert.False(_voice.StoppedByItself);
-        Assert.Equal("Текст готов — проверьте его перед использованием.", VoiceText.Status(_voice));
+        Assert.Equal("Голос", VoiceText.Chip(_voice));
         Assert.Equal("audio/webm", _groq.ContentType);
 
         _voice.SetText("гречка 200 г");
@@ -62,7 +62,6 @@ public sealed class VoiceCaptureTests : IAsyncLifetime
         await _recorder.FinishAsync(Audio);
 
         Assert.Equal("набрано руками\nгречка 150 г", _voice.Text);
-        Assert.Equal("Продиктовать ещё", VoiceText.RecordButton(_voice));
     }
 
     [Fact]
@@ -76,7 +75,6 @@ public sealed class VoiceCaptureTests : IAsyncLifetime
 
         Assert.True(_voice.StoppedByItself);
         Assert.Equal("гречка 150 г", _voice.Text);
-        Assert.StartsWith("Запись прервалась на 0 с.", VoiceText.Status(_voice));
     }
 
     [Theory]
@@ -92,17 +90,13 @@ public sealed class VoiceCaptureTests : IAsyncLifetime
     public async Task TypedTextIsNotCalledRecognised()
     {
         _voice.SetText("набрано руками");
-        Assert.Equal("Начать запись", VoiceText.RecordButton(_voice));
-        Assert.StartsWith("Расскажите", VoiceText.Status(_voice));
+        Assert.False(_voice.Recognised);
 
         await _voice.StartAsync();
         _recorder.Begin();
         await _voice.StopAsync();
         await _recorder.FinishAsync(Audio);
-        Assert.StartsWith("Текст готов", VoiceText.Status(_voice));
-
-        _voice.SetText("");
-        Assert.StartsWith("Расскажите", VoiceText.Status(_voice));
+        Assert.True(_voice.Recognised);
     }
 
     [Fact]
@@ -144,7 +138,6 @@ public sealed class VoiceCaptureTests : IAsyncLifetime
         Assert.True(_voice.CanRetry);
         Assert.Equal("уже введено", _voice.Text);
         Assert.Equal(VoicePhase.Idle, _voice.Phase);
-        Assert.StartsWith("Запись сохранена", VoiceText.Status(_voice));
 
         _groq.Failure = null;
         await _voice.RetryAsync();

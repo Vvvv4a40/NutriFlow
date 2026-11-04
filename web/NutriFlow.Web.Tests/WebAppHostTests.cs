@@ -182,6 +182,21 @@ public sealed class WebAppHostTests : IDisposable
     }
 
     [Fact]
+    public async Task BarcodeComesFromTheModuleAndAnUnreadablePhotoIsReportedAsData()
+    {
+        WebAppHost host = Create(new BrowserPlatform(_js));
+        _js.Media.Barcode = new PickedBarcode("3017620422003");
+
+        Assert.Equal("3017620422003", (await host.ReadBarcodeAsync(default))!.Digits);
+
+        _js.Media.Barcode = null;
+        Assert.Null(await host.ReadBarcodeAsync(default));
+
+        _js.Media.PhotoFails = true;
+        await Assert.ThrowsAsync<InvalidDataException>(() => host.ReadBarcodeAsync(default));
+    }
+
+    [Fact]
     public async Task VoiceRecorderWorksThroughTheCaptureOfTheModule()
     {
         await using IVoiceRecorder recorder = Create(new BrowserPlatform(_js)).CreateVoiceRecorder();

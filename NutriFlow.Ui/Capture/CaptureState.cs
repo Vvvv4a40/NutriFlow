@@ -340,6 +340,9 @@ public sealed class CaptureState : IDisposable
             UseSession(session);
             await ClearSubmittedInputAsync(profileId);
         }
+
+        // the shell shows the title and the confirmation of the calculation
+        Changed?.Invoke();
     }
 
     // a calculation made without Groq (a catalog product, a saved dish, a dish from products) replaces the current
@@ -376,6 +379,40 @@ public sealed class CaptureState : IDisposable
         if (ProfileId == profileId)
         {
             UseSession(found);
+            Changed?.Invoke();
+        }
+    }
+
+    public Task SetDishWeightAsync(int dishIndex, decimal grams) => ChangeSessionAsync(
+        (profileId, session) => _meals.SetDishWeightAsync(profileId, session.Id, dishIndex, grams));
+
+    // without the last food there is nothing left to write down
+    public Task RemoveDishAsync(int dishIndex) => Session is { Dishes.Count: 1 }
+        ? RestartAsync()
+        : ChangeSessionAsync((profileId, session) => _meals.RemoveDishAsync(profileId, session.Id, dishIndex));
+
+    public async Task EstimateMissingAsync()
+    {
+        Guid profileId = RequireProfile();
+        GroqSettings groq = await _settings.GetGroqAsync(profileId);
+        try
+        {
+            await ChangeSessionAsync((id, session) => _meals.EstimateMissingAsync(id, session.Id, groq));
+        }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or InvalidDataException)
+        {
+            throw new InvalidOperationException(CaptureText.GroqError(exception), exception);
+        }
+    }
+
+    private async Task ChangeSessionAsync(Func<Guid, MealSessionResponse, Task<MealSessionResponse?>> change)
+    {
+        Guid profileId = RequireProfile();
+        MealSessionResponse session = Session ?? throw new InvalidOperationException(CaptureText.SessionMissing);
+        MealSessionResponse changed = await change(profileId, session) ?? throw new InvalidOperationException(CaptureText.SessionMissing);
+        if (ProfileId == profileId)
+        {
+            UseSession(changed);
             Changed?.Invoke();
         }
     }
