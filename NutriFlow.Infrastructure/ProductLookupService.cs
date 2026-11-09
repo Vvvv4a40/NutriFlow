@@ -23,8 +23,15 @@ public sealed class ProductLookupService
         string barcode,
         CancellationToken cancellationToken = default)
     {
+        return (await FindStoredByBarcodeAsync(barcode, cancellationToken))?.Product;
+    }
+
+    public async Task<StoredProduct?> FindStoredByBarcodeAsync(
+        string barcode,
+        CancellationToken cancellationToken = default)
+    {
         string normalizedBarcode = ProductBarcode.Normalize(barcode);
-        Product? localProduct = await _localCatalog.FindByBarcodeAsync(
+        StoredProduct? localProduct = await _localCatalog.FindStoredByBarcodeAsync(
             normalizedBarcode,
             cancellationToken);
 
@@ -51,7 +58,7 @@ public sealed class ProductLookupService
             externalProduct,
             cancellationToken);
 
-        return await _localCatalog.FindByBarcodeAsync(
+        return await _localCatalog.FindStoredByBarcodeAsync(
                    normalizedBarcode,
                    cancellationToken) ??
                throw new InvalidDataException("The imported product is not available in the catalogue.");

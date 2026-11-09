@@ -1,7 +1,9 @@
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.OpenApi;
 using NutriFlow.Api.Contracts;
+using NutriFlow.Api.Endpoints;
 using NutriFlow.Domain;
 
 namespace NutriFlow.Api.Configuration;
@@ -23,6 +25,19 @@ internal static class OpenApiConfiguration
                 }
             }
 
+            // every problem response carries the machine code the client chooses its text by
+            if (type == typeof(ProblemDetails) || type == typeof(HttpValidationProblemDetails))
+            {
+                schema.Properties ??= new Dictionary<string, IOpenApiSchema>();
+                schema.Properties[ApiProblems.CodeKey] = new OpenApiSchema
+                {
+                    Type = JsonSchemaType.String,
+                    Description = "Machine-readable error code, for example product_not_found."
+                };
+                schema.Required ??= new HashSet<string>();
+                schema.Required.Add(ApiProblems.CodeKey);
+            }
+
             return Task.CompletedTask;
         });
 
@@ -30,6 +45,11 @@ internal static class OpenApiConfiguration
         {
             SetEnumDefault(document, nameof(CreateMealSessionRequest), "purpose", nameof(MealSessionPurpose.Diary));
             SetEnumDefault(document, nameof(UpdateMealEntryRequest), "weightQuality", nameof(DataQuality.Exact));
+            SetEnumDefault(document, nameof(CreateManualMealRequest), "weightQuality", nameof(DataQuality.Exact));
+            SetEnumDefault(document, nameof(CreateSavedDishMealRequest), "weightQuality", nameof(DataQuality.Exact));
+            SetEnumDefault(document, nameof(CreateManualDishRequest), "finalWeightQuality", nameof(DataQuality.Exact));
+            SetEnumDefault(document, nameof(ManualIngredientRequest), "weightQuality", nameof(DataQuality.Exact));
+            SetEnumDefault(document, nameof(ManualIngredientRequest), "removedWeightQuality", nameof(DataQuality.Exact));
             return Task.CompletedTask;
         });
     }

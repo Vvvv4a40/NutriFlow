@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Infrastructure.Ai;
 
 namespace NutriFlow.Mobile.Core.Tests;
 

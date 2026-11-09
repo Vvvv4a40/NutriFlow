@@ -16,7 +16,12 @@ internal static class ResponseMapper
             dish.Product.Source.Quality.ToString());
     }
 
-    public static ProductResponse ToProductResponse(Product product)
+    public static ProductResponse ToProductResponse(StoredProduct product)
+    {
+        return ToProductResponse(product.Product, product.Id);
+    }
+
+    public static ProductResponse ToProductResponse(Product product, int? id = null)
     {
         return new ProductResponse(
             product.Name,
@@ -28,7 +33,8 @@ internal static class ResponseMapper
             product.Source.Quality.ToString(),
             product.Source.Name,
             product.Source.Reference,
-            product.Barcode);
+            product.Barcode,
+            id);
     }
 
     public static MealEntryResponse ToMealEntryResponse(StoredMealEntry storedEntry)

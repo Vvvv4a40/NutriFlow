@@ -2,11 +2,11 @@ using System.Globalization;
 using System.Net;
 using System.Text.RegularExpressions;
 
-namespace NutriFlow.Mobile.Core;
+namespace NutriFlow.Infrastructure.Ai;
 
 // groq limits a key by tokens per minute and its edge sometimes drops a request; both pass within seconds, so the user
 // should not have to repeat the action. Browsers do not expose retry-after here, the wait is read from the error text too
-internal sealed partial class GroqRetryHandler(
+public sealed partial class GroqRetryHandler(
     HttpClient inner,
     TimeSpan maximumRateLimitWait,
     Func<TimeSpan, CancellationToken, Task> delay) : HttpMessageHandler

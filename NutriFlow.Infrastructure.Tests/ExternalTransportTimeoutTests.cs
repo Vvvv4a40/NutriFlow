@@ -13,8 +13,6 @@ public sealed class ExternalTransportTimeoutTests
         yield return new object[] { nameof(GroqMealParser) };
         yield return new object[] { nameof(GroqNutritionLabelReader) };
         yield return new object[] { nameof(GroqSpeechTranscriber) };
-        yield return new object[] { nameof(OpenAiMealParser) };
-        yield return new object[] { nameof(OpenAiNutritionLabelReader) };
         yield return new object[] { nameof(OpenFoodFactsClient) };
     }
 
@@ -147,10 +145,6 @@ public sealed class ExternalTransportTimeoutTests
                 .TranscribeAsync(
                     new ValidatedAudio(new byte[] { 1 }, "audio/wav", ".wav"),
                     cancellationToken),
-            nameof(OpenAiMealParser) => new OpenAiMealParser(client, "test-model")
-                .ParseAsync(session, cancellationToken),
-            nameof(OpenAiNutritionLabelReader) => new OpenAiNutritionLabelReader(client, "test-model")
-                .ReadAsync(new byte[] { 1 }, "image/jpeg", cancellationToken),
             nameof(OpenFoodFactsClient) => new OpenFoodFactsClient(client)
                 .FindByBarcodeAsync("3017620422003", cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(provider))

@@ -63,7 +63,6 @@ internal sealed class TestApiFactory : WebApplicationFactory<Program>
             "Storage:LabelPhotosPath",
             _labelPhotoPath ?? Path.Combine(_directoryPath, "label-photos"));
         builder.UseSetting("Ai:Provider", _aiProvider);
-        builder.UseSetting("Ai:OpenAI:ApiKey", "test-key");
         builder.UseSetting("Ai:Groq:ApiKey", "test-key");
         builder.UseSetting("Ai:Groq:BaseUrl", "https://api.groq.test/openai/v1");
         builder.UseSetting("Ai:Groq:TextModel", "qwen-test");

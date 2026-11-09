@@ -45,10 +45,12 @@ public sealed class StartupConfigurationApiTests
         Assert.False(Directory.Exists(factory.DirectoryPath));
     }
 
-    [Fact]
-    public async Task UnknownProvider_FailsBeforeCreatingStorage()
+    [Theory]
+    [InlineData(UnrelatedKey)]
+    [InlineData("OpenAI")]
+    public async Task UnknownProvider_FailsBeforeCreatingStorage(string provider)
     {
-        await using StartupApiFactory factory = new("Production", UnrelatedKey);
+        await using StartupApiFactory factory = new("Production", provider);
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
             () => factory.CreateClient());
@@ -62,9 +64,6 @@ public sealed class StartupConfigurationApiTests
     [InlineData("Groq", null)]
     [InlineData("Groq", "")]
     [InlineData("Groq", " ")]
-    [InlineData("OpenAI", null)]
-    [InlineData("OpenAI", "")]
-    [InlineData("OpenAI", " ")]
     public async Task RealProviderWithoutKey_FailsBeforeCreatingStorage(string provider, string? apiKey)
     {
         await using StartupApiFactory factory = new("Production", provider, apiKey: apiKey);
@@ -114,19 +113,14 @@ public sealed class StartupConfigurationApiTests
         Assert.False(Directory.Exists(factory.DirectoryPath));
     }
 
-    [Theory]
-    [InlineData("gRoQ", "Groq", true)]
-    [InlineData("oPeNaI", "OpenAI", false)]
-    public async Task RealProviderWithKey_StartsWithoutCallingExternalServicesOrSeedingDemoData(
-        string configuredProvider,
-        string expectedProvider,
-        bool supportsSpeech)
+    [Fact]
+    public async Task RealProviderWithKey_StartsWithoutCallingExternalServicesOrSeedingDemoData()
     {
         await using StartupApiFactory factory = new(
-            "Production", configuredProvider, seedDemoData: true, apiKey: "startup-dummy-key");
+            "Production", "gRoQ", seedDemoData: true, apiKey: "startup-dummy-key");
         using HttpClient client = factory.CreateClient();
 
-        await AssertCapabilitiesAsync(client, expectedProvider, supportsAiInput: true, supportsSpeech);
+        await AssertCapabilitiesAsync(client, "Groq", supportsAiInput: true, supportsSpeech: true);
         Assert.Equal(0, await factory.CountProductsAsync());
         Assert.Equal(0, factory.ExternalRequestCount);
     }
@@ -210,14 +204,11 @@ public sealed class StartupConfigurationApiTests
                 ["Ai:Provider"] = configuration["Ai:Provider"] ?? "",
                 ["Demo:SeedData"] = configuration["Demo:SeedData"] ?? "false",
                 ["Ai:Groq:ApiKey"] = "",
-                ["Ai:OpenAI:ApiKey"] = "",
                 ["Ai:Groq:BaseUrl"] = "https://groq.test/openai/v1/",
                 ["Ai:Groq:TextModel"] = "test-text-model",
                 ["Ai:Groq:VisionModel"] = "test-vision-model",
                 ["Ai:Groq:SpeechModel"] = "test-speech-model",
-                ["Ai:Groq:SpeechLanguage"] = "ru",
-                ["Ai:OpenAI:BaseUrl"] = "https://openai.test/v1/",
-                ["Ai:OpenAI:Model"] = "test-model"
+                ["Ai:Groq:SpeechLanguage"] = "ru"
             };
 
             if (_provider is not null)
@@ -237,25 +228,13 @@ public sealed class StartupConfigurationApiTests
 
             if (_provider?.Equals("Groq", StringComparison.OrdinalIgnoreCase) == true)
             {
-                overrides["Ai:OpenAI:ApiKey"] = UnrelatedKey;
-
                 if (_apiKey is not null)
                 {
                     overrides["Ai:Groq:ApiKey"] = _apiKey;
                 }
             }
-            else if (_provider?.Equals("OpenAI", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                overrides["Ai:Groq:ApiKey"] = UnrelatedKey;
-
-                if (_apiKey is not null)
-                {
-                    overrides["Ai:OpenAI:ApiKey"] = _apiKey;
-                }
-            }
             else
             {
-                overrides["Ai:OpenAI:ApiKey"] = UnrelatedKey;
                 overrides["Ai:Groq:ApiKey"] = UnrelatedKey;
             }
 

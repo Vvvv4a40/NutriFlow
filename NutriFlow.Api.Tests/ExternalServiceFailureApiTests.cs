@@ -12,6 +12,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using NutriFlow.Api.Contracts;
+using NutriFlow.Infrastructure.Ai;
 using NutriFlow.Infrastructure.Persistence;
 
 namespace NutriFlow.Api.Tests;
@@ -28,7 +29,7 @@ public sealed class ExternalServiceFailureApiTests
 
     [Theory]
     [MemberData(nameof(FailureCases))]
-    public async Task UpstreamFailure_ReturnsSafeProblemWithoutRetryOrDataChanges(
+    public async Task UpstreamFailure_ReturnsSafeProblemAfterTheRetriesOfThePhoneWithoutDataChanges(
         string operation,
         string failure)
     {
@@ -43,9 +44,18 @@ public sealed class ExternalServiceFailureApiTests
             .WaitAsync(TimeSpan.FromSeconds(10));
         string body = await response.Content.ReadAsStringAsync();
         using JsonDocument problem = JsonDocument.Parse(body);
+        // groq calls go through the same chain as on the phone: failures are repeated twice, a limit longer than the
+        // wait of a client is not waited for, and a text request tries the reserve model before giving up
+        bool groq = operation != "barcode";
         HttpStatusCode expectedStatus = failure.EndsWith("timeout", StringComparison.Ordinal)
             ? HttpStatusCode.GatewayTimeout
-            : HttpStatusCode.BadGateway;
+            : groq && failure == "rate-limit"
+                ? HttpStatusCode.ServiceUnavailable
+                : HttpStatusCode.BadGateway;
+        int expectedCalls = !groq ? 1
+            : failure != "rate-limit" ? 3
+            : operation is "label" or "speech" ? 1
+            : 2;
 
         Assert.Equal(expectedStatus, response.StatusCode);
         Assert.Equal((int)expectedStatus, problem.RootElement.GetProperty("status").GetInt32());
@@ -53,10 +63,19 @@ public sealed class ExternalServiceFailureApiTests
         Assert.DoesNotContain(SensitiveDetail, body, StringComparison.Ordinal);
         Assert.DoesNotContain("test-key", body, StringComparison.Ordinal);
         Assert.DoesNotContain("groq.test", body, StringComparison.Ordinal);
-        Assert.Null(response.Headers.RetryAfter);
+        if (expectedStatus == HttpStatusCode.ServiceUnavailable)
+        {
+            Assert.Equal(TimeSpan.FromSeconds(60), response.Headers.RetryAfter?.Delta);
+            Assert.Equal("ai_rate_limited", problem.RootElement.GetProperty("code").GetString());
+        }
+        else
+        {
+            Assert.Null(response.Headers.RetryAfter);
+        }
+
         Assert.True(response.Headers.CacheControl?.Private);
         Assert.True(response.Headers.CacheControl?.NoStore);
-        Assert.Equal(callsBefore + 1, fixture.Transport.CallCount);
+        Assert.Equal(callsBefore + expectedCalls, fixture.Transport.CallCount);
         Assert.Equal(before, await ReadSnapshotAsync(fixture));
         Assert.Empty(Directory.EnumerateFiles(fixture.PhotoPath, "*", SearchOption.AllDirectories));
 
@@ -216,6 +235,7 @@ public sealed class ExternalServiceFailureApiTests
                 builder.ConfigureServices(services =>
                 {
                     services.AddSingleton<IHttpMessageHandlerBuilderFilter>(new TransportFilter(Transport));
+                    services.AddSingleton<GroqRetryDelay>((_, _) => Task.CompletedTask);
                     services.AddSingleton<IStartupFilter>(new CompletionFilter(Transport));
                     services.ConfigureAll<HttpClientFactoryOptions>(options =>
                         options.HttpClientActions.Add(client => client.Timeout = infiniteTimeout

@@ -120,8 +120,10 @@ public sealed class MealWorkflowApiTests
         Assert.True(capabilities.SupportsSpeechTranscription);
 
         using IServiceScope scope = factory.Services.CreateScope();
-        Assert.IsType<GroqMealParser>(
+        Assert.IsType<AutoNutritionMealParser>(
             scope.ServiceProvider.GetRequiredService<IMealParser>());
+        Assert.IsType<ReserveNutritionEstimator>(
+            scope.ServiceProvider.GetRequiredService<INutritionEstimator>());
         Assert.IsType<GroqNutritionLabelReader>(
             scope.ServiceProvider.GetRequiredService<INutritionLabelReader>());
         Assert.IsType<GroqSpeechTranscriber>(
@@ -139,28 +141,6 @@ public sealed class MealWorkflowApiTests
         Assert.Equal(
             "test-key",
             groqClient.DefaultRequestHeaders.Authorization?.Parameter);
-    }
-
-    [Fact]
-    public async Task Capabilities_WithOpenAiProvider_ReportsSpeechUnavailable()
-    {
-        await using TestApiFactory factory = new TestApiFactory(
-            aiProvider: "OpenAI");
-        using HttpClient client = factory.CreateClient();
-
-        ApplicationCapabilitiesResponse capabilities =
-            await client.GetFromJsonAsync<ApplicationCapabilitiesResponse>(
-                "/api/capabilities",
-                JsonOptions) ?? throw new InvalidDataException();
-
-        Assert.Equal("OpenAI", capabilities.AiProvider);
-        Assert.True(capabilities.SupportsFreeText);
-        Assert.True(capabilities.SupportsLabelPhotos);
-        Assert.False(capabilities.SupportsSpeechTranscription);
-
-        using IServiceScope scope = factory.Services.CreateScope();
-        Assert.IsType<UnavailableSpeechTranscriber>(
-            scope.ServiceProvider.GetRequiredService<ISpeechTranscriber>());
     }
 
     [Theory]

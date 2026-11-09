@@ -7,6 +7,8 @@ namespace NutriFlow.Api.Endpoints;
 
 internal static class ProductEndpoints
 {
+    private const int DefaultSearchLimit = 50;
+
     public static void MapProductEndpoints(this WebApplication app)
     {
         app.MapPost("/api/products/manual", CreateManualProductAsync)
@@ -38,7 +40,7 @@ internal static class ProductEndpoints
 
         app.MapGet("/api/products", FindLocalProductsAsync)
             .WithName("FindLocalProducts")
-            .WithSummary("Finds local products by an exact normalized name.")
+            .WithSummary("Finds products by an exact name, or searches names and barcodes by q.")
             .WithTags("Products")
             .Produces<List<ProductResponse>>(StatusCodes.Status200OK)
             .ProducesValidationProblem(StatusCodes.Status400BadRequest);
@@ -91,19 +93,20 @@ internal static class ProductEndpoints
                 source,
                 request.Barcode);
 
-            bool wasAdded = await catalog.AddAsync(product, cancellationToken);
+            StoredProduct? added = await catalog.AddStoredAsync(product, cancellationToken);
 
-            if (!wasAdded)
+            if (added is null)
             {
-                return Results.Problem(
-                    detail: "A matching product already exists, or this barcode has data of equal or better quality.",
-                    statusCode: StatusCodes.Status409Conflict,
-                    title: "The product already exists.");
+                return ApiProblems.Problem(
+                    StatusCodes.Status409Conflict,
+                    "product_exists",
+                    "The product already exists.",
+                    "A matching product already exists, or this barcode has data of equal or better quality.");
             }
 
             string location =
                 $"/api/products?name={Uri.EscapeDataString(product.Name)}";
-            return Results.Created(location, ResponseMapper.ToProductResponse(product));
+            return Results.Created(location, ResponseMapper.ToProductResponse(added));
         }
         catch (ArgumentException exception)
         {
@@ -151,19 +154,20 @@ internal static class ProductEndpoints
                 nutrition,
                 source,
                 request.Barcode);
-            bool wasAdded = await catalog.AddAsync(product, cancellationToken);
+            StoredProduct? added = await catalog.AddStoredAsync(product, cancellationToken);
 
-            if (!wasAdded)
+            if (added is null)
             {
-                return Results.Problem(
-                    detail: "A matching product already exists, or this barcode has data of equal or better quality.",
-                    statusCode: StatusCodes.Status409Conflict,
-                    title: "The product already exists.");
+                return ApiProblems.Problem(
+                    StatusCodes.Status409Conflict,
+                    "product_exists",
+                    "The product already exists.",
+                    "A matching product already exists, or this barcode has data of equal or better quality.");
             }
 
             string location =
                 $"/api/products?name={Uri.EscapeDataString(product.Name)}";
-            return Results.Created(location, ResponseMapper.ToProductResponse(product));
+            return Results.Created(location, ResponseMapper.ToProductResponse(added));
         }
         catch (ArgumentException exception)
         {
@@ -178,15 +182,16 @@ internal static class ProductEndpoints
     {
         try
         {
-            Product? product = await lookupService.FindByBarcodeAsync(
+            StoredProduct? product = await lookupService.FindStoredByBarcodeAsync(
                 barcode,
                 cancellationToken);
 
             return product is null
-                ? Results.Problem(
-                    detail: "The product was not found in the local catalog or Open Food Facts.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Product not found.")
+                ? ApiProblems.Problem(
+                    StatusCodes.Status404NotFound,
+                    "product_not_found",
+                    "Product not found.",
+                    "The product was not found in the local catalog or Open Food Facts.")
                 : Results.Ok(ResponseMapper.ToProductResponse(product));
         }
         catch (ArgumentException exception)
@@ -232,10 +237,12 @@ internal static class ProductEndpoints
 
         try
         {
-            Product product = await catalog.AddAliasByBarcodeAsync(
+            await catalog.AddAliasByBarcodeAsync(
                 request.Barcode!,
                 request.Alias!,
                 cancellationToken);
+            StoredProduct product = await catalog.FindStoredByBarcodeAsync(request.Barcode!, cancellationToken)
+                ?? throw new KeyNotFoundException("The product disappeared while its alias was added.");
 
             return Results.Ok(ResponseMapper.ToProductResponse(product));
         }
@@ -245,24 +252,28 @@ internal static class ProductEndpoints
         }
         catch (KeyNotFoundException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Product not found.");
+            return ApiProblems.Problem(
+                StatusCodes.Status404NotFound,
+                "product_not_found",
+                "Product not found.",
+                exception.Message);
         }
     }
 
     private static async Task<IResult> FindLocalProductsAsync(
         string? name,
+        string? q,
+        int? limit,
         LocalProductCatalog catalog,
         CancellationToken cancellationToken)
     {
         try
         {
-            IReadOnlyList<Product> products =
-                await catalog.FindByNameAsync(name!, cancellationToken);
+            IReadOnlyList<StoredProduct> products = name is not null
+                ? await catalog.FindStoredByNameAsync(name, cancellationToken)
+                : await catalog.SearchStoredAsync(q, limit ?? DefaultSearchLimit, cancellationToken);
             List<ProductResponse> response = products
-                .Select(ResponseMapper.ToProductResponse)
+                .Select(product => ResponseMapper.ToProductResponse(product))
                 .ToList();
 
             return Results.Ok(response);
@@ -275,10 +286,6 @@ internal static class ProductEndpoints
 
     private static IResult InvalidProduct(string message)
     {
-        return Results.ValidationProblem(
-            new Dictionary<string, string[]>
-            {
-                ["product"] = new[] { message }
-            });
+        return ApiProblems.Invalid("product", message);
     }
 }

@@ -1,5 +1,6 @@
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Infrastructure.Ai;
 using NutriFlow.Infrastructure.Audio;
 using NutriFlow.Infrastructure.LabelPhotos;
 
@@ -55,6 +56,7 @@ internal static class MediaEndpoints
     private static async Task<IResult> TranscribeSpeechAsync(
         IFormFile? audio,
         ISpeechTranscriber transcriber,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
         if (audio is null || audio.Length == 0 ||
@@ -105,6 +107,10 @@ internal static class MediaEndpoints
                 statusCode: StatusCodes.Status502BadGateway,
                 title: "Speech transcription failed.");
         }
+        catch (GroqRateLimitException exception)
+        {
+            return ApiProblems.AiFailure(exception, context, cancellationToken)!;
+        }
         catch (HttpRequestException)
         {
             return Results.Problem(
@@ -125,6 +131,7 @@ internal static class MediaEndpoints
         IFormFile photo,
         INutritionLabelReader labelReader,
         LabelPhotoStore photoStore,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
         if (photo.Length == 0)
@@ -190,6 +197,10 @@ internal static class MediaEndpoints
                 detail: "The AI provider returned invalid label data.",
                 statusCode: StatusCodes.Status502BadGateway,
                 title: "Label analysis failed.");
+        }
+        catch (GroqRateLimitException exception)
+        {
+            return ApiProblems.AiFailure(exception, context, cancellationToken)!;
         }
         catch (HttpRequestException)
         {

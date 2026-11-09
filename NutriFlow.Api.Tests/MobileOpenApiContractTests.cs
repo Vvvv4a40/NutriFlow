@@ -21,6 +21,12 @@ public sealed class MobileOpenApiContractTests
             "post /api/meal-sessions/{id}/messages AddMealSessionMessage",
             "post /api/meal-sessions/{id}/confirm ConfirmMealSession",
             "post /api/meal-drafts/parse ParseMealDraft",
+            "post /api/meal-sessions/manual-meal CreateManualMeal",
+            "post /api/meal-sessions/manual-dish CreateManualDish",
+            "post /api/meal-sessions/saved-dish-meal CreateSavedDishMeal",
+            "put /api/meal-sessions/{id}/dishes/{index}/weight SetMealSessionDishWeight",
+            "delete /api/meal-sessions/{id}/dishes/{index} RemoveMealSessionDish",
+            "post /api/meal-sessions/{id}/estimate-missing EstimateMissingNutrition",
             "put /api/daily-goals/{date} SetDailyGoal",
             "get /api/daily-progress/{date} GetDailyProgress",
             "get /api/meal-entries/{id} GetMealEntry",
@@ -49,10 +55,14 @@ public sealed class MobileOpenApiContractTests
         Assert.StartsWith("3.1.", document.RootElement.GetProperty("openapi").GetString());
         Assert.Equal(expectedOperations.Order(StringComparer.Ordinal), operations.Order(StringComparer.Ordinal));
         Assert.Equal(operations.Length, operations.Select(operation => operation.Split(' ')[2]).Distinct().Count());
-        JsonElement search = Assert.Single(GetOperation(document, "/api/products", "get").GetProperty("parameters").EnumerateArray());
-        Assert.Equal("name", search.GetProperty("name").GetString());
-        Assert.Equal("query", search.GetProperty("in").GetString());
-        AssertType(search.GetProperty("schema"), "string");
+        JsonElement[] search = GetOperation(document, "/api/products", "get").GetProperty("parameters")
+            .EnumerateArray().ToArray();
+        Assert.Equal(["name", "q", "limit"], search.Select(parameter => parameter.GetProperty("name").GetString()));
+        Assert.All(search, parameter => Assert.Equal("query", parameter.GetProperty("in").GetString()));
+        AssertType(search[0].GetProperty("schema"), "string");
+        AssertType(search[1].GetProperty("schema"), "string");
+        Assert.Contains("integer", search[2].GetProperty("schema").GetProperty("type").EnumerateArray()
+            .Select(type => type.GetString()));
     }
 
     [Fact]
@@ -87,6 +97,8 @@ public sealed class MobileOpenApiContractTests
     [InlineData("CreateMealSessionRequest", "purpose", "MealSessionPurpose", new[] { "Diary", "CreateDish" })]
     [InlineData("CreateLabelProductRequest", "basis", "NutritionBasis", new[] { "Unknown", "Per100Grams", "Per100Milliliters", "PerServing" })]
     [InlineData("UpdateMealEntryRequest", "weightQuality", "DataQuality", new[] { "Unknown", "Exact", "Verified", "Estimated" })]
+    [InlineData("CreateManualMealRequest", "weightQuality", "DataQuality", new[] { "Unknown", "Exact", "Verified", "Estimated" })]
+    [InlineData("ManualIngredientRequest", "removedWeightQuality", "DataQuality", new[] { "Unknown", "Exact", "Verified", "Estimated" })]
     public async Task RequestEnums_UseReferencesToNamedStringMembers(
         string requestName, string propertyName, string enumName, string[] members)
     {
@@ -167,8 +179,12 @@ public sealed class MobileOpenApiContractTests
         }
         AssertType(GetProperty(document, "ProductResponse", "sourceReference"), "string", nullable: true);
         AssertType(GetProperty(document, "ProductResponse", "barcode"), "string", nullable: true);
-        JsonElement date = Assert.Single(GetOperation(document, "/api/daily-progress/{date}", "get")
-            .GetProperty("parameters").EnumerateArray());
+        AssertType(GetProperty(document, "ProductResponse", "id"), "integer", nullable: true);
+        JsonElement[] progressParameters = GetOperation(document, "/api/daily-progress/{date}", "get")
+            .GetProperty("parameters").EnumerateArray().ToArray();
+        Assert.Equal(["date", "carryGoalOver"], progressParameters.Select(parameter => parameter.GetProperty("name").GetString()));
+        JsonElement date = progressParameters[0];
+        Assert.Equal("query", progressParameters[1].GetProperty("in").GetString());
         Assert.Equal("path", date.GetProperty("in").GetString());
         Assert.True(date.GetProperty("required").GetBoolean());
         Assert.Equal("date", date.GetProperty("schema").GetProperty("format").GetString());
@@ -206,6 +222,20 @@ public sealed class MobileOpenApiContractTests
         {
             AssertType(GetProperty(document, "NutritionLabelDraftResponse", field), "number", nullable: true);
         }
+    }
+
+    [Theory]
+    [InlineData("ProblemDetails")]
+    [InlineData("HttpValidationProblemDetails")]
+    public async Task ProblemSchemas_RequireTheMachineCode(string schemaName)
+    {
+        await using TestApiFactory factory = new(applyMigrations: false, seedDemoData: false);
+        using HttpClient client = factory.CreateClient();
+        using JsonDocument document = await ReadOpenApiAsync(factory, client);
+
+        AssertType(GetProperty(document, schemaName, "code"), "string");
+        Assert.Contains("code", GetSchema(document, schemaName).GetProperty("required").EnumerateArray()
+            .Select(field => field.GetString()));
     }
 
     private static async Task<JsonDocument> ReadOpenApiAsync(TestApiFactory factory, HttpClient client)

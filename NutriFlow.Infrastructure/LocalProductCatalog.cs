@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure.Persistence;
 
@@ -7,6 +9,10 @@ namespace NutriFlow.Infrastructure;
 
 public sealed class LocalProductCatalog
 {
+    private const int MaximumRecentHints = 100;
+    private const int MaximumMatchedHints = 50;
+    private const int MaximumHintWords = 30;
+
     private readonly NutriFlowDbContext _dbContext;
     private readonly Guid _ownerId;
 
@@ -35,16 +41,25 @@ public sealed class LocalProductCatalog
         _ownerId = ownerId;
     }
 
-    public Task<bool> AddAsync(
+    public async Task<bool> AddAsync(
+        Product product,
+        CancellationToken cancellationToken = default)
+    {
+        return await AddStoredAsync(product, cancellationToken) is not null;
+    }
+
+    // null when the same product is already there, or its barcode has data of equal or better quality
+    public async Task<StoredProduct?> AddStoredAsync(
         Product product,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(product);
 
-        return AddCoreAsync(product, _ownerId, cancellationToken);
+        int? id = await AddCoreAsync(product, _ownerId, cancellationToken);
+        return id is null ? null : await FindByIdAsync(id.Value, cancellationToken);
     }
 
-    internal Task<bool> AddSharedExternalProductAsync(
+    internal async Task<bool> AddSharedExternalProductAsync(
         Product product,
         CancellationToken cancellationToken = default)
     {
@@ -59,7 +74,7 @@ public sealed class LocalProductCatalog
                 "A shared import requires an external product with a public HTTP source.");
         }
 
-        return AddCoreAsync(product, null, cancellationToken);
+        return await AddCoreAsync(product, null, cancellationToken) is not null;
     }
 
     public async Task<Product> AddAliasByBarcodeAsync(
@@ -141,18 +156,33 @@ public sealed class LocalProductCatalog
         string normalizedName = NormalizeName(selected.Name);
         await using var transaction =
             await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-        List<ProductRecord> candidates = await _dbContext.Products
-            .AsNoTracking()
-            .Where(product => product.UserId == _ownerId ||
-                (product.UserId == null && (product.Barcode == null ||
-                    !_dbContext.Products.Any(personal => personal.UserId == _ownerId &&
-                                                        personal.Barcode == product.Barcode))))
+        List<ProductRecord> candidates = await VisibleForSelection()
             .Where(product => product.NormalizedName == normalizedName && product.Barcode == selected.Barcode)
             .OrderBy(product => product.Id)
             .ToListAsync(cancellationToken);
         ProductRecord record = candidates.FirstOrDefault(candidate =>
                 MatchesSelection(MapProduct(candidate), selected))
-            ?? throw new KeyNotFoundException("Выбранный продукт недоступен или изменился. Обновите каталог и выберите его заново.");
+            ?? throw SelectionUnavailable();
+        return await AddSelectionAliasAsync(record, transaction, cancellationToken);
+    }
+
+    public async Task<string> CreateSelectionAliasAsync(
+        int productId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var transaction =
+            await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        ProductRecord record = await VisibleForSelection()
+            .SingleOrDefaultAsync(product => product.Id == productId, cancellationToken)
+            ?? throw SelectionUnavailable();
+        return await AddSelectionAliasAsync(record, transaction, cancellationToken);
+    }
+
+    private async Task<string> AddSelectionAliasAsync(
+        ProductRecord record,
+        IDbContextTransaction transaction,
+        CancellationToken cancellationToken)
+    {
         string alias = $"selected-{Guid.NewGuid():N}";
         ProductAliasRecord addedAlias = new()
         {
@@ -180,6 +210,15 @@ public sealed class LocalProductCatalog
         string name,
         CancellationToken cancellationToken = default)
     {
+        return (await FindStoredByNameAsync(name, cancellationToken))
+            .Select(product => product.Product)
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<StoredProduct>> FindStoredByNameAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
         string normalizedName = NormalizeName(name);
 
         List<ProductRecord> records = await _dbContext.Products
@@ -199,7 +238,7 @@ public sealed class LocalProductCatalog
 
         if (sharedBarcodes.Length == 0)
         {
-            return records.Select(MapProduct).ToArray();
+            return records.Select(MapStored).ToArray();
         }
 
         Dictionary<string, ProductRecord> personalOverrides = await _dbContext.Products
@@ -217,11 +256,21 @@ public sealed class LocalProductCatalog
                 ? personal
                 : record)
             .DistinctBy(record => record.Id)
-            .Select(MapProduct)
+            .Select(MapStored)
             .ToArray();
     }
 
     public async Task<IReadOnlyList<Product>> SearchAsync(
+        string? query = null,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        return (await SearchStoredAsync(query, limit, cancellationToken))
+            .Select(product => product.Product)
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<StoredProduct>> SearchStoredAsync(
         string? query = null,
         int limit = 100,
         CancellationToken cancellationToken = default)
@@ -259,10 +308,17 @@ public sealed class LocalProductCatalog
             .Take(limit)
             .ToListAsync(cancellationToken);
 
-        return records.Select(MapProduct).ToArray();
+        return records.Select(MapStored).ToArray();
     }
 
     public async Task<Product?> FindByBarcodeAsync(
+        string barcode,
+        CancellationToken cancellationToken = default)
+    {
+        return (await FindStoredByBarcodeAsync(barcode, cancellationToken))?.Product;
+    }
+
+    public async Task<StoredProduct?> FindStoredByBarcodeAsync(
         string barcode,
         CancellationToken cancellationToken = default)
     {
@@ -271,10 +327,62 @@ public sealed class LocalProductCatalog
         ProductRecord? record = await FindVisibleBarcodeRecordAsync(
             normalizedBarcode, cancellationToken);
 
-        return record is null ? null : MapProduct(record);
+        return record is null ? null : MapStored(record);
     }
 
-    private async Task<bool> AddCoreAsync(
+    // a shared record hidden by a personal version of its barcode is not visible: the personal one replaces it
+    public async Task<StoredProduct?> FindByIdAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        ProductRecord? record = await VisibleForSelection()
+            .SingleOrDefaultAsync(product => product.Id == id, cancellationToken);
+
+        return record is null ? null : MapStored(record);
+    }
+
+    // what the model is told about the catalog: the products added last and those named like a word of the text.
+    // The whole catalog would cost tokens on every request and still miss what was just typed
+    public async Task<IReadOnlyList<string>> GetModelHintsAsync(
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        List<string> names = await _dbContext.Products
+            .AsNoTracking()
+            .Where(product => product.UserId == _ownerId)
+            .OrderByDescending(product => product.Id)
+            .Select(product => product.Name)
+            .Take(MaximumRecentHints)
+            .ToListAsync(cancellationToken);
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        names = names.Where(seen.Add).ToList();
+        int matched = 0;
+
+        foreach (string stem in HintStems(text))
+        {
+            List<string> found = await VisibleForSelection()
+                .Where(product => product.NormalizedName.Contains(stem))
+                .OrderByDescending(product => product.Id)
+                .Select(product => product.Name)
+                .Take(MaximumMatchedHints)
+                .ToListAsync(cancellationToken);
+
+            foreach (string name in found.Where(seen.Add))
+            {
+                names.Add(name);
+                if (++matched == MaximumMatchedHints)
+                {
+                    return names;
+                }
+            }
+        }
+
+        return names;
+    }
+
+    private async Task<int?> AddCoreAsync(
         Product product,
         Guid? userId,
         CancellationToken cancellationToken)
@@ -295,7 +403,9 @@ public sealed class LocalProductCatalog
             return await UpgradeBarcodeProductAsync(
                 barcodeMatch,
                 product,
-                cancellationToken);
+                cancellationToken)
+                ? barcodeMatch.Id
+                : null;
         }
 
         bool alreadyExists = await _dbContext.Products
@@ -318,7 +428,7 @@ public sealed class LocalProductCatalog
 
         if (alreadyExists)
         {
-            return false;
+            return null;
         }
 
         ProductRecord addedRecord = MapRecord(product, userId);
@@ -343,7 +453,9 @@ public sealed class LocalProductCatalog
                 return await UpgradeBarcodeProductAsync(
                     concurrentlyAdded,
                     product,
-                    cancellationToken);
+                    cancellationToken)
+                    ? concurrentlyAdded.Id
+                    : null;
             }
 
             throw;
@@ -354,7 +466,31 @@ public sealed class LocalProductCatalog
             throw;
         }
 
-        return true;
+        return addedRecord.Id;
+    }
+
+    private static KeyNotFoundException SelectionUnavailable() =>
+        new("Выбранный продукт недоступен или изменился. Обновите каталог и выберите его заново.");
+
+    private IQueryable<ProductRecord> VisibleForSelection()
+    {
+        return _dbContext.Products
+            .AsNoTracking()
+            .Where(product => product.UserId == _ownerId ||
+                (product.UserId == null && (product.Barcode == null ||
+                    !_dbContext.Products.Any(personal => personal.UserId == _ownerId &&
+                                                        personal.Barcode == product.Barcode))));
+    }
+
+    private static IEnumerable<string> HintStems(string text)
+    {
+        // a short stem finds other forms of the word: "гречки" finds "гречка", "яйца" finds "яйцо"
+        return Regex.Matches(text.Normalize(NormalizationForm.FormC), @"\p{L}+")
+            .Select(match => match.Value.ToUpperInvariant())
+            .Where(word => word.Length >= 3)
+            .Select(word => word[..Math.Max(3, Math.Min(5, word.Length - 1))])
+            .Distinct(StringComparer.Ordinal)
+            .Take(MaximumHintWords);
     }
 
     private Task<ProductRecord?> FindVisibleBarcodeRecordAsync(
@@ -491,6 +627,8 @@ public sealed class LocalProductCatalog
             throw;
         }
     }
+
+    private static StoredProduct MapStored(ProductRecord record) => new(record.Id, MapProduct(record));
 
     private static Product MapProduct(ProductRecord record)
     {

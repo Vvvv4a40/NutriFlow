@@ -1,6 +1,7 @@
 using System.Net;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Domain;
+using NutriFlow.Infrastructure.Ai;
 using NutriFlow.Mobile.Core;
 using NutriFlow.Ui.Components;
 using NutriFlow.Ui.Pages;

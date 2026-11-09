@@ -9,6 +9,8 @@
     <Compile Include="../../NutriFlow.Api/Services/MealWorkflowService.cs" Link="Workflow/MealWorkflowService.cs" />
     <Compile Include="../../NutriFlow.Api/Services/MealPreviewValidator.cs" Link="Workflow/MealPreviewValidator.cs" />
     <Compile Include="../../NutriFlow.Api/Services/MealParserResponseException.cs" Link="Workflow/MealParserResponseException.cs" />
+    <Compile Include="../../NutriFlow.Api/Services/ManualMealDrafts.cs" Link="Workflow/ManualMealDrafts.cs" />
+    <Compile Include="../../NutriFlow.Api/Services/DraftEdits.cs" Link="Workflow/DraftEdits.cs" />
     <Compile Include="../../NutriFlow.Api/Contracts/MealSessionContracts.cs" Link="Contracts/MealSessionContracts.cs" />
     <Compile Include="../../NutriFlow.Api/Contracts/DailyProgressResponse.cs" Link="Contracts/DailyProgressResponse.cs" />
     <Compile Include="../../NutriFlow.Api/Contracts/ProductResponse.cs" Link="Contracts/ProductResponse.cs" />

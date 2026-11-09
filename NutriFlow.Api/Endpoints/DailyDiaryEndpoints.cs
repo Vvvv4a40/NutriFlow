@@ -49,22 +49,21 @@ internal static class DailyDiaryEndpoints
         }
     }
 
+    // with carryGoalOver a day without its own goal shows the last goal set before it, as the web app does
     private static async Task<IResult> GetDailyProgressAsync(
         DateOnly date,
+        bool? carryGoalOver,
         MealWorkflowService workflow,
         CancellationToken cancellationToken)
     {
         return Results.Ok(await workflow.GetDailyProgressAsync(
             date,
+            carryGoalOver ?? false,
             cancellationToken));
     }
 
     private static IResult InvalidGoal(string message)
     {
-        return Results.ValidationProblem(
-            new Dictionary<string, string[]>
-            {
-                ["goal"] = new[] { message }
-            });
+        return ApiProblems.Invalid("goal", message);
     }
 }

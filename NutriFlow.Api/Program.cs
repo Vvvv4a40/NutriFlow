@@ -25,6 +25,8 @@ app.MapGet(
     .Produces<ApplicationCapabilitiesResponse>(StatusCodes.Status200OK);
 
 app.MapMealSessionEndpoints();
+app.MapManualMealEndpoints();
+app.MapMealDraftEditEndpoints();
 app.MapDailyDiaryEndpoints();
 app.MapMealEntryEndpoints();
 app.MapProductEndpoints();

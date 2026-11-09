@@ -48,7 +48,8 @@ public sealed class MealWorkflowService
         DateOnly mealDate,
         CancellationToken cancellationToken = default,
         Guid? idempotencyKey = null,
-        MealSessionPurpose purpose = MealSessionPurpose.Diary)
+        MealSessionPurpose purpose = MealSessionPurpose.Diary,
+        string? requestIdentity = null)
     {
         if (!Enum.IsDefined(purpose))
         {
@@ -70,7 +71,8 @@ public sealed class MealWorkflowService
             originalRequestHash = ComputeOriginalRequestHash(
                 validatedMessages,
                 mealDate,
-                purpose);
+                purpose,
+                requestIdentity);
             StoredMealSession? existing =
                 await _sessionStore.FindByIdempotencyKeyAsync(
                     idempotencyKey.Value,
@@ -149,14 +151,18 @@ public sealed class MealWorkflowService
         return new MealSessionCreationResult(response, Created: false);
     }
 
+    // a manual request also names what was picked: the messages carry only names, and namesakes must not share a key
     private static string ComputeOriginalRequestHash(
         IReadOnlyList<string> messages,
         DateOnly mealDate,
-        MealSessionPurpose purpose)
+        MealSessionPurpose purpose,
+        string? requestIdentity)
     {
-        object request = purpose == MealSessionPurpose.Diary
-            ? new { Messages = messages, MealDate = mealDate }
-            : (object)new { Messages = messages, MealDate = mealDate, Purpose = purpose };
+        object request = requestIdentity is not null
+            ? new { Messages = messages, MealDate = mealDate, Purpose = purpose, Request = requestIdentity }
+            : purpose == MealSessionPurpose.Diary
+                ? new { Messages = messages, MealDate = mealDate }
+                : new { Messages = messages, MealDate = mealDate, Purpose = purpose };
         byte[] requestBytes = JsonSerializer.SerializeToUtf8Bytes(
             request,
             SerializerOptions);
@@ -333,7 +339,8 @@ public sealed class MealWorkflowService
         Guid id,
         Func<MealDraft, MealDraft> change,
         Func<MealDraft, string> describe,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? expectedPreviewToken = null)
     {
         ArgumentNullException.ThrowIfNull(change);
         ArgumentNullException.ThrowIfNull(describe);
@@ -348,6 +355,14 @@ public sealed class MealWorkflowService
         {
             throw new InvalidOperationException(
                 "A confirmed meal session cannot be changed.");
+        }
+
+        // a line is chosen by its index, which means another line once the calculation has changed
+        if (expectedPreviewToken is not null &&
+            !string.Equals(existing.PreviewToken, expectedPreviewToken, StringComparison.Ordinal))
+        {
+            throw new MealSessionConflictException(
+                "The meal session changed. Review the current calculation before changing it.");
         }
 
         MealDraft draft = change(existing.Draft);
@@ -716,7 +731,7 @@ public sealed class MealWorkflowService
                     ingredient.IncludedWeightInGrams,
                     selection.Product is null
                         ? null
-                        : ResponseMapper.ToProductResponse(selection.Product),
+                        : ResponseMapper.ToProductResponse(selection.Product, selection.ProductId),
                     ingredientNutrition is null
                         ? null
                         : ResponseMapper.ToNutritionResponse(ingredientNutrition)));
@@ -887,9 +902,10 @@ public sealed class MealWorkflowService
         string productName,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<Product> matches = await _catalog.FindByNameAsync(
+        IReadOnlyList<StoredProduct> storedMatches = await _catalog.FindStoredByNameAsync(
             productName,
             cancellationToken);
+        Product[] matches = storedMatches.Select(match => match.Product).ToArray();
         StoredSavedDish? savedDish = await _savedDishStore.FindByNameAsync(productName, cancellationToken);
 
         if (savedDish is not null)
@@ -903,10 +919,10 @@ public sealed class MealWorkflowService
 
             return conflictingProduct
                 ? new ProductSelection(null, IsAmbiguous: true)
-                : new ProductSelection(savedDish.Product, IsAmbiguous: false);
+                : new ProductSelection(savedDish.Product, IsAmbiguous: false, ProductId: null);
         }
 
-        if (matches.Count == 0)
+        if (matches.Length == 0)
         {
             return new ProductSelection(null, IsAmbiguous: false);
         }
@@ -937,7 +953,8 @@ public sealed class MealWorkflowService
             .ThenBy(product => product.Source.Name, StringComparer.Ordinal)
             .First();
 
-        return new ProductSelection(selected, IsAmbiguous: false);
+        return new ProductSelection(selected, IsAmbiguous: false,
+            storedMatches[Array.IndexOf(matches, selected)].Id);
     }
 
     private static IReadOnlyList<string> ValidateMessages(
@@ -1090,7 +1107,7 @@ public sealed class MealWorkflowService
         };
     }
 
-    private sealed record ProductSelection(Product? Product, bool IsAmbiguous);
+    private sealed record ProductSelection(Product? Product, bool IsAmbiguous, int? ProductId = null);
 
     private sealed record MealPreviewDocument(
         IReadOnlyList<string> ClarificationQuestions,

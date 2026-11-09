@@ -65,7 +65,7 @@ public sealed class LocalProfileBackupTests : IDisposable
         LocalMealClient restarted = new(new LocalProfileStore(_root));
         Assert.Equal(JsonSerializer.Serialize(originalProgress), JsonSerializer.Serialize(await restarted.GetDailyProgressAsync(restored.Profile.Id, _date)));
         Assert.Equal(JsonSerializer.Serialize(originalDish), JsonSerializer.Serialize(await restarted.FindSavedDishAsync(restored.Profile.Id, saved.Id)));
-        Assert.Equal(product, Assert.Single(await restarted.SearchProductsAsync(restored.Profile.Id)));
+        Assert.Equal(product, Assert.Single(await restarted.SearchProductsAsync(restored.Profile.Id)) with { Id = null });
         MealSessionResponse restoredPending = (await restarted.FindSessionAsync(restored.Profile.Id, pending.Id))!;
         Assert.Equal(pending.PreviewToken, restoredPending.PreviewToken);
         Assert.True(restoredPending.CanConfirm);

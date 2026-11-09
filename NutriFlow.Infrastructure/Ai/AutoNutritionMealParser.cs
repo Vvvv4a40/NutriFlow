@@ -1,18 +1,17 @@
 using NutriFlow.Domain;
-using NutriFlow.Infrastructure;
 
-namespace NutriFlow.Mobile.Core;
+namespace NutriFlow.Infrastructure.Ai;
 
 // foods the profile does not know get an estimate right away and stay in its catalog, so the same food gives the same
 // numbers next time. A failed estimate is not a failed description: the food stays in the calculation without nutrition
-internal sealed class AutoNutritionMealParser(
+public sealed class AutoNutritionMealParser(
     IMealParser inner,
     LocalProductCatalog catalog,
     SavedDishStore dishes,
     INutritionEstimator estimator) : IMealParser
 {
-    internal const string SourceName = "Оценка AI";
-    internal const string SourceReference = "ai-estimate";
+    public const string SourceName = "Оценка AI";
+    public const string SourceReference = "ai-estimate";
 
     public async Task<MealDraft> ParseAsync(CaptureSession session, CancellationToken cancellationToken = default)
     {
@@ -35,7 +34,7 @@ internal sealed class AutoNutritionMealParser(
         return draft;
     }
 
-    internal static async Task AddEstimatesAsync(LocalProductCatalog catalog, SavedDishStore dishes, INutritionEstimator estimator,
+    public static async Task AddEstimatesAsync(LocalProductCatalog catalog, SavedDishStore dishes, INutritionEstimator estimator,
         MealDraft draft, CancellationToken cancellationToken)
     {
         List<string> missing = [];
@@ -63,7 +62,7 @@ internal sealed class AutoNutritionMealParser(
 }
 
 // the limits of a key are per model, so the reserve answers while the main model waits for its next minute
-internal sealed class ReserveMealParser(IMealParser main, IMealParser reserve) : IMealParser
+public sealed class ReserveMealParser(IMealParser main, IMealParser reserve) : IMealParser
 {
     public async Task<MealDraft> ParseAsync(CaptureSession session, CancellationToken cancellationToken = default)
     {
@@ -78,7 +77,7 @@ internal sealed class ReserveMealParser(IMealParser main, IMealParser reserve) :
     }
 }
 
-internal sealed class ReserveNutritionEstimator(INutritionEstimator main, INutritionEstimator reserve) : INutritionEstimator
+public sealed class ReserveNutritionEstimator(INutritionEstimator main, INutritionEstimator reserve) : INutritionEstimator
 {
     public async Task<IReadOnlyList<NutritionEstimate>> EstimateAsync(IReadOnlyList<string> foods, CancellationToken cancellationToken = default)
     {

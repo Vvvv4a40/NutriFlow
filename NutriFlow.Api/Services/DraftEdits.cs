@@ -1,6 +1,7 @@
+using System.Globalization;
 using NutriFlow.Domain;
 
-namespace NutriFlow.Mobile.Core;
+namespace NutriFlow.Api.Services;
 
 // a change of one line of the calculation made by hand, without another request to the model
 public static class DraftEdits
@@ -35,4 +36,11 @@ public static class DraftEdits
         ArgumentNullException.ThrowIfNull(draft);
         return new MealDraft(draft.Dishes.Where((_, index) => index != dishIndex).ToArray(), draft.ClarificationQuestions);
     }
+
+    // the note joins the messages, so the next parse of all messages keeps the change
+    public static string DescribeWeight(MealDraft draft, int dishIndex, decimal grams) =>
+        $"Исправлено вручную: «{draft.Dishes[dishIndex].Name}» — {grams.ToString("G29", CultureInfo.InvariantCulture)} г.";
+
+    public static string DescribeRemoval(MealDraft draft, int dishIndex) =>
+        $"Исправлено вручную: «{draft.Dishes[dishIndex].Name}» не ели, убрать.";
 }

@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Net.Http.Headers;
-using System.Text;
 using NutriFlow.Api.Contracts;
 using NutriFlow.Api.Services;
 using NutriFlow.Domain;
@@ -66,8 +64,8 @@ public sealed class LocalMealClient
     {
         return WithContextAsync<IReadOnlyList<ProductResponse>>(profileId, async context =>
         {
-            IReadOnlyList<Product> products = await new LocalProductCatalog(context, profileId)
-                .SearchAsync(query, 200, cancellationToken);
+            IReadOnlyList<StoredProduct> products = await new LocalProductCatalog(context, profileId)
+                .SearchStoredAsync(query, 200, cancellationToken);
             return products.Select(ResponseMapper.ToProductResponse).ToArray();
         }, cancellationToken);
     }
@@ -118,9 +116,9 @@ public sealed class LocalMealClient
             {
                 client.DefaultRequestHeaders.UserAgent.ParseAdd(identification);
             }
-            Product? product = await new ProductLookupService(
+            StoredProduct? product = await new ProductLookupService(
                 new LocalProductCatalog(context, profileId), new OpenFoodFactsClient(client))
-                .FindByBarcodeAsync(barcode, cancellationToken);
+                .FindStoredByBarcodeAsync(barcode, cancellationToken);
             return product is null ? null : ResponseMapper.ToProductResponse(product);
         }, cancellationToken);
     }
@@ -143,9 +141,7 @@ public sealed class LocalMealClient
         Guid profileId, string productName, decimal grams, DateOnly date,
         DataQuality quality = DataQuality.Exact, CancellationToken cancellationToken = default)
     {
-        MealDraft draft = new([new DishDraft(productName,
-            [new IngredientDraft(productName, grams, quality)], grams, quality,
-            [new PortionDraft(grams, quality)])], []);
+        MealDraft draft = ManualMealDrafts.Portion(productName, productName, grams, quality);
         return WithContextAsync(profileId, async context =>
         {
             await RequireUnambiguousNameAsync(context, profileId, productName, cancellationToken);
@@ -163,12 +159,8 @@ public sealed class LocalMealClient
         {
             string alias = await new LocalProductCatalog(context, profileId)
                 .CreateSelectionAliasAsync(product, cancellationToken);
-            MealDraft draft = new([new DishDraft(product.Name,
-                [new IngredientDraft(alias, grams, quality)], grams, quality,
-                [new PortionDraft(grams, quality)])], []);
-            MealDraft readableDraft = new([new DishDraft(product.Name,
-                [new IngredientDraft(product.Name, grams, quality)], grams, quality,
-                [new PortionDraft(grams, quality)])], []);
+            MealDraft draft = ManualMealDrafts.Portion(alias, product.Name, grams, quality);
+            MealDraft readableDraft = ManualMealDrafts.Portion(product.Name, product.Name, grams, quality);
             return await CreateDraftAsync(context, profileId, draft, date, MealSessionPurpose.Diary,
                 cancellationToken, readableDraft);
         }, cancellationToken);
@@ -178,7 +170,7 @@ public sealed class LocalMealClient
         Guid profileId, string name, IReadOnlyList<IngredientDraft> ingredients, decimal finalGrams,
         DateOnly date, DataQuality quality = DataQuality.Exact, CancellationToken cancellationToken = default)
     {
-        MealDraft draft = new([new DishDraft(name, ingredients, finalGrams, quality, [])], []);
+        MealDraft draft = ManualMealDrafts.Dish(name, ingredients, finalGrams, quality);
         return WithContextAsync(profileId, async context =>
         {
             foreach (IngredientDraft ingredient in draft.Dishes[0].Ingredients)
@@ -212,8 +204,8 @@ public sealed class LocalMealClient
                     ingredient.RemovedWeightInGrams, ingredient.RemovedWeightQuality));
             }
 
-            MealDraft draft = new([new DishDraft(name, selectedIngredients, finalGrams, quality, [])], []);
-            MealDraft readableDraft = new([new DishDraft(name, validated, finalGrams, quality, [])], []);
+            MealDraft draft = ManualMealDrafts.Dish(name, selectedIngredients, finalGrams, quality);
+            MealDraft readableDraft = ManualMealDrafts.Dish(name, validated, finalGrams, quality);
             return await CreateDraftAsync(context, profileId, draft, date, MealSessionPurpose.CreateDish,
                 cancellationToken, readableDraft);
         }, cancellationToken);
@@ -228,12 +220,8 @@ public sealed class LocalMealClient
         {
             StoredSavedDish dish = await new SavedDishStore(context, profileId).FindAsync(dishId, cancellationToken)
                 ?? throw new KeyNotFoundException("Блюдо не найдено в этом профиле.");
-            MealDraft draft = new([new DishDraft(dish.Product.Name,
-                [new IngredientDraft(dish.Product.Source.Reference!, grams, quality)], grams, quality,
-                [new PortionDraft(grams, quality)])], []);
-            MealDraft readableDraft = new([new DishDraft(dish.Product.Name,
-                [new IngredientDraft(dish.Product.Name, grams, quality)], grams, quality,
-                [new PortionDraft(grams, quality)])], []);
+            MealDraft draft = ManualMealDrafts.Portion(dish.Product.Source.Reference!, dish.Product.Name, grams, quality);
+            MealDraft readableDraft = ManualMealDrafts.Portion(dish.Product.Name, dish.Product.Name, grams, quality);
             return await CreateDraftAsync(context, profileId, draft, date, MealSessionPurpose.Diary,
                 cancellationToken, readableDraft);
         }, cancellationToken);
@@ -266,7 +254,8 @@ public sealed class LocalMealClient
                 return null;
             }
 
-            await RequireUnambiguousManualSelectionAsync(context, profileId, session, cancellationToken);
+            await ManualMealDrafts.RequireUnambiguousSelectionAsync(new LocalProductCatalog(context, profileId),
+                new SavedDishStore(context, profileId), session, cancellationToken);
             using GroqTextClients clients = CreateTextClients(settings);
             IMealParser parser = await CreateGroqParserAsync(context, profileId, clients, cancellationToken);
             return await CreateWorkflow(context, profileId, parser).AddMessageAsync(sessionId, message, cancellationToken);
@@ -279,7 +268,7 @@ public sealed class LocalMealClient
     {
         return WithWorkflowAsync(profileId, null, workflow => workflow.ChangeDraftAsync(sessionId,
             draft => DraftEdits.SetWeight(draft, dishIndex, grams),
-            draft => $"Исправлено вручную: «{draft.Dishes[dishIndex].Name}» — {grams.ToString("G29", CultureInfo.InvariantCulture)} г.",
+            draft => DraftEdits.DescribeWeight(draft, dishIndex, grams),
             cancellationToken), cancellationToken);
     }
 
@@ -288,7 +277,7 @@ public sealed class LocalMealClient
     {
         return WithWorkflowAsync(profileId, null, workflow => workflow.ChangeDraftAsync(sessionId,
             draft => DraftEdits.Remove(draft, dishIndex),
-            draft => $"Исправлено вручную: «{draft.Dishes[dishIndex].Name}» не ели, убрать.",
+            draft => DraftEdits.DescribeRemoval(draft, dishIndex),
             cancellationToken), cancellationToken);
     }
 
@@ -386,55 +375,9 @@ public sealed class LocalMealClient
         MealSessionPurpose purpose, CancellationToken cancellationToken, MealDraft? readableDraft = null)
     {
         MealSessionCreationResult result = await CreateWorkflow(context, profileId, new FixedMealParser(draft)).CreateAsync(
-            DescribeManualDraft(readableDraft ?? draft, purpose), date, cancellationToken, Guid.NewGuid(), purpose);
+            ManualMealDrafts.Describe(readableDraft ?? draft, purpose), date, cancellationToken, Guid.NewGuid(), purpose);
         return result.Session;
     }
-
-    private static IReadOnlyList<string> DescribeManualDraft(MealDraft draft, MealSessionPurpose purpose)
-    {
-        List<string> lines = [purpose == MealSessionPurpose.CreateDish
-            ? "Ручной ввод: создать сохранённое блюдо (CreateDish)."
-            : "Ручной ввод: записать съеденную порцию в дневник (Diary)."];
-        foreach (DishDraft dish in draft.Dishes)
-        {
-            lines.Add($"Блюдо: «{dish.Name}».");
-            foreach (IngredientDraft ingredient in dish.Ingredients)
-            {
-                lines.Add($"Ингредиент «{ingredient.ProductName}»: исходный вес {DescribeWeight(ingredient.WeightInGrams, ingredient.WeightQuality)}; " +
-                    $"убрано {DescribeWeight(ingredient.RemovedWeightInGrams, ingredient.RemovedWeightQuality)}.");
-            }
-
-            lines.Add($"Готовый вес блюда: {DescribeWeight(dish.FinalWeightInGrams, dish.FinalWeightQuality)}.");
-            foreach (PortionDraft portion in dish.Portions)
-            {
-                lines.Add(portion.WeightInGrams is not null
-                    ? $"Съеденная порция: {DescribeWeight(portion.WeightInGrams, portion.WeightQuality)}."
-                    : $"Съеденная доля блюда: {portion.FractionOfDish!.Value.ToString("G29", CultureInfo.InvariantCulture)} ({DescribeQuality(portion.WeightQuality)}).");
-            }
-        }
-
-        List<string> messages = [];
-        StringBuilder message = new();
-        foreach (string line in lines)
-        {
-            if (message.Length + line.Length + Environment.NewLine.Length > 4000)
-            {
-                messages.Add(message.ToString().TrimEnd());
-                message.Clear();
-            }
-
-            message.AppendLine(line);
-        }
-
-        messages.Add(message.ToString().TrimEnd());
-        return messages;
-    }
-
-    private static string DescribeWeight(decimal? grams, DataQuality quality) => grams is null
-        ? "не указан"
-        : $"{grams.Value.ToString("G29", CultureInfo.InvariantCulture)} г ({DescribeQuality(quality)})";
-
-    private static string DescribeQuality(DataQuality quality) => quality == DataQuality.Estimated ? "примерно" : "точно";
 
     private static async Task RequireUnambiguousNameAsync(
         NutriFlowDbContext context, Guid profileId, string name, CancellationToken cancellationToken)
@@ -444,45 +387,6 @@ public sealed class LocalMealClient
             throw new ArgumentException("Найдено несколько продуктов с таким названием. Выберите конкретный продукт из каталога.", nameof(name));
         }
     }
-
-    private static async Task RequireUnambiguousManualSelectionAsync(
-        NutriFlowDbContext context, Guid profileId, StoredMealSession session, CancellationToken cancellationToken)
-    {
-        LocalProductCatalog catalog = new(context, profileId);
-        SavedDishStore dishes = new(context, profileId);
-        foreach (IngredientDraft ingredient in session.Draft.Dishes.SelectMany(dish => dish.Ingredients))
-        {
-            string handle = ingredient.ProductName;
-            bool productSelection = handle.StartsWith("selected-", StringComparison.Ordinal) &&
-                                    Guid.TryParseExact(handle[9..], "N", out _);
-            bool dishSelection = handle.StartsWith("saved-dish:", StringComparison.Ordinal) &&
-                                 Guid.TryParseExact(handle[11..], "N", out _);
-            if (!productSelection && !dishSelection)
-            {
-                continue;
-            }
-
-            StoredSavedDish? selectedDish = dishSelection ? await dishes.FindByNameAsync(handle, cancellationToken) : null;
-            Product? selectedProduct = productSelection
-                ? (await catalog.FindByNameAsync(handle, cancellationToken)).SingleOrDefault()
-                : selectedDish?.Product;
-            if (selectedProduct is null)
-            {
-                throw AmbiguousManualSelection();
-            }
-
-            IReadOnlyList<Product> products = await catalog.FindByNameAsync(selectedProduct.Name, cancellationToken);
-            StoredSavedDish? namesakeDish = await dishes.FindByNameAsync(selectedProduct.Name, cancellationToken);
-            if (products.Count > 1 || (products.Count != 0 && namesakeDish is not null) ||
-                (dishSelection && namesakeDish?.Id != selectedDish?.Id))
-            {
-                throw AmbiguousManualSelection();
-            }
-        }
-    }
-
-    private static InvalidOperationException AmbiguousManualSelection() =>
-        new("У этого названия несколько вариантов. Создайте новый ручной черновик и выберите нужный продукт.");
 
     private Task<T> WithWorkflowAsync<T>(Guid profileId, IMealParser? parser,
         Func<MealWorkflowService, Task<T>> operation, CancellationToken cancellationToken)
@@ -530,10 +434,8 @@ public sealed class LocalMealClient
 
     private GroqTextClients CreateTextClients(GroqSettings settings)
     {
-        string reserve = settings.TextModel == GroqSettings.ReserveTextModel ? GroqSettings.DefaultTextModel : GroqSettings.ReserveTextModel;
-        // the main model does not wait for its limit: the reserve answers at once, and only that one is worth waiting for
         return new GroqTextClients(CreateGroqClient(settings, TimeSpan.Zero), settings.TextModel,
-            CreateGroqClient(settings, RateLimitWait), reserve);
+            CreateGroqClient(settings, RateLimitWait), GroqModels.ReserveFor(settings.TextModel));
     }
 
     private HttpClient CreateGroqClient(GroqSettings settings) => CreateGroqClient(settings, RateLimitWait);
@@ -561,11 +463,11 @@ public sealed class LocalMealClient
 
     private sealed class GroqTextClients(HttpClient main, string mainModel, HttpClient reserve, string reserveModel) : IDisposable
     {
-        public INutritionEstimator Estimator { get; } = new ReserveNutritionEstimator(
-            new GroqNutritionEstimator(main, mainModel), new GroqNutritionEstimator(reserve, reserveModel));
+        private readonly GroqTextChain _chain = new(main, mainModel, reserve, reserveModel);
 
-        public IMealParser CreateParser(IReadOnlyList<string> knownProducts) => new ReserveMealParser(
-            new GroqMealParser(main, mainModel, knownProducts), new GroqMealParser(reserve, reserveModel, knownProducts));
+        public INutritionEstimator Estimator => _chain.CreateEstimator();
+
+        public IMealParser CreateParser(IReadOnlyList<string> knownProducts) => _chain.CreateParser(knownProducts);
 
         public void Dispose()
         {
@@ -596,15 +498,6 @@ public sealed class LocalMealClient
         if (result.Kind == MealEntryChangeKind.RevisionConflict)
         {
             throw new InvalidOperationException("Запись уже изменилась. Обнови дневник и повтори действие.");
-        }
-    }
-
-    private sealed class FixedMealParser(MealDraft? draft) : IMealParser
-    {
-        public Task<MealDraft> ParseAsync(CaptureSession session, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(draft ?? throw new InvalidOperationException("Для разбора текста нужен Groq-ключ."));
         }
     }
 }

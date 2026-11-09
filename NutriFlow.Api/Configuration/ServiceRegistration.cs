@@ -4,6 +4,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using NutriFlow.Api.Endpoints;
 using NutriFlow.Api.Services;
 using NutriFlow.Domain;
 using NutriFlow.Infrastructure;
@@ -21,7 +22,11 @@ internal static class ServiceRegistration
     {
         string aiProvider = ConfigureAiProvider(builder);
         builder.Services.AddOpenApi(OpenApiConfiguration.Configure);
-        builder.Services.AddProblemDetails();
+        builder.Services.AddProblemDetails(options =>
+            options.CustomizeProblemDetails = context =>
+                context.ProblemDetails.Extensions.TryAdd(
+                    ApiProblems.CodeKey,
+                    ApiProblems.DefaultCode(context.ProblemDetails.Status ?? context.HttpContext.Response.StatusCode)));
         builder.Services.AddHealthChecks()
             .AddCheck<DatabaseHealthCheck>(
                 "sqlite",
@@ -97,6 +102,8 @@ internal static class ServiceRegistration
         builder.Services.AddScoped<DailyDiaryStore>();
         builder.Services.AddScoped<SavedDishStore>();
         builder.Services.AddScoped<MealWorkflowService>();
+        builder.Services.AddScoped<ManualMealService>();
+        builder.Services.AddScoped<MealDraftEditService>();
         builder.Services.Configure<FormOptions>(options =>
         {
             options.MultipartBodyLengthLimit =
@@ -143,141 +150,97 @@ internal static class ServiceRegistration
         if (string.IsNullOrWhiteSpace(configuredAiProvider))
         {
             throw new InvalidOperationException(
-                "Ai:Provider must be configured. Use 'Fake', 'OpenAI', or 'Groq'.");
+                "Ai:Provider must be configured. Use 'Fake' or 'Groq'.");
         }
-
-        string aiProvider;
 
         if (configuredAiProvider.Equals("Fake", StringComparison.OrdinalIgnoreCase))
         {
-            aiProvider = "Fake";
             builder.Services.AddSingleton<IMealParser, FakeMealParser>();
+            builder.Services.AddSingleton<INutritionEstimator,
+                UnavailableNutritionEstimator>();
             builder.Services.AddSingleton<INutritionLabelReader,
                 UnavailableNutritionLabelReader>();
             builder.Services.AddSingleton<ISpeechTranscriber,
                 UnavailableSpeechTranscriber>();
+            return "Fake";
         }
-        else if (configuredAiProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
+
+        if (configuredAiProvider.Equals("Groq", StringComparison.OrdinalIgnoreCase))
         {
-            aiProvider = "OpenAI";
-            builder.Services.AddSingleton<ISpeechTranscriber,
-                UnavailableSpeechTranscriber>();
-            string? apiKey = builder.Configuration["Ai:OpenAI:ApiKey"];
-
-            if (string.IsNullOrWhiteSpace(apiKey))
-            {
-                throw new InvalidOperationException(
-                    "Ai:OpenAI:ApiKey must be configured when the OpenAI provider is enabled.");
-            }
-
-            string openAiBaseUrl =
-                builder.Configuration["Ai:OpenAI:BaseUrl"] ??
-                "https://api.openai.com/v1/";
-            string openAiModel =
-                builder.Configuration["Ai:OpenAI:Model"] ??
-                "gpt-5.4-mini";
-
-            builder.Services.AddHttpClient(
-                "OpenAI",
-                client =>
-                {
-                    client.BaseAddress = new Uri(openAiBaseUrl, UriKind.Absolute);
-                    client.Timeout = TimeSpan.FromSeconds(45);
-                    client.DefaultRequestHeaders.Authorization =
-                        new AuthenticationHeaderValue("Bearer", apiKey);
-                });
-            builder.Services.AddScoped<IMealParser>(serviceProvider =>
-            {
-                IHttpClientFactory httpClientFactory =
-                    serviceProvider.GetRequiredService<IHttpClientFactory>();
-
-                return new OpenAiMealParser(
-                    httpClientFactory.CreateClient("OpenAI"),
-                    openAiModel);
-            });
-            builder.Services.AddScoped<INutritionLabelReader>(serviceProvider =>
-            {
-                IHttpClientFactory httpClientFactory =
-                    serviceProvider.GetRequiredService<IHttpClientFactory>();
-
-                return new OpenAiNutritionLabelReader(
-                    httpClientFactory.CreateClient("OpenAI"),
-                    openAiModel);
-            });
+            ConfigureGroq(builder);
+            return "Groq";
         }
-        else if (configuredAiProvider.Equals("Groq", StringComparison.OrdinalIgnoreCase))
-        {
-            aiProvider = "Groq";
-            string? apiKey = builder.Configuration["Ai:Groq:ApiKey"];
 
-            if (string.IsNullOrWhiteSpace(apiKey))
-            {
-                throw new InvalidOperationException(
-                    "Ai:Groq:ApiKey must be configured when the Groq provider is enabled.");
-            }
+        throw new InvalidOperationException(
+            "Unsupported AI provider. Use 'Fake' or 'Groq'.");
+    }
 
-            string groqBaseUrl =
-                builder.Configuration["Ai:Groq:BaseUrl"] ??
-                "https://api.groq.com/openai/v1/";
-            Uri groqBaseAddress = new Uri(
-                $"{groqBaseUrl.TrimEnd('/')}/",
-                UriKind.Absolute);
-            string groqTextModel =
-                builder.Configuration["Ai:Groq:TextModel"] ??
-                "qwen/qwen3.8-27b";
-            string groqVisionModel =
-                builder.Configuration["Ai:Groq:VisionModel"] ??
-                "qwen/qwen3.8-27b";
-            string groqSpeechModel =
-                builder.Configuration["Ai:Groq:SpeechModel"] ??
-                "whisper-large-v3-turbo";
-            string? groqSpeechLanguage =
-                builder.Configuration["Ai:Groq:SpeechLanguage"];
+    // the same chain as on the phone: the main text model gives way to the reserve one on a 429, failures are repeated,
+    // and a food the catalog does not know gets an estimate that stays in the catalog
+    private static void ConfigureGroq(WebApplicationBuilder builder)
+    {
+        string? apiKey = builder.Configuration["Ai:Groq:ApiKey"];
 
-            builder.Services.AddHttpClient(
-                "Groq",
-                client =>
-                {
-                    client.BaseAddress = groqBaseAddress;
-                    client.Timeout = TimeSpan.FromSeconds(45);
-                    client.DefaultRequestHeaders.Authorization =
-                        new AuthenticationHeaderValue("Bearer", apiKey);
-                });
-            builder.Services.AddScoped<IMealParser>(serviceProvider =>
-            {
-                IHttpClientFactory httpClientFactory =
-                    serviceProvider.GetRequiredService<IHttpClientFactory>();
-
-                return new GroqMealParser(
-                    httpClientFactory.CreateClient("Groq"),
-                    groqTextModel);
-            });
-            builder.Services.AddScoped<INutritionLabelReader>(serviceProvider =>
-            {
-                IHttpClientFactory httpClientFactory =
-                    serviceProvider.GetRequiredService<IHttpClientFactory>();
-
-                return new GroqNutritionLabelReader(
-                    httpClientFactory.CreateClient("Groq"),
-                    groqVisionModel);
-            });
-            builder.Services.AddScoped<ISpeechTranscriber>(serviceProvider =>
-            {
-                IHttpClientFactory httpClientFactory =
-                    serviceProvider.GetRequiredService<IHttpClientFactory>();
-
-                return new GroqSpeechTranscriber(
-                    httpClientFactory.CreateClient("Groq"),
-                    groqSpeechModel,
-                    groqSpeechLanguage);
-            });
-        }
-        else
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new InvalidOperationException(
-                "Unsupported AI provider. Use 'Fake', 'OpenAI', or 'Groq'.");
+                "Ai:Groq:ApiKey must be configured when the Groq provider is enabled.");
         }
 
-        return aiProvider;
+        string groqBaseUrl =
+            builder.Configuration["Ai:Groq:BaseUrl"] ??
+            "https://api.groq.com/openai/v1/";
+        Uri groqBaseAddress = new Uri(
+            $"{groqBaseUrl.TrimEnd('/')}/",
+            UriKind.Absolute);
+        string textModel =
+            builder.Configuration["Ai:Groq:TextModel"] ?? GroqModels.DefaultText;
+        string reserveTextModel =
+            builder.Configuration["Ai:Groq:ReserveTextModel"] ?? GroqModels.ReserveFor(textModel);
+        string visionModel =
+            builder.Configuration["Ai:Groq:VisionModel"] ?? GroqModels.Vision;
+        string speechModel =
+            builder.Configuration["Ai:Groq:SpeechModel"] ?? GroqModels.Speech;
+        string? speechLanguage =
+            builder.Configuration["Ai:Groq:SpeechLanguage"];
+
+        builder.Services.AddHttpClient(
+            GroqClients.TransportName,
+            client =>
+            {
+                client.BaseAddress = groqBaseAddress;
+                client.Timeout = TimeSpan.FromSeconds(45);
+                client.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", apiKey);
+            });
+        builder.Services.AddScoped(serviceProvider => new GroqClients(
+            serviceProvider.GetRequiredService<IHttpClientFactory>(),
+            groqBaseAddress,
+            serviceProvider.GetService<GroqRetryDelay>()));
+        builder.Services.AddScoped(serviceProvider =>
+        {
+            GroqClients clients = serviceProvider.GetRequiredService<GroqClients>();
+            return new GroqTextChain(clients.Immediate, textModel, clients.Waiting, reserveTextModel);
+        });
+        builder.Services.AddScoped(serviceProvider =>
+            serviceProvider.GetRequiredService<GroqTextChain>().CreateEstimator());
+        builder.Services.AddScoped<IMealParser>(serviceProvider =>
+        {
+            LocalProductCatalog catalog = serviceProvider.GetRequiredService<LocalProductCatalog>();
+            return new AutoNutritionMealParser(
+                new CatalogAwareMealParser(serviceProvider.GetRequiredService<GroqTextChain>(), catalog),
+                catalog,
+                serviceProvider.GetRequiredService<SavedDishStore>(),
+                serviceProvider.GetRequiredService<INutritionEstimator>());
+        });
+        builder.Services.AddScoped<INutritionLabelReader>(serviceProvider =>
+            new GroqNutritionLabelReader(
+                serviceProvider.GetRequiredService<GroqClients>().Waiting,
+                visionModel));
+        builder.Services.AddScoped<ISpeechTranscriber>(serviceProvider =>
+            new GroqSpeechTranscriber(
+                serviceProvider.GetRequiredService<GroqClients>().Waiting,
+                speechModel,
+                speechLanguage));
     }
 }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using NutriFlow.Api.Contracts;
+using NutriFlow.Api.Services;
 using NutriFlow.Domain;
 
 namespace NutriFlow.Mobile.Core.Tests;
@@ -191,7 +192,7 @@ public sealed class LocalMobileTests : IDisposable
         Assert.Equal(new NutritionResponse(75m, 0m, 0m, 18.75m), preview.NutritionPer100Grams);
         Assert.Equal("Estimated", preview.TotalNutritionQuality);
         Assert.Equal("Estimated", preview.NutritionPer100GramsQuality);
-        Assert.Equal(new[] { exact, estimated }, preview.Ingredients.Select(ingredient => ingredient.ResolvedProduct));
+        Assert.Equal(new[] { exact, estimated }, preview.Ingredients.Select(ingredient => ingredient.ResolvedProduct! with { Id = null }));
         Assert.Equal(new decimal?[] { 300m, 100m }, preview.Ingredients.Select(ingredient => ingredient.WeightInGrams));
         Assert.Equal(new decimal?[] { 100m, 0m }, preview.Ingredients.Select(ingredient => ingredient.RemovedWeightInGrams));
         Assert.Equal(new decimal?[] { 200m, 100m }, preview.Ingredients.Select(ingredient => ingredient.IncludedWeightInGrams));
@@ -252,7 +253,7 @@ public sealed class LocalMobileTests : IDisposable
         Assert.Equal("Estimated", entry.Quality);
         Assert.Equal(new NutritionResponse(150m, 0m, 0m, 37.5m), entry.Nutrition);
         Assert.Equal(entry.Nutrition, progress.Consumed);
-        ProductResponse[] products = (await afterEating.SearchProductsAsync(profile.Id)).ToArray();
+        ProductResponse[] products = (await afterEating.SearchProductsAsync(profile.Id)).Select(product => product with { Id = null }).ToArray();
         Assert.Equal(2, products.Length);
         Assert.Contains(exact, products);
         Assert.Contains(estimated, products);
@@ -303,7 +304,7 @@ public sealed class LocalMobileTests : IDisposable
         DailyProgressResponse empty = await afterDeletion.GetDailyProgressAsync(profile.Id, _date);
         Assert.Empty(empty.Entries);
         Assert.Equal(new NutritionResponse(0m, 0m, 0m, 0m), empty.Consumed);
-        Assert.Equal(product, Assert.Single(await afterDeletion.SearchProductsAsync(profile.Id)));
+        Assert.Equal(product, Assert.Single(await afterDeletion.SearchProductsAsync(profile.Id)) with { Id = null });
     }
 
     [Fact]
@@ -321,7 +322,7 @@ public sealed class LocalMobileTests : IDisposable
         Assert.Equal(400m, saved.FinalWeightInGrams);
         Assert.Equal(new NutritionResponse(50m, 0m, 0m, 12.5m), saved.NutritionPer100Grams);
         IngredientPreviewResponse ingredient = Assert.Single(before.Dish.Ingredients);
-        Assert.Equal(product, ingredient.ResolvedProduct);
+        Assert.Equal(product, ingredient.ResolvedProduct! with { Id = null });
         Assert.Equal(300m, ingredient.WeightInGrams);
         Assert.Equal(100m, ingredient.RemovedWeightInGrams);
         Assert.Equal(200m, ingredient.IncludedWeightInGrams);
@@ -350,7 +351,7 @@ public sealed class LocalMobileTests : IDisposable
         Assert.Empty(empty.Entries);
         Assert.Equal(new NutritionResponse(0m, 0m, 0m, 0m), empty.Consumed);
         Assert.Equal(saved, Assert.Single(await afterDeletion.GetSavedDishesAsync(profile.Id)));
-        Assert.Equal(product, Assert.Single(await afterDeletion.SearchProductsAsync(profile.Id)));
+        Assert.Equal(product, Assert.Single(await afterDeletion.SearchProductsAsync(profile.Id)) with { Id = null });
         SavedDishDetailResponse afterDelete = (await afterDeletion.FindSavedDishAsync(profile.Id, saved.Id))!;
 
         foreach (SavedDishDetailResponse snapshot in new[] { afterEdit, afterDelete })
@@ -623,7 +624,7 @@ public sealed class LocalMobileTests : IDisposable
         await client.AddProductAsync(profile.Id, selected);
         MealSessionResponse before = await client.CreateManualMealAsync(profile.Id, selected, 100m, _date);
 
-        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        InvalidOperationException error = await Assert.ThrowsAsync<ManualSelectionAmbiguousException>(() =>
             client.AddMessageAsync(profile.Id, before.Id, "Съел 150 г", new GroqSettings("synthetic-test-key")));
 
         Assert.Contains("несколько вариантов", error.Message);
@@ -654,7 +655,7 @@ public sealed class LocalMobileTests : IDisposable
         await client.AddProductAsync(profile.Id, Product("Рагу", 800m));
         MealSessionResponse before = await client.CreateSavedDishMealAsync(profile.Id, saved.Id, 100m, _date);
 
-        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        InvalidOperationException error = await Assert.ThrowsAsync<ManualSelectionAmbiguousException>(() =>
             client.AddMessageAsync(profile.Id, before.Id, "Съел 150 г", new GroqSettings("synthetic-test-key")));
 
         Assert.Contains("несколько вариантов", error.Message);

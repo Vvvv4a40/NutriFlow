@@ -1,6 +1,4 @@
-using NutriFlow.Domain;
-
-namespace NutriFlow.Mobile.Core;
+namespace NutriFlow.Domain;
 
 // what a diary meal does not need to ask: a dish without a final weight weighs what went into it and a dish without a
 // portion was eaten whole. The whole dish holds all of its calories whatever the cooked weight, so the entry stays right

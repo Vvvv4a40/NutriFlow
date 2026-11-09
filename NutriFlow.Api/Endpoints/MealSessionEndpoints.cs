@@ -23,6 +23,7 @@ internal static class MealSessionEndpoints
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status504GatewayTimeout)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
@@ -45,6 +46,7 @@ internal static class MealSessionEndpoints
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status504GatewayTimeout)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
@@ -77,6 +79,7 @@ internal static class MealSessionEndpoints
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status502BadGateway)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status504GatewayTimeout)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
@@ -93,33 +96,14 @@ internal static class MealSessionEndpoints
             return InvalidMessages("A meal session request is required.");
         }
 
-        Guid? idempotencyKey = null;
-
-        if (context.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+        if (ApiProblems.ReadIdempotencyKey(context, out Guid? idempotencyKey) is { } keyError)
         {
-            if (values.Count != 1 ||
-                !Guid.TryParseExact(idempotencyKeyHeader, "D", out Guid parsedKey) ||
-                parsedKey == Guid.Empty)
-            {
-                return Results.ValidationProblem(
-                    new Dictionary<string, string[]>
-                    {
-                        ["Idempotency-Key"] =
-                        ["The idempotency key must be one non-empty UUID in the standard format."]
-                    });
-            }
+            return keyError;
+        }
 
-            idempotencyKey = parsedKey;
-
-            if (request.MealDate is null)
-            {
-                return Results.ValidationProblem(
-                    new Dictionary<string, string[]>
-                    {
-                        ["mealDate"] =
-                        ["An explicit meal date is required with an idempotency key."]
-                    });
-            }
+        if (idempotencyKey is not null && request.MealDate is null)
+        {
+            return ApiProblems.Invalid("mealDate", "An explicit meal date is required with an idempotency key.");
         }
 
         try
@@ -146,29 +130,15 @@ internal static class MealSessionEndpoints
         }
         catch (MealSessionConflictException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status409Conflict,
-                title: "The idempotency key conflicts with an existing request.");
+            return IdempotencyConflict(exception);
         }
         catch (NotSupportedException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                title: "The input sequence is not supported.");
+            return InputNotSupported(exception);
         }
-        catch (MealParserResponseException)
+        catch (Exception exception) when (ApiProblems.AiFailure(exception, context, cancellationToken) is { } failure)
         {
-            return MealParserFailure();
-        }
-        catch (HttpRequestException)
-        {
-            return MealParserUnavailable();
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return MealParserTimeout();
+            return failure;
         }
     }
 
@@ -182,7 +152,7 @@ internal static class MealSessionEndpoints
             cancellationToken);
 
         return response is null
-            ? MealSessionNotFound(id)
+            ? ApiProblems.MealSessionNotFound(id)
             : Results.Ok(response);
     }
 
@@ -192,6 +162,7 @@ internal static class MealSessionEndpoints
         [FromHeader(Name = "Idempotency-Key")] string? idempotencyKeyHeader,
         HttpContext context,
         MealWorkflowService workflow,
+        ManualMealService manualMeals,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -199,27 +170,14 @@ internal static class MealSessionEndpoints
             return InvalidMessages("A message request is required.");
         }
 
-        Guid? idempotencyKey = null;
-
-        if (context.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+        if (ApiProblems.ReadIdempotencyKey(context, out Guid? idempotencyKey) is { } keyError)
         {
-            if (values.Count != 1 ||
-                !Guid.TryParseExact(idempotencyKeyHeader, "D", out Guid parsedKey) ||
-                parsedKey == Guid.Empty)
-            {
-                return Results.ValidationProblem(
-                    new Dictionary<string, string[]>
-                    {
-                        ["Idempotency-Key"] =
-                        ["The idempotency key must be one non-empty UUID in the standard format."]
-                    });
-            }
-
-            idempotencyKey = parsedKey;
+            return keyError;
         }
 
         try
         {
+            await manualMeals.RequireUnambiguousSelectionAsync(id, cancellationToken);
             MealSessionResponse? response = await workflow.AddMessageAsync(
                 id,
                 request.Message,
@@ -227,38 +185,40 @@ internal static class MealSessionEndpoints
                 idempotencyKey);
 
             return response is null
-                ? MealSessionNotFound(id)
+                ? ApiProblems.MealSessionNotFound(id)
                 : Results.Ok(response);
         }
         catch (ArgumentException exception)
         {
             return InvalidMessages(exception.Message);
         }
+        catch (ManualSelectionAmbiguousException exception)
+        {
+            return ApiProblems.Problem(
+                StatusCodes.Status409Conflict,
+                "product_selection_ambiguous",
+                "The chosen product can no longer be told apart by name.",
+                exception.Message);
+        }
+        catch (MealSessionConflictException exception)
+        {
+            return IdempotencyConflict(exception);
+        }
         catch (InvalidOperationException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status409Conflict,
-                title: "The meal session cannot be changed.");
+            return ApiProblems.Problem(
+                StatusCodes.Status409Conflict,
+                "meal_session_confirmed",
+                "The meal session cannot be changed.",
+                exception.Message);
         }
         catch (NotSupportedException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                title: "The input sequence is not supported.");
+            return InputNotSupported(exception);
         }
-        catch (MealParserResponseException)
+        catch (Exception exception) when (ApiProblems.AiFailure(exception, context, cancellationToken) is { } failure)
         {
-            return MealParserFailure();
-        }
-        catch (HttpRequestException)
-        {
-            return MealParserUnavailable();
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return MealParserTimeout();
+            return failure;
         }
     }
 
@@ -270,14 +230,7 @@ internal static class MealSessionEndpoints
     {
         if (request is null || string.IsNullOrWhiteSpace(request.PreviewToken))
         {
-            return Results.ValidationProblem(
-                new Dictionary<string, string[]>
-                {
-                    ["previewToken"] = new[]
-                    {
-                        "The preview token returned by the server is required."
-                    }
-                });
+            return ApiProblems.Invalid("previewToken", "The preview token returned by the server is required.");
         }
 
         MealConfirmationOutcome? outcome;
@@ -288,15 +241,16 @@ internal static class MealSessionEndpoints
         }
         catch (MealSessionConflictException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status409Conflict,
-                title: "The saved dish conflicts with an existing name.");
+            return ApiProblems.Problem(
+                StatusCodes.Status409Conflict,
+                "saved_dish_name_conflict",
+                "The saved dish conflicts with an existing name.",
+                exception.Message);
         }
 
         if (outcome is null)
         {
-            return MealSessionNotFound(id);
+            return ApiProblems.MealSessionNotFound(id);
         }
 
         string? message = outcome.Kind switch
@@ -323,6 +277,7 @@ internal static class MealSessionEndpoints
     private static async Task<IResult> ParseMealDraftAsync(
         ParseMealDraftRequest? request,
         IMealParser parser,
+        HttpContext context,
         CancellationToken cancellationToken)
     {
         if (request is null ||
@@ -375,73 +330,39 @@ internal static class MealSessionEndpoints
         }
         catch (NotSupportedException exception)
         {
-            return Results.Problem(
-                detail: exception.Message,
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                title: "The input sequence is not supported.");
+            return InputNotSupported(exception);
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException exception)
         {
-            return Results.Problem(
-                detail: "The AI provider returned an invalid structured meal draft.",
-                statusCode: StatusCodes.Status502BadGateway,
-                title: "Meal parsing failed.");
+            return ApiProblems.AiFailure(new MealParserResponseException(exception), context, cancellationToken)!;
         }
-        catch (HttpRequestException)
+        catch (Exception exception) when (ApiProblems.AiFailure(exception, context, cancellationToken) is { } failure)
         {
-            return Results.Problem(
-                detail: "The AI provider is temporarily unavailable.",
-                statusCode: StatusCodes.Status502BadGateway,
-                title: "Meal parsing failed.");
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return Results.Problem(
-                detail: "The AI provider did not respond before the timeout.",
-                statusCode: StatusCodes.Status504GatewayTimeout,
-                title: "Meal parsing timed out.");
+            return failure;
         }
     }
 
     private static IResult InvalidMessages(string message)
     {
-        return Results.ValidationProblem(
-            new Dictionary<string, string[]>
-            {
-                [nameof(ParseMealDraftRequest.Messages)] = new[] { message }
-            });
+        return ApiProblems.Invalid(nameof(ParseMealDraftRequest.Messages), message);
     }
 
-    private static IResult MealSessionNotFound(Guid id)
+    private static IResult IdempotencyConflict(MealSessionConflictException exception)
     {
-        return Results.Problem(
-            detail: $"Meal session '{id}' was not found.",
-            statusCode: StatusCodes.Status404NotFound,
-            title: "Meal session not found.");
+        return ApiProblems.Problem(
+            StatusCodes.Status409Conflict,
+            "idempotency_conflict",
+            "The idempotency key conflicts with an existing request.",
+            exception.Message);
     }
 
-    private static IResult MealParserFailure()
+    private static IResult InputNotSupported(NotSupportedException exception)
     {
-        return Results.Problem(
-            detail: "The AI provider returned an invalid structured meal draft.",
-            statusCode: StatusCodes.Status502BadGateway,
-            title: "Meal parsing failed.");
-    }
-
-    private static IResult MealParserUnavailable()
-    {
-        return Results.Problem(
-            detail: "The AI provider is temporarily unavailable.",
-            statusCode: StatusCodes.Status502BadGateway,
-            title: "Meal parsing failed.");
-    }
-
-    private static IResult MealParserTimeout()
-    {
-        return Results.Problem(
-            detail: "The AI provider did not respond before the timeout.",
-            statusCode: StatusCodes.Status504GatewayTimeout,
-            title: "Meal parsing timed out.");
+        return ApiProblems.Problem(
+            StatusCodes.Status422UnprocessableEntity,
+            "input_not_supported",
+            "The input sequence is not supported.",
+            exception.Message);
     }
 
     private static MealDraftResponse MapResponse(
